@@ -25,10 +25,7 @@ namespace AutomatedLine.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("AutomatedLine.Infrastructure.Persistence.Entities.CraneConfig", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<double>("AccelX")
                         .HasColumnType("double");
@@ -114,10 +111,7 @@ namespace AutomatedLine.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("AutomatedLine.Infrastructure.Persistence.Entities.DeviceConfig", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("DeviceType")
                         .IsRequired()

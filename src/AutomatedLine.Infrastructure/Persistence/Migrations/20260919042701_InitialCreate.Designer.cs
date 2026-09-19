@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace AutomatedLine.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260919022005_InitialCreate")]
+    [Migration("20260919042701_InitialCreate")]
     partial class InitialCreate
     {
         /// <inheritdoc />
@@ -28,10 +28,7 @@ namespace AutomatedLine.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("AutomatedLine.Infrastructure.Persistence.Entities.CraneConfig", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<double>("AccelX")
                         .HasColumnType("double");
@@ -117,10 +114,7 @@ namespace AutomatedLine.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("AutomatedLine.Infrastructure.Persistence.Entities.DeviceConfig", b =>
                 {
                     b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<string>("DeviceType")
                         .IsRequired()

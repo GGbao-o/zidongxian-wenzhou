@@ -37,6 +37,8 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("CraneConfig");
             entity.HasKey(e => e.Id);
+            // 主键由使用方填写（天车号），不由数据库生成；表结构手工维护，兼容自增/非自增两种建表方式
+            entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.Name).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Protocol).HasMaxLength(30).IsRequired();
             entity.Property(e => e.IpAddress).HasMaxLength(50).IsRequired();
@@ -49,6 +51,8 @@ public class AppDbContext : DbContext
         {
             entity.ToTable("DeviceConfig");
             entity.HasKey(e => e.Id);
+            // 主键由使用方填写（设备号），不由数据库生成；表结构手工维护，兼容自增/非自增两种建表方式
+            entity.Property(e => e.Id).ValueGeneratedNever();
             entity.Property(e => e.Name).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Protocol).HasMaxLength(30).IsRequired();
             entity.Property(e => e.IpAddress).HasMaxLength(50).IsRequired();

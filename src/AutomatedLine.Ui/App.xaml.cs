@@ -53,10 +53,23 @@ public partial class App : System.Windows.Application
         _host = builder.Build();
 
         // 先装载数据库配置为内存对象与驱动，再启动宿主：
-        // 这样采集器启动时注册表里已经有资源可采（架构文档 §8.2）
+        // 这样采集器启动时注册表里已经有资源可采（架构文档 §8.2）。
+        // 数据库不可达时不阻塞界面启动：记录报警后继续，界面仍可打开，稍后重启线路再试。
         var loader = _host.Services.GetRequiredService<IConfigurationLoader>();
-        var loadResult = await loader.LoadAsync();
-        Console.WriteLine($"[App] 配置装载：设备 {loadResult.DeviceCount}、天车 {loadResult.CraneCount}、驱动 {loadResult.DriverCount}");
+        try
+        {
+            var loadResult = await loader.LoadAsync();
+            Console.WriteLine($"[App] 配置装载：设备 {loadResult.DeviceCount}、天车 {loadResult.CraneCount}、驱动 {loadResult.DriverCount}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[App] 配置装载失败（数据库不可用？）：{ex.Message}");
+            _host.Services.GetRequiredService<AutomatedLine.Application.Alarms.AlarmManager>().Raise(
+                AutomatedLine.Domain.Alarms.AlarmLevel.Error,
+                "系统",
+                $"配置装载失败：{ex.Message}",
+                "界面继续启动；请检查 appsettings.json 的连接串与数据库可用性");
+        }
 
         await _host.StartAsync();
 
@@ -105,14 +118,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IConfigService>(configService);
         services.AddSingleton<IAppLogger, FileAppLogger>();
 
-        // 数据库：只存配置。这里刻意使用固定版本的 ServerVersion，而不是 AutoDetect。
-        // 原因：AutoDetect 会在解析 DbContext 时立即连库；而 dotnet ef 生成迁移时会通过宿主解析 DbContext，
-        // 导致无库环境下无法生成迁移。固定版本可让"模型构建"与"真正连接"解耦，本地无 MySQL 也能开发。
-        // 配置表结构简单，不依赖具体小版本特性；现场 MySQL 版本变化时同步调整此处即可。
+        // 数据库：只存配置。运行时用 AutoDetect 探测服务器版本，兼容本地/远程、MySQL/MariaDB，
+        // 不把版本写死；连接串完全来自 appsettings.json，部署到远程只改配置即可。
+        // （设计时工厂 DesignTimeDbContextFactory 仍用固定版本，保证离线也能生成迁移。）
         services.AddDbContext<AppDbContext>(options =>
         {
             var connectionString = configService.GetConnectionString();
-            options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 36)));
+            options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
         });
 
         // 运行态容器：全线唯一实例，跨页面/服务共享（架构文档 §7）
