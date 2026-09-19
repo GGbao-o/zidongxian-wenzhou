@@ -25,6 +25,14 @@ public partial class ScreenViewModel : ObservableObject
     /// <summary>天车卡片数据。</summary>
     public ObservableCollection<CraneRowViewModel> Cranes { get; } = new();
 
+    /// <summary>应用服务卡片：候选任务数（TransportTaskGenerator 产物，P3 填充）。</summary>
+    [ObservableProperty]
+    private int _candidateTaskCount;
+
+    /// <summary>应用服务卡片：已派发正式任务数（集中调度产物，P3 填充）。</summary>
+    [ObservableProperty]
+    private int _dispatchedTaskCount;
+
     /// <summary>
     /// 构造函数。订阅节拍器定期刷新。
     /// </summary>
@@ -57,7 +65,7 @@ public partial class ScreenViewModel : ObservableObject
             _craneRegistry.Snapshot().OrderBy(c => c.No).ToList(),
             row => row.Id,
             crane => crane.Id,
-            crane => new CraneRowViewModel(crane),
+            crane => new CraneRowViewModel(crane, _deviceRegistry.Get),
             (row, crane) => row.Refresh(crane));
     }
 }

@@ -16,6 +16,9 @@ public partial class CraneViewModel : ObservableObject
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
 
+    /// <summary>设备注册表，用于把任务的源/目标设备号解析成名称。</summary>
+    private readonly DeviceRegistry _deviceRegistry;
+
     /// <summary>天车行集合（界面绑定源）。</summary>
     public ObservableCollection<CraneRowViewModel> Cranes { get; } = new();
 
@@ -23,10 +26,12 @@ public partial class CraneViewModel : ObservableObject
     /// 构造函数。订阅节拍器定期刷新。
     /// </summary>
     /// <param name="craneRegistry">天车注册表</param>
+    /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="ticker">运行态节拍器</param>
-    public CraneViewModel(CraneRegistry craneRegistry, IRuntimeTicker ticker)
+    public CraneViewModel(CraneRegistry craneRegistry, DeviceRegistry deviceRegistry, IRuntimeTicker ticker)
     {
         _craneRegistry = craneRegistry;
+        _deviceRegistry = deviceRegistry;
         ticker.Tick += (_, _) => Refresh();
         Refresh();
     }
@@ -42,7 +47,7 @@ public partial class CraneViewModel : ObservableObject
             cranes,
             row => row.Id,
             crane => crane.Id,
-            crane => new CraneRowViewModel(crane),
+            crane => new CraneRowViewModel(crane, _deviceRegistry.Get),
             (row, crane) => row.Refresh(crane));
     }
 }

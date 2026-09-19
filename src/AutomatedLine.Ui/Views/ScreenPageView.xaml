@@ -10,6 +10,7 @@
     <Grid Margin="24,12,24,24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -19,7 +20,31 @@
                 FontWeight="Bold"
                 Foreground="{StaticResource TextPrimaryBrush}"
                 Text="大屏展示（只读）" />
-            <TextBlock Style="{StaticResource CaptionText}" Text="展示全部设备与天车的实时信号；卡片横向排列，支持横竖滚动。" />
+            <TextBlock Style="{StaticResource CaptionText}" Text="展示全部设备与天车的实时信号与内存数据；鼠标悬浮卡片查看详情；支持横竖滚动。" />
+        </StackPanel>
+
+        <!-- 顶部应用服务卡片：展示调度过程的实时产物（P3 逐步填充） -->
+        <StackPanel
+            Grid.Row="1"
+            Margin="0,0,0,12"
+            Orientation="Horizontal">
+            <Border
+                Width="220"
+                Margin="0,0,12,0"
+                Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource CardTitle}" Text="候选任务（TransportTaskGenerator）" />
+                    <TextBlock Style="{StaticResource CardMetric}" Text="{Binding CandidateTaskCount}" />
+                </StackPanel>
+            </Border>
+            <Border
+                Width="220"
+                Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource CardTitle}" Text="已派发任务（集中调度）" />
+                    <TextBlock Style="{StaticResource CardMetric}" Text="{Binding DispatchedTaskCount}" />
+                </StackPanel>
+            </Border>
         </StackPanel>
 
         <!--
@@ -27,7 +52,7 @@
             WrapPanel 在无限宽度下会把所有卡片排成一行，因此设备/天车再多也能横向滚动查看，不会被截断。
         -->
         <ScrollViewer
-            Grid.Row="1"
+            Grid.Row="2"
             CanContentScroll="False"
             HorizontalScrollBarVisibility="Auto"
             VerticalScrollBarVisibility="Auto">
@@ -47,10 +72,21 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
+                            <!-- 悬浮显示加工状态与工件信息；报警时边框变红 -->
                             <Border
                                 Width="300"
                                 Margin="0,0,12,12"
-                                Style="{StaticResource CardBorder}">
+                                ToolTip="{Binding TooltipText}">
+                                <Border.Style>
+                                    <Style BasedOn="{StaticResource CardBorder}" TargetType="Border">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasAlarm}" Value="True">
+                                                <Setter Property="BorderBrush" Value="{StaticResource StatusFaultBrush}" />
+                                                <Setter Property="BorderThickness" Value="2" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <StackPanel>
                                     <TextBlock
                                         FontSize="15"
@@ -58,13 +94,18 @@
                                         Foreground="{StaticResource TextPrimaryBrush}"
                                         Text="{Binding Name}" />
                                     <TextBlock Style="{StaticResource CaptionText}" Text="{Binding TypeText}" />
-                                    <TextBlock Margin="0,8,0,0" Text="{Binding SignalSummary}" TextWrapping="Wrap" />
-                                    <TextBlock Margin="0,6,0,0" Style="{StaticResource CaptionText}" Text="{Binding WorkpieceText, StringFormat=当前工件：{0}}" />
                                     <TextBlock
-                                        Margin="0,6,0,0"
+                                        Margin="0,4,0,0"
                                         FontWeight="SemiBold"
                                         Foreground="{StaticResource StatusRunningBrush}"
-                                        Text="{Binding StateText}" />
+                                        Text="{Binding MachiningText}" />
+                                    <!-- 多行 PLC 点位信号：点名=值 -->
+                                    <TextBlock
+                                        Margin="0,8,0,0"
+                                        FontFamily="Consolas"
+                                        FontSize="12"
+                                        Text="{Binding SignalText}"
+                                        TextWrapping="Wrap" />
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
@@ -86,10 +127,21 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
+                            <!-- 悬浮显示当前任务、工件与 source→target；报警时边框变红 -->
                             <Border
                                 Width="300"
                                 Margin="0,0,12,12"
-                                Style="{StaticResource CardBorder}">
+                                ToolTip="{Binding TooltipText}">
+                                <Border.Style>
+                                    <Style BasedOn="{StaticResource CardBorder}" TargetType="Border">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasAlarm}" Value="True">
+                                                <Setter Property="BorderBrush" Value="{StaticResource StatusFaultBrush}" />
+                                                <Setter Property="BorderThickness" Value="2" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
                                 <StackPanel>
                                     <TextBlock
                                         FontSize="15"
@@ -97,12 +149,14 @@
                                         Foreground="{StaticResource TextPrimaryBrush}"
                                         Text="{Binding Name}" />
                                     <TextBlock
-                                        Margin="0,6,0,0"
-                                        Text="{Binding X, StringFormat=X：{0:0.0}}" />
-                                    <TextBlock Text="{Binding SignalSummary}" TextWrapping="Wrap" />
+                                        Margin="0,4,0,0"
+                                        FontFamily="Consolas"
+                                        Text="{Binding X, StringFormat=X：{0:0.###}}" />
+                                    <TextBlock FontFamily="Consolas" Text="{Binding Y, StringFormat=Y：{0:0.###}}" />
+                                    <TextBlock FontFamily="Consolas" Text="{Binding Z, StringFormat=Z：{0:0.###}}" />
                                     <TextBlock Margin="0,6,0,0" Style="{StaticResource CaptionText}" Text="{Binding TaskText, StringFormat=当前任务：{0}}" />
                                     <TextBlock
-                                        Margin="0,6,0,0"
+                                        Margin="0,4,0,0"
                                         FontWeight="SemiBold"
                                         Foreground="{StaticResource StatusRunningBrush}"
                                         Text="{Binding StateText}" />

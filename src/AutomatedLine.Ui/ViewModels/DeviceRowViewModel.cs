@@ -1,10 +1,13 @@
+using System.Text;
 using AutomatedLine.Domain.Devices;
+using AutomatedLine.Ui.Helpers;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AutomatedLine.Ui.ViewModels;
 
 /// <summary>
 /// 设备列表/大屏中的一行。把设备对象与信号快照翻译成界面文本。
+/// 大屏悬浮详情（是否加工、当前工件信息）也由此提供。
 /// </summary>
 public partial class DeviceRowViewModel : ObservableObject
 {
@@ -31,17 +34,33 @@ public partial class DeviceRowViewModel : ObservableObject
     [ObservableProperty]
     private string _stateText = string.Empty;
 
+    /// <summary>加工状态文本（加工中/空闲）。</summary>
+    [ObservableProperty]
+    private string _machiningText = "空闲";
+
     /// <summary>当前工件文本。</summary>
     [ObservableProperty]
     private string _workpieceText = "无";
+
+    /// <summary>是否报警（用于大屏高亮）。</summary>
+    [ObservableProperty]
+    private bool _hasAlarm;
 
     /// <summary>报警文本。</summary>
     [ObservableProperty]
     private string _alarmText = "正常";
 
-    /// <summary>关键信号摘要（供大屏紧凑展示）。</summary>
+    /// <summary>一行信号摘要（供列表页紧凑展示）。</summary>
     [ObservableProperty]
     private string _signalSummary = string.Empty;
+
+    /// <summary>多行信号明细（每个点位一行，形如"请求上料=1"），供大屏展示。</summary>
+    [ObservableProperty]
+    private string _signalText = string.Empty;
+
+    /// <summary>悬浮详情文本。</summary>
+    [ObservableProperty]
+    private string _tooltipText = string.Empty;
 
     /// <summary>
     /// 构造函数。
@@ -60,51 +79,97 @@ public partial class DeviceRowViewModel : ObservableObject
     public void Refresh(DeviceBase device)
     {
         Name = device.Name;
-        TypeText = TypeToText(device.Type);
+        TypeText = DisplayText.DeviceTypeText(device.Type);
         PositionX = device.PositionX;
-        StateText = StateToText(device.ResourceState);
+        StateText = DisplayText.ResourceStateText(device.ResourceState);
         WorkpieceText = device.CurrentWorkpiece?.Info.ToString() ?? "无";
+
+        // 加工状态：当前按"内存是否有工件 + 资源忙"判断；P3 接入调度后由状态机精确维护
+        var machining = device.ResourceState == ResourceState.Busy || device.CurrentWorkpiece is not null;
+        MachiningText = machining ? "加工中" : "空闲";
 
         var signals = device.Signals;
         ConnectionText = device.IsConnected ? "已连接" : "未连接";
-        AlarmText = signals?.GetBool("Alarm") == true ? "报警" : "正常";
+        HasAlarm = signals?.GetBool("Alarm") == true;
+        AlarmText = HasAlarm ? "报警" : "正常";
         SignalSummary = signals is null
             ? "无数据"
-            : $"有料={(signals.GetBool("HasMaterial") ? "是" : "否")} 请求上料={(signals.GetBool("RequestLoad") ? "是" : "否")} 请求下料={(signals.GetBool("RequestUnload") ? "是" : "否")} 完成={(signals.GetBool("ProcessDone") ? "是" : "否")}";
+            : $"有料={Bool(signals.GetBool("HasMaterial"))} 请求上料={Bool(signals.GetBool("RequestLoad"))} 请求下料={Bool(signals.GetBool("RequestUnload"))} 完成={Bool(signals.GetBool("ProcessDone"))}";
+
+        SignalText = BuildSignalText(device, signals);
+        TooltipText = BuildTooltip(device, machining);
     }
 
     /// <summary>
-    /// 设备类型转中文文本。
+    /// 组装多行信号明细：按设备信号点位目录逐点点名，取快照值。
     /// </summary>
-    /// <param name="type">设备类型</param>
-    /// <returns>中文文本</returns>
-    private static string TypeToText(DeviceType type) => type switch
+    /// <param name="device">设备对象</param>
+    /// <param name="signals">信号快照</param>
+    /// <returns>多行文本</returns>
+    private static string BuildSignalText(DeviceBase device, Domain.Signals.SignalSnapshot? signals)
     {
-        DeviceType.LoadRack => "上料架",
-        DeviceType.UnloadRack => "下料架",
-        DeviceType.ForkMachine => "货叉",
-        DeviceType.BoringMachine => "双头镗",
-        DeviceType.LatheMachine => "斜床",
-        DeviceType.GrinderMachine => "研磨机",
-        DeviceType.BalancingMachine => "动平衡机",
-        DeviceType.MarkerMachine => "打号机",
-        DeviceType.CheckMachine => "验点机",
-        _ => "未知"
-    };
+        if (signals is null)
+        {
+            return "无数据";
+        }
+
+        var builder = new StringBuilder();
+        foreach (var point in device.SignalPoints)
+        {
+            if (!signals.Values.TryGetValue(point.Name, out var value))
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.Append(point.Name).Append('=').Append(FormatValue(value));
+        }
+
+        return builder.Length == 0 ? "无数据" : builder.ToString();
+    }
 
     /// <summary>
-    /// 资源状态转中文文本。
+    /// 组装悬浮详情：加工状态 + 当前工件信息（板号/序号/直径/长度）。
     /// </summary>
-    /// <param name="state">资源状态</param>
-    /// <returns>中文文本</returns>
-    private static string StateToText(ResourceState state) => state switch
+    /// <param name="device">设备对象</param>
+    /// <param name="machining">是否加工中</param>
+    /// <returns>详情文本</returns>
+    private static string BuildTooltip(DeviceBase device, bool machining)
     {
-        ResourceState.Available => "可用",
-        ResourceState.Reserved => "已预约",
-        ResourceState.Busy => "加工中",
-        ResourceState.Alarm => "报警",
-        ResourceState.Disconnected => "断开",
-        ResourceState.BlockedByPhysicalState => "物理阻塞",
-        _ => "未知"
+        var builder = new StringBuilder();
+        builder.Append(device.Name).Append("（").Append(DisplayText.DeviceTypeText(device.Type)).Append('）');
+        builder.AppendLine();
+        builder.Append("状态：").Append(machining ? "加工中" : "空闲");
+
+        var info = device.CurrentWorkpiece?.Info;
+        if (info is not null)
+        {
+            builder.AppendLine();
+            builder.Append("板号：").Append(info.PlateNo);
+            builder.AppendLine();
+            builder.Append("序号：").Append(info.SerialNo);
+            builder.AppendLine();
+            builder.Append("直径：").Append(info.Diameter.ToString("0.###"));
+            builder.AppendLine();
+            builder.Append("长度：").Append(info.Length.ToString("0.###"));
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>布尔点位格式化为 PLC 风格 1/0。</summary>
+    private static string Bool(bool value) => value ? "1" : "0";
+
+    /// <summary>信号值格式化。</summary>
+    private static string FormatValue(object? value) => value switch
+    {
+        null => "-",
+        bool b => b ? "1" : "0",
+        double d => d.ToString("0.###"),
+        _ => value.ToString() ?? "-"
     };
 }
