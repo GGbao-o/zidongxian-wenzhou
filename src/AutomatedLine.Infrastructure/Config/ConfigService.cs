@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using Microsoft.Extensions.Configuration;
@@ -5,8 +7,9 @@ using Microsoft.Extensions.Configuration;
 namespace AutomatedLine.Infrastructure.Config;
 
 /// <summary>
-/// 基于 appsettings.json 的配置读取实现（架构文档 §9.3）。
-/// 只做"读"，不负责写回；页面参数设置后续在此之上扩展。
+/// 基于 appsettings.json 的配置读写实现（架构文档 §9.3）。
+/// 读取经 IConfiguration；写回只更新 App 节点，保留连接串等其他节点。
+/// 宿主配置开启了 reloadOnChange，写盘后 IConfiguration 会自动重载。
 /// </summary>
 public class ConfigService : IConfigService
 {
@@ -49,5 +52,29 @@ public class ConfigService : IConfigService
         // Bind 到强类型对象，缺省项使用 AppOptions 的默认值
         var options = _configuration.GetSection("App").Get<AppOptions>();
         return options ?? new AppOptions();
+    }
+
+    /// <summary>
+    /// 把程序参数保存回 appsettings.json 的 App 节点。
+    /// </summary>
+    /// <param name="options">待保存的参数集合</param>
+    public void SaveAppOptions(AppOptions options)
+    {
+        // 写回程序输出目录下的 appsettings.json，与宿主加载的是同一份文件
+        var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+        var json = File.Exists(path) ? File.ReadAllText(path) : "{}";
+
+        // 用 JsonNode 局部更新，避免覆盖 ConnectionStrings 等不该由界面改动的节点
+        var root = JsonNode.Parse(json) as JsonObject ?? new JsonObject();
+
+        var naming = new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            WriteIndented = true
+        };
+        root["App"] = JsonSerializer.SerializeToNode(options, naming);
+
+        File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine("[ConfigService] 已保存程序参数到 appsettings.json");
     }
 }

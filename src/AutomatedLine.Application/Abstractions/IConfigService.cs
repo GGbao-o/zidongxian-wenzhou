@@ -19,4 +19,11 @@ public interface IConfigService
     /// </summary>
     /// <returns>参数对象，永不返回 null；缺省项使用默认值</returns>
     AppOptions GetAppOptions();
+
+    /// <summary>
+    /// 保存程序参数集合到 appsettings.json（仅更新 App 节点，不动连接串等其他节点）。
+    /// 参数设置页编辑后调用；宿主配置开启了 reloadOnChange，写盘后会自动重载。
+    /// </summary>
+    /// <param name="options">待保存的参数集合</param>
+    void SaveAppOptions(AppOptions options);
 }

@@ -1,74 +1,198 @@
 using System.Collections.ObjectModel;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Configuration;
+using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace AutomatedLine.Ui.ViewModels;
 
 /// <summary>
 /// 参数设置页面 ViewModel。
-/// 当前只读展示 appsettings.json 的程序参数（架构文档 §13.5），编辑与保存功能后续补充。
+/// 参数会持续增多，因此按类别组织成卡片；点击卡片弹出该类参数对话框编辑，确定后写回 appsettings.json
+/// （架构文档 §13.5）。
 /// </summary>
 public partial class ParamsViewModel : ObservableObject
 {
-    /// <summary>参数项集合。</summary>
-    public ObservableCollection<ParamItemViewModel> Items { get; } = new();
+    /// <summary>配置服务。</summary>
+    private readonly IConfigService _configService;
 
-    /// <summary>
-    /// 构造函数。把 AppOptions 展平为"分类/名称/值"的列表，便于界面统一展示。
-    /// </summary>
-    /// <param name="configService">配置服务</param>
-    public ParamsViewModel(IConfigService configService)
-    {
-        var options = configService.GetAppOptions();
+    /// <summary>弹窗服务。</summary>
+    private readonly IDialogService _dialogService;
 
-        void Add(string category, string name, object value)
-            => Items.Add(new ParamItemViewModel(category, name, value.ToString() ?? string.Empty));
+    /// <summary>当前参数快照。编辑时直接改这里，再整体保存。</summary>
+    private AppOptions _options = new();
 
-        Add("采集", "设备采集周期(ms)", options.Collection.DeviceIntervalMs);
-        Add("采集", "天车采集周期(ms)", options.Collection.CraneIntervalMs);
-        Add("采集", "通信超时(ms)", options.Collection.CommunicationTimeoutMs);
-
-        Add("调度", "候选任务生成周期(ms)", options.Scheduling.GenerateIntervalMs);
-        Add("调度", "调度周期(ms)", options.Scheduling.ScheduleIntervalMs);
-        Add("调度", "设备预约超时(ms)", options.Scheduling.ReservationTimeoutMs);
-
-        Add("状态机", "运动到位超时(ms)", options.StateMachine.MoveTimeoutMs);
-        Add("状态机", "取料确认超时(ms)", options.StateMachine.PickTimeoutMs);
-        Add("状态机", "放料确认超时(ms)", options.StateMachine.PlaceTimeoutMs);
-        Add("状态机", "握手超时(ms)", options.StateMachine.HandshakeTimeoutMs);
-
-        Add("日志", "日志目录", options.Logging.Directory);
-        Add("日志", "保留天数", options.Logging.RetentionDays);
-        Add("日志", "单文件上限(字节)", options.Logging.MaxFileSizeBytes);
-
-        Add("模拟", "配置表为空时写入样例数据", options.Simulation.SeedSampleData);
-    }
-}
-
-/// <summary>
-/// 单个参数项。
-/// </summary>
-public sealed class ParamItemViewModel
-{
-    /// <summary>参数分类。</summary>
-    public string Category { get; }
-
-    /// <summary>参数名称。</summary>
-    public string Name { get; }
-
-    /// <summary>参数值（字符串形式展示）。</summary>
-    public string Value { get; }
+    /// <summary>参数分类卡片集合。</summary>
+    public ObservableCollection<ParamCategoryViewModel> Categories { get; } = new();
 
     /// <summary>
     /// 构造函数。
     /// </summary>
-    /// <param name="category">分类</param>
-    /// <param name="name">名称</param>
-    /// <param name="value">值文本</param>
-    public ParamItemViewModel(string category, string name, string value)
+    /// <param name="configService">配置服务</param>
+    /// <param name="dialogService">弹窗服务</param>
+    public ParamsViewModel(IConfigService configService, IDialogService dialogService)
     {
-        Category = category;
+        _configService = configService;
+        _dialogService = dialogService;
+        BuildCategories();
+    }
+
+    /// <summary>
+    /// 点击分类卡片：弹出该类参数对话框，确定后应用并保存。
+    /// </summary>
+    /// <param name="category">分类</param>
+    [RelayCommand]
+    private void OpenCategory(ParamCategoryViewModel? category)
+    {
+        if (category is null)
+        {
+            return;
+        }
+
+        var dialogViewModel = new ParamsDialogViewModel(category.Title, category.Items);
+        if (!_dialogService.ShowParamsDialog(dialogViewModel))
+        {
+            return;
+        }
+
+        // 把弹框里的编辑结果写回参数项并应用到 AppOptions
+        for (var i = 0; i < category.Items.Count && i < dialogViewModel.Items.Count; i++)
+        {
+            var item = category.Items[i];
+            item.Value = dialogViewModel.Items[i].Value;
+
+            try
+            {
+                item.Apply(item.Value);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ParamsViewModel] 参数 {item.Name} 应用失败：{ex.Message}");
+            }
+        }
+
+        try
+        {
+            _configService.SaveAppOptions(_options);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ParamsViewModel] 保存参数失败：{ex.Message}");
+        }
+
+        // 保存后重建，界面值以最新配置为准
+        BuildCategories();
+    }
+
+    /// <summary>
+    /// 依据当前 AppOptions 重建分类卡片。新增参数只需在此追加，界面自动出现卡片与弹框项。
+    /// </summary>
+    private void BuildCategories()
+    {
+        _options = _configService.GetAppOptions();
+        Categories.Clear();
+
+        var collection = new ParamCategoryViewModel("采集", "设备/天车采集周期与通信超时");
+        collection.Items.Add(IntItem("设备采集周期(ms)", () => _options.Collection.DeviceIntervalMs, v => _options.Collection.DeviceIntervalMs = v));
+        collection.Items.Add(IntItem("天车采集周期(ms)", () => _options.Collection.CraneIntervalMs, v => _options.Collection.CraneIntervalMs = v));
+        collection.Items.Add(IntItem("通信超时(ms)", () => _options.Collection.CommunicationTimeoutMs, v => _options.Collection.CommunicationTimeoutMs = v));
+        Categories.Add(collection);
+
+        var scheduling = new ParamCategoryViewModel("调度", "候选任务重算与派发节奏");
+        scheduling.Items.Add(IntItem("候选任务生成周期(ms)", () => _options.Scheduling.GenerateIntervalMs, v => _options.Scheduling.GenerateIntervalMs = v));
+        scheduling.Items.Add(IntItem("调度周期(ms)", () => _options.Scheduling.ScheduleIntervalMs, v => _options.Scheduling.ScheduleIntervalMs = v));
+        scheduling.Items.Add(IntItem("设备预约超时(ms)", () => _options.Scheduling.ReservationTimeoutMs, v => _options.Scheduling.ReservationTimeoutMs = v));
+        Categories.Add(scheduling);
+
+        var stateMachine = new ParamCategoryViewModel("状态机", "各环节超时");
+        stateMachine.Items.Add(IntItem("运动到位超时(ms)", () => _options.StateMachine.MoveTimeoutMs, v => _options.StateMachine.MoveTimeoutMs = v));
+        stateMachine.Items.Add(IntItem("取料确认超时(ms)", () => _options.StateMachine.PickTimeoutMs, v => _options.StateMachine.PickTimeoutMs = v));
+        stateMachine.Items.Add(IntItem("放料确认超时(ms)", () => _options.StateMachine.PlaceTimeoutMs, v => _options.StateMachine.PlaceTimeoutMs = v));
+        stateMachine.Items.Add(IntItem("握手超时(ms)", () => _options.StateMachine.HandshakeTimeoutMs, v => _options.StateMachine.HandshakeTimeoutMs = v));
+        Categories.Add(stateMachine);
+
+        var logging = new ParamCategoryViewModel("日志", "目录与滚动策略");
+        logging.Items.Add(TextItem("日志目录", () => _options.Logging.Directory, v => _options.Logging.Directory = v));
+        logging.Items.Add(IntItem("保留天数", () => _options.Logging.RetentionDays, v => _options.Logging.RetentionDays = v));
+        logging.Items.Add(LongItem("单文件上限(字节)", () => _options.Logging.MaxFileSizeBytes, v => _options.Logging.MaxFileSizeBytes = v));
+        Categories.Add(logging);
+
+        var simulation = new ParamCategoryViewModel("模拟", "仅联调用；接现场后删除模拟模块");
+        simulation.Items.Add(BoolItem("配置表为空时写入样例数据", () => _options.Simulation.SeedSampleData, v => _options.Simulation.SeedSampleData = v));
+        Categories.Add(simulation);
+    }
+
+    /// <summary>构造整数参数项。</summary>
+    private static ParamItemViewModel IntItem(string name, Func<int> get, Action<int> set)
+        => new(name, get().ToString(), text => set(int.TryParse(text, out var v) ? v : 0));
+
+    /// <summary>构造长整数参数项。</summary>
+    private static ParamItemViewModel LongItem(string name, Func<long> get, Action<long> set)
+        => new(name, get().ToString(), text => set(long.TryParse(text, out var v) ? v : 0));
+
+    /// <summary>构造布尔参数项。</summary>
+    private static ParamItemViewModel BoolItem(string name, Func<bool> get, Action<bool> set)
+        => new(name, get() ? "true" : "false", text => set(text.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) || text.Trim() == "1"));
+
+    /// <summary>构造文本参数项。</summary>
+    private static ParamItemViewModel TextItem(string name, Func<string> get, Action<string> set)
+        => new(name, get(), set);
+}
+
+/// <summary>
+/// 参数分类。
+/// </summary>
+public sealed class ParamCategoryViewModel
+{
+    /// <summary>分类标题。</summary>
+    public string Title { get; }
+
+    /// <summary>分类说明。</summary>
+    public string Description { get; }
+
+    /// <summary>该分类下的参数项。</summary>
+    public ObservableCollection<ParamItemViewModel> Items { get; } = new();
+
+    /// <summary>参数项数量（界面显示）。</summary>
+    public int ItemCount => Items.Count;
+
+    /// <summary>
+    /// 构造函数。
+    /// </summary>
+    /// <param name="title">标题</param>
+    /// <param name="description">说明</param>
+    public ParamCategoryViewModel(string title, string description)
+    {
+        Title = title;
+        Description = description;
+    }
+}
+
+/// <summary>
+/// 单个参数项（含"如何写回强类型参数"的委托）。
+/// </summary>
+public sealed class ParamItemViewModel
+{
+    /// <summary>参数名称。</summary>
+    public string Name { get; }
+
+    /// <summary>参数值（字符串形式）。</summary>
+    public string Value { get; set; }
+
+    /// <summary>把字符串值写回强类型参数的动作。</summary>
+    public Action<string> Apply { get; }
+
+    /// <summary>
+    /// 构造函数。
+    /// </summary>
+    /// <param name="name">名称</param>
+    /// <param name="value">初值</param>
+    /// <param name="apply">写回动作</param>
+    public ParamItemViewModel(string name, string value, Action<string> apply)
+    {
         Name = name;
         Value = value;
+        Apply = apply;
     }
 }

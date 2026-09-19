@@ -1,4 +1,5 @@
 using AutomatedLine.Domain.Workpieces;
+using AutomatedLine.Ui.ViewModels;
 
 namespace AutomatedLine.Ui.Services;
 
@@ -13,4 +14,11 @@ public interface IDialogService
     /// </summary>
     /// <returns>用户确认返回工件数据；取消返回 null</returns>
     WorkpieceInfo? ShowAddWorkpieceDialog();
+
+    /// <summary>
+    /// 弹出参数分类编辑对话框。
+    /// </summary>
+    /// <param name="viewModel">参数编辑 ViewModel</param>
+    /// <returns>用户确定返回 true；取消返回 false</returns>
+    bool ShowParamsDialog(ParamsDialogViewModel viewModel);
 }

@@ -23,4 +23,15 @@ public class DialogService : IDialogService
         // ShowDialog 为模态，返回 true 表示用户点击了确定
         return dialog.ShowDialog() == true ? dialog.Result : null;
     }
+
+    /// <inheritdoc />
+    public bool ShowParamsDialog(ParamsDialogViewModel viewModel)
+    {
+        var dialog = new ParamsDialog(viewModel)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+
+        return dialog.ShowDialog() == true;
+    }
 }
