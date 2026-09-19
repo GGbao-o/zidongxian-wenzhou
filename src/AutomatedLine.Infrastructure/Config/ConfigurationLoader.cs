@@ -6,6 +6,7 @@ using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Infrastructure.Drivers;
 using AutomatedLine.Infrastructure.Persistence;
 using AutomatedLine.Infrastructure.Persistence.Entities;
+using AutomatedLine.Infrastructure.Simulation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -70,14 +71,8 @@ public class ConfigurationLoader : IConfigurationLoader
 
         var options = _configService.GetAppOptions();
 
-        // 联调期：配置表为空时写一套样例数据，保证界面与采集管线立刻可见
-        var seeded = false;
-        if (options.Simulation.SeedSampleData && !db.CraneConfigs.Any() && !db.DeviceConfigs.Any())
-        {
-            SeedSampleData(db);
-            seeded = true;
-            _logger.Info(LogCategory.System, "配置表为空，已写入样例设备/天车数据（供联调）");
-        }
+        // 联调期样例数据：实现集中在 SimulationDataSeeder，接现场前整体删除该类即可，不影响真实路径
+        var seeded = options.Simulation.SeedSampleData && SimulationDataSeeder.SeedIfEmpty(db, _logger);
 
         var deviceConfigs = db.DeviceConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.Id).ToList();
         var craneConfigs = db.CraneConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.No).ToList();
@@ -89,8 +84,8 @@ public class ConfigurationLoader : IConfigurationLoader
             var device = CreateDevice(config);
             _deviceRegistry.Register(device);
 
-            // 目前统一用模拟驱动；接现场后按 config.Protocol 分支构造真实驱动
-            var driver = new SimulatedDeviceDriver(config.Id);
+            // 按协议创建驱动；模拟协议由 DriverFactory 返回模拟实现
+            var driver = DriverFactory.CreateDeviceDriver(config);
             await driver.ConnectAsync(cancellationToken).ConfigureAwait(false);
             _driverRegistry.Register(driver);
             driverCount++;
@@ -109,7 +104,7 @@ public class ConfigurationLoader : IConfigurationLoader
             };
             _craneRegistry.Register(crane);
 
-            var driver = new SimulatedCraneDriver(config.Id, config.SafeX);
+            var driver = DriverFactory.CreateCraneDriver(config);
             await driver.ConnectAsync(cancellationToken).ConfigureAwait(false);
             _driverRegistry.Register(driver);
             driverCount++;
@@ -150,28 +145,5 @@ public class ConfigurationLoader : IConfigurationLoader
         device.MaxLength = config.MaxLength;
         device.IsEnabled = config.IsEnabled;
         return device;
-    }
-
-    /// <summary>
-    /// 写入一套样例设备/天车配置（仅供联调，现场接入后请关闭 Simulation.SeedSampleData）。
-    /// 坐标参考架构文档 §3.2、§18.1 的示例布局。
-    /// </summary>
-    /// <param name="db">数据库上下文</param>
-    private static void SeedSampleData(AppDbContext db)
-    {
-        db.DeviceConfigs.AddRange(
-            new DeviceConfig { Id = 1, Name = "上料架", DeviceType = DeviceType.LoadRack, Protocol = "Simulated", PositionX = 1000 },
-            new DeviceConfig { Id = 2, Name = "双头镗", DeviceType = DeviceType.BoringMachine, Protocol = "Simulated", PositionX = 6000, MinDiameter = 0, MaxDiameter = 1000, MinLength = 0, MaxLength = 5000 },
-            new DeviceConfig { Id = 3, Name = "斜床01", DeviceType = DeviceType.LatheMachine, Protocol = "Simulated", PositionX = 12000, MinDiameter = 0, MaxDiameter = 1000, MinLength = 0, MaxLength = 5000 },
-            new DeviceConfig { Id = 4, Name = "斜床02", DeviceType = DeviceType.LatheMachine, Protocol = "Simulated", PositionX = 14000, MinDiameter = 0, MaxDiameter = 1000, MinLength = 0, MaxLength = 5000 },
-            new DeviceConfig { Id = 5, Name = "研磨机01", DeviceType = DeviceType.GrinderMachine, Protocol = "Simulated", PositionX = 18000, MinDiameter = 0, MaxDiameter = 1000, MinLength = 0, MaxLength = 5000 },
-            new DeviceConfig { Id = 6, Name = "动平衡", DeviceType = DeviceType.BalancingMachine, Protocol = "Simulated", PositionX = 22000, MinDiameter = 0, MaxDiameter = 1000, MinLength = 0, MaxLength = 5000 },
-            new DeviceConfig { Id = 7, Name = "下料架", DeviceType = DeviceType.UnloadRack, Protocol = "Simulated", PositionX = 26000 });
-
-        db.CraneConfigs.AddRange(
-            new CraneConfig { Id = 1, No = 1, Name = "天车1", Protocol = "Simulated", StartX = 0, EndX = 20000, Width = 800, SafeX = 0, SafeZ = 0 },
-            new CraneConfig { Id = 2, No = 2, Name = "天车2", Protocol = "Simulated", StartX = 15000, EndX = 30000, Width = 800, SafeX = 30000, SafeZ = 0 });
-
-        db.SaveChanges();
     }
 }
