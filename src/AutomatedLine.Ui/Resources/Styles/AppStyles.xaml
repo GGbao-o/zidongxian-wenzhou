@@ -1,0 +1,56 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+        全站浅色风格资源。
+        背景设定：车间光线偏暗，界面必须用浅底深字保证可读性，配蓝/绿强调色区分状态；
+        刻意不用阴影/模糊等 Effect，保证性能与清晰度。
+    -->
+
+    <!-- 配色：页面底色、卡片、文本 -->
+    <SolidColorBrush x:Key="PageBackgroundBrush" Color="#F1F5F9" />
+    <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="CardBorderBrush" Color="#E2E8F0" />
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#0F172A" />
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#64748B" />
+
+    <!-- 强调色与状态色：绿=正常/空闲，蓝=运行，橙=等待，红=故障 -->
+    <SolidColorBrush x:Key="BrandBlueBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="BrandGreenBrush" Color="#16A34A" />
+    <SolidColorBrush x:Key="StatusIdleBrush" Color="#16A34A" />
+    <SolidColorBrush x:Key="StatusRunningBrush" Color="#2563EB" />
+    <SolidColorBrush x:Key="StatusWaitingBrush" Color="#D97706" />
+    <SolidColorBrush x:Key="StatusFaultBrush" Color="#DC2626" />
+    <SolidColorBrush x:Key="StatusStoppedBrush" Color="#64748B" />
+
+    <!-- 卡片容器：白底、圆角、细边框，不使用阴影 -->
+    <Style x:Key="CardBorder" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource CardBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource CardBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="20" />
+    </Style>
+
+    <!-- 卡片标题 -->
+    <Style x:Key="CardTitle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+    </Style>
+
+    <!-- 卡片主数值 -->
+    <Style x:Key="CardMetric" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="32" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+    </Style>
+
+    <!-- 次要说明文本 -->
+    <Style x:Key="CaptionText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+    </Style>
+
+</ResourceDictionary>

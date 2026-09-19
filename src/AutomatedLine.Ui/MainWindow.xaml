@@ -7,14 +7,14 @@
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
     Title="车间自动化调度系统"
-    Width="1280"
-    Height="800"
+    Width="1360"
+    Height="820"
     d:DataContext="{d:DesignInstance Type=vm:MainViewModel}"
     ExtendsContentIntoTitleBar="True"
     WindowBackdropType="Mica"
     WindowStartupLocation="CenterScreen"
     mc:Ignorable="d">
-    <Grid>
+    <Grid Background="{StaticResource PageBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -24,74 +24,136 @@
         <!-- Fluent 自绘标题栏 -->
         <ui:TitleBar Grid.Row="0" Title="车间自动化调度系统" />
 
-        <!-- 顶部：线路状态与操作按钮 -->
-        <Grid Grid.Row="1" Margin="32,20,32,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <!-- 概览卡片区 -->
+        <UniformGrid
+            Grid.Row="1"
+            Margin="24,16,24,12"
+            Columns="4"
+            Rows="1">
+            <!-- 线路状态卡片：大字号 + 状态色 -->
+            <Border Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource CardTitle}" Text="线路状态" />
+                    <TextBlock
+                        FontSize="30"
+                        FontWeight="Bold"
+                        Foreground="{Binding LineStateBrush}"
+                        Text="{Binding LineStateText}" />
+                    <TextBlock
+                        Margin="0,6,0,0"
+                        Style="{StaticResource CaptionText}"
+                        Text="{Binding GenerateIntervalMs, StringFormat=生成周期 {0} ms}" />
+                </StackPanel>
+            </Border>
 
-            <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                <TextBlock
-                    FontSize="13"
-                    Opacity="0.65"
-                    Text="当前线路状态" />
-                <TextBlock
-                    FontSize="28"
-                    FontWeight="SemiBold"
-                    Text="{Binding LineStateText}" />
-            </StackPanel>
+            <!-- 工件任务数卡片 -->
+            <Border Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource CardTitle}" Text="工件任务" />
+                    <TextBlock Style="{StaticResource CardMetric}" Text="{Binding TaskCount}" />
+                    <TextBlock Style="{StaticResource CaptionText}" Text="内存任务总数" />
+                </StackPanel>
+            </Border>
 
-            <StackPanel
-                Grid.Column="1"
-                VerticalAlignment="Center"
-                Orientation="Horizontal">
-                <ui:Button
-                    Margin="0,0,12,0"
-                    Command="{Binding StartLineCommand}"
-                    Content="启动线路" />
-                <ui:Button
-                    Margin="0,0,12,0"
-                    Command="{Binding PauseLineCommand}"
-                    Content="暂停线路" />
-                <ui:Button
-                    Appearance="Primary"
-                    Command="{Binding AddTaskCommand}"
-                    Content="添加任务" />
-            </StackPanel>
-        </Grid>
+            <!-- 设备数卡片 -->
+            <Border Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource CardTitle}" Text="设备" />
+                    <TextBlock
+                        Style="{StaticResource CardMetric}"
+                        Foreground="{StaticResource BrandGreenBrush}"
+                        Text="{Binding DeviceCount}" />
+                    <TextBlock Style="{StaticResource CaptionText}" Text="已装载设备数" />
+                </StackPanel>
+            </Border>
 
-        <!-- 工件任务列表 -->
-        <DataGrid
+            <!-- 天车数卡片 -->
+            <Border Style="{StaticResource CardBorder}">
+                <StackPanel>
+                    <TextBlock Style="{StaticResource CardTitle}" Text="天车" />
+                    <TextBlock
+                        Style="{StaticResource CardMetric}"
+                        Foreground="{StaticResource BrandBlueBrush}"
+                        Text="{Binding CraneCount}" />
+                    <TextBlock Style="{StaticResource CaptionText}" Text="已装载天车数" />
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <!-- 任务列表卡片 -->
+        <Border
             Grid.Row="2"
-            Margin="32,0,32,32"
-            AutoGenerateColumns="False"
-            CanUserAddRows="False"
-            GridLinesVisibility="Horizontal"
-            HeadersVisibility="Column"
-            IsReadOnly="True"
-            ItemsSource="{Binding Tasks}">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="板号" Binding="{Binding PlateNo}" />
-                <DataGridTextColumn Header="序号" Binding="{Binding SerialNo}" />
-                <DataGridTextColumn Header="直径" Binding="{Binding Diameter}" />
-                <DataGridTextColumn Header="长度" Binding="{Binding Length}" />
-                <DataGridTextColumn Header="当前工序" Binding="{Binding ProcessText}" />
-                <DataGridTextColumn Header="位置" Binding="{Binding LocationText}" />
-                <DataGridTextColumn Header="状态" Binding="{Binding StateText}" />
-                <DataGridTemplateColumn Header="操作">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <!-- 命令在 DataGrid 的 DataContext（MainViewModel）上，参数为当前行 -->
-                            <ui:Button
-                                Padding="8,2"
-                                Command="{Binding DataContext.ClearTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                CommandParameter="{Binding}"
-                                Content="清除" />
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-            </DataGrid.Columns>
-        </DataGrid>
+            Margin="24,0,24,24"
+            Padding="0"
+            Style="{StaticResource CardBorder}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- 卡片头：标题 + 操作按钮 -->
+                <Grid Grid.Row="0" Margin="20,16,20,12">
+                    <TextBlock
+                        VerticalAlignment="Center"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Foreground="{StaticResource TextPrimaryBrush}"
+                        Text="工件任务列表" />
+                    <StackPanel
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                        <ui:Button
+                            Margin="0,0,12,0"
+                            Command="{Binding StartLineCommand}"
+                            Content="启动线路" />
+                        <ui:Button
+                            Margin="0,0,12,0"
+                            Command="{Binding PauseLineCommand}"
+                            Content="暂停线路" />
+                        <ui:Button
+                            Appearance="Primary"
+                            Command="{Binding AddTaskCommand}"
+                            Content="添加任务" />
+                    </StackPanel>
+                </Grid>
+
+                <DataGrid
+                    Grid.Row="1"
+                    Margin="8,0,8,8"
+                    AutoGenerateColumns="False"
+                    Background="Transparent"
+                    CanUserAddRows="False"
+                    GridLinesVisibility="Horizontal"
+                    HeadersVisibility="Column"
+                    HorizontalGridLinesBrush="{StaticResource CardBorderBrush}"
+                    IsReadOnly="True"
+                    ItemsSource="{Binding Tasks}"
+                    RowBackground="Transparent"
+                    AlternatingRowBackground="#F8FAFC">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="板号" Binding="{Binding PlateNo}" />
+                        <DataGridTextColumn Header="序号" Binding="{Binding SerialNo}" />
+                        <DataGridTextColumn Header="直径" Binding="{Binding Diameter}" />
+                        <DataGridTextColumn Header="长度" Binding="{Binding Length}" />
+                        <DataGridTextColumn Header="当前工序" Binding="{Binding ProcessText}" />
+                        <DataGridTextColumn Header="位置" Binding="{Binding LocationText}" />
+                        <DataGridTextColumn Header="状态" Binding="{Binding StateText}" />
+                        <DataGridTemplateColumn Header="操作">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <!-- 命令在 DataGrid 的 DataContext（MainViewModel）上，参数为当前行 -->
+                                    <ui:Button
+                                        Padding="8,2"
+                                        Command="{Binding DataContext.ClearTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}"
+                                        Content="清除" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </Border>
     </Grid>
 </ui:FluentWindow>

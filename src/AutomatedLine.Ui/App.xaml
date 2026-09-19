@@ -3,15 +3,16 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
     <!--
-        应用级资源：接入 WPF UI 主题与控件字典。
-        只做"主题打底"，具体的状态色/卡片样式后续放到 Resources/Styles，避免把重效果铺满全局。
-        注意：这里不再使用 StartupUri，主窗口由 DI 容器解析后在 App.xaml.cs 中手动显示。
+        应用级资源：WPF UI 主题与控件字典打底，再叠加自建的浅色风格资源。
+        主题选 Light：车间光线偏暗，浅底深字更清晰；强调色与卡片样式见 Resources/Styles/AppStyles.xaml。
+        注意：不使用 StartupUri，主窗口由 DI 容器解析后在 App.xaml.cs 中手动显示。
     -->
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ThemesDictionary Theme="Light" />
                 <ui:ControlsDictionary />
+                <ResourceDictionary Source="Resources/Styles/AppStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>
     </Application.Resources>
