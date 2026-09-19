@@ -35,6 +35,9 @@ public partial class MainViewModel : ObservableObject
     /// <summary>冷启动核对。启动线路时检查现场是否有无法关联的内存在制品。</summary>
     private readonly IColdStartChecker _coldStartChecker;
 
+    /// <summary>线路控制服务。启停与状态以它为准。</summary>
+    private readonly LineControlService _lineControl;
+
     /// <summary>线路状态（枚举）。</summary>
     [ObservableProperty]
     private LineState _lineState = LineState.Stopped;
@@ -75,13 +78,15 @@ public partial class MainViewModel : ObservableObject
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="dialogService">弹窗服务</param>
     /// <param name="coldStartChecker">冷启动核对</param>
+    /// <param name="lineControl">线路控制服务</param>
     public MainViewModel(
         IConfigService configService,
         IRuntimeTaskManager taskManager,
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
         IDialogService dialogService,
-        IColdStartChecker coldStartChecker)
+        IColdStartChecker coldStartChecker,
+        LineControlService lineControl)
     {
         _configService = configService;
         _taskManager = taskManager;
@@ -89,9 +94,14 @@ public partial class MainViewModel : ObservableObject
         _craneRegistry = craneRegistry;
         _dialogService = dialogService;
         _coldStartChecker = coldStartChecker;
+        _lineControl = lineControl;
 
         // 任务表变化时刷新界面列表；事件可能在非 UI 线程触发，需切回 UI 线程
         _taskManager.Changed += OnTasksChanged;
+
+        // 线路状态以 LineControlService 为准，状态变化时刷新界面
+        _lineControl.StateChanged += (_, _) => RefreshLineState();
+        RefreshLineState();
 
         GenerateIntervalMs = _configService.GetAppOptions().Scheduling.GenerateIntervalMs;
 
@@ -141,25 +151,38 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void StartLine()
     {
-        // 启动前先做冷启动核对：现场有料但内存无任务 → 标记物理阻塞，防止被误判为空闲
+        // 启动前先做冷启动核对：现场有料但内存无数据 → 仅告警，不阻塞
         var blocks = _coldStartChecker.Check();
         if (blocks.Count > 0)
         {
-            Console.WriteLine($"[MainViewModel] 冷启动核对发现 {blocks.Count} 个物理阻塞资源");
+            Console.WriteLine($"[MainViewModel] 冷启动核对发现 {blocks.Count} 个现场残留资源");
         }
 
-        LineState = LineState.Running;
-        Console.WriteLine("[MainViewModel] 启动线路");
+        _lineControl.Start();
     }
 
     /// <summary>
-    /// 暂停线路命令（P2 仍为骨架，后续接入 LineControlService）。
+    /// 暂停线路命令。
     /// </summary>
     [RelayCommand]
     private void PauseLine()
     {
-        LineState = LineState.Paused;
-        Console.WriteLine("[MainViewModel] 暂停线路（骨架占位）");
+        _lineControl.Pause();
+    }
+
+    /// <summary>
+    /// 从 LineControlService 同步线路状态到界面。
+    /// </summary>
+    private void RefreshLineState()
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            dispatcher.Invoke(() => LineState = _lineControl.State);
+            return;
+        }
+
+        LineState = _lineControl.State;
     }
 
     /// <summary>
