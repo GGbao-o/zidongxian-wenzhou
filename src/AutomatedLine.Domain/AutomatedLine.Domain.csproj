@@ -6,4 +6,13 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!--
+      仅允许 Application 访问 internal 成员。
+      目的：设备/天车的 CurrentWorkpiece、位置的单点写入等"只应由调度与状态机写"的成员，
+      对 UI 层不可见，从编译期强制单写者原则（架构文档 §12.3）。
+    -->
+    <InternalsVisibleTo Include="AutomatedLine.Application" />
+  </ItemGroup>
+
 </Project>
