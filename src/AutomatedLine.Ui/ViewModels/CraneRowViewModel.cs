@@ -1,6 +1,7 @@
 using System.Text;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Devices;
+using AutomatedLine.Domain.Signals;
 using AutomatedLine.Ui.Helpers;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -62,6 +63,10 @@ public partial class CraneRowViewModel : ObservableObject
     [ObservableProperty]
     private string _signalSummary = string.Empty;
 
+    /// <summary>多行信号明细（每个点位一行），供手动操作页与详情展示。</summary>
+    [ObservableProperty]
+    private string _signalText = string.Empty;
+
     /// <summary>悬浮详情文本。</summary>
     [ObservableProperty]
     private string _tooltipText = string.Empty;
@@ -100,9 +105,51 @@ public partial class CraneRowViewModel : ObservableObject
             ? "无数据"
             : $"到位={Bool(signals.GetBool("InPosition"))} 有料={Bool(signals.GetBool("HasMaterial"))} 伴信号={signals.GetInt("CompanionSignal")}";
 
+        SignalText = BuildSignalText(signals);
+
         TaskText = BuildTaskShort(crane);
         TooltipText = BuildTooltip(crane);
     }
+
+    /// <summary>
+    /// 组装多行信号明细：按天车信号点位目录逐点点名，取快照值（布尔显示 1/0）。
+    /// </summary>
+    /// <param name="signals">信号快照</param>
+    /// <returns>多行文本</returns>
+    private static string BuildSignalText(SignalSnapshot? signals)
+    {
+        if (signals is null)
+        {
+            return "无数据";
+        }
+
+        var builder = new StringBuilder();
+        foreach (var point in CraneSignalCatalog.Points)
+        {
+            if (!signals.Values.TryGetValue(point.Name, out var value))
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.Append(point.Name).Append('=').Append(FormatValue(value));
+        }
+
+        return builder.Length == 0 ? "无数据" : builder.ToString();
+    }
+
+    /// <summary>信号值格式化。</summary>
+    private static string FormatValue(object? value) => value switch
+    {
+        null => "-",
+        bool b => b ? "1" : "0",
+        double d => d.ToString("0.###"),
+        _ => value.ToString() ?? "-"
+    };
 
     /// <summary>
     /// 列表用任务简述：无任务显示"无"，有任务显示"源→目标设备名"。

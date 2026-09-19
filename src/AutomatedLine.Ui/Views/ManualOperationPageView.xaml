@@ -1,0 +1,176 @@
+<UserControl
+    x:Class="AutomatedLine.Ui.Views.ManualOperationPageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
+    d:DataContext="{d:DesignInstance Type=vm:ManualOperationViewModel}"
+    mc:Ignorable="d">
+    <Grid Margin="24,12,24,24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock
+            Grid.Row="0"
+            Margin="0,0,0,12"
+            FontSize="16"
+            FontWeight="SemiBold"
+            Foreground="{StaticResource TextPrimaryBrush}"
+            Text="手动操作（直接下发天车 PLC；不与自动线互斥）" />
+
+        <!-- 内容较多，页面支持横竖滚动 -->
+        <ScrollViewer
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Auto"
+            VerticalScrollBarVisibility="Auto">
+            <StackPanel Orientation="Horizontal">
+                <!-- 选择天车与当前状态 -->
+                <Border
+                    Width="360"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="选择天车" />
+                        <ComboBox
+                            Margin="0,8,0,0"
+                            DisplayMemberPath="Name"
+                            ItemsSource="{Binding Cranes}"
+                            SelectedItem="{Binding SelectedCrane, Mode=TwoWay}" />
+
+                        <TextBlock Margin="0,16,0,0" Style="{StaticResource CardTitle}" Text="当前坐标 / 状态" />
+                        <TextBlock Margin="0,6,0,0" FontFamily="Consolas" Text="{Binding SelectedCrane.X, StringFormat=X：{0:0.###}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding SelectedCrane.Y, StringFormat=Y：{0:0.###}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding SelectedCrane.Z, StringFormat=Z：{0:0.###}}" />
+                        <TextBlock Margin="0,6,0,0" Text="{Binding SelectedCrane.StateText, StringFormat=状态：{0}}" />
+                        <TextBlock Text="{Binding SelectedCrane.ConnectionText, StringFormat=通信：{0}}" />
+                        <TextBlock Text="{Binding SelectedCrane.AlarmText, StringFormat=报警：{0}}" />
+
+                        <TextBlock Margin="0,16,0,0" Style="{StaticResource CardTitle}" Text="信号" />
+                        <TextBlock
+                            Margin="0,6,0,0"
+                            FontFamily="Consolas"
+                            FontSize="12"
+                            Text="{Binding SelectedCrane.SignalText}"
+                            TextWrapping="Wrap" />
+
+                        <TextBlock
+                            Margin="0,12,0,0"
+                            Foreground="{StaticResource BrandBlueBrush}"
+                            Text="{Binding Message}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 绝对运动 -->
+                <Border
+                    Width="300"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="绝对运动（输入目标坐标）" />
+                        <TextBlock Margin="0,10,0,0" Text="目标 X" />
+                        <ui:TextBox Text="{Binding AbsoluteX, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="0,8,0,0" Text="目标 Y" />
+                        <ui:TextBox Text="{Binding AbsoluteY, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="0,8,0,0" Text="目标 Z" />
+                        <ui:TextBox Text="{Binding AbsoluteZ, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Margin="0,8,0,0" Text="速度" />
+                        <ui:TextBox Text="{Binding Speed, UpdateSourceTrigger=PropertyChanged}" />
+                        <ui:Button
+                            Margin="0,14,0,0"
+                            Appearance="Primary"
+                            Command="{Binding MoveAbsoluteCommand}"
+                            Content="绝对运动" />
+                        <ui:Button
+                            Margin="0,8,0,0"
+                            Command="{Binding SetSpeedCommand}"
+                            Content="设置速度" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 相对运动 -->
+                <Border
+                    Width="300"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="相对运动（按步长点动）" />
+                        <TextBlock Margin="0,10,0,0" Text="步长(mm)" />
+                        <ui:TextBox Text="{Binding Step, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Margin="0,12,0,0" Text="X 轴" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button
+                                Margin="0,0,8,0"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="X+"
+                                Content="X+" />
+                            <ui:Button
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="X-"
+                                Content="X-" />
+                        </StackPanel>
+
+                        <TextBlock Margin="0,12,0,0" Text="Y 轴" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button
+                                Margin="0,0,8,0"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Y+"
+                                Content="Y+" />
+                            <ui:Button
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Y-"
+                                Content="Y-" />
+                        </StackPanel>
+
+                        <TextBlock Margin="0,12,0,0" Text="Z 轴" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button
+                                Margin="0,0,8,0"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Z+"
+                                Content="Z+" />
+                            <ui:Button
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Z-"
+                                Content="Z-" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- 动作 -->
+                <Border Width="260" Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="动作" />
+                        <ui:Button
+                            Margin="0,10,0,0"
+                            Command="{Binding ClearAlarmCommand}"
+                            Content="清除报警" />
+                        <ui:Button
+                            Margin="0,8,0,0"
+                            Command="{Binding MagnetizeCommand}"
+                            Content="充磁" />
+                        <ui:Button
+                            Margin="0,8,0,0"
+                            Command="{Binding DemagnetizeCommand}"
+                            Content="放磁" />
+                        <ui:Button
+                            Margin="0,8,0,0"
+                            Command="{Binding PressDownCommand}"
+                            Content="下压" />
+                        <TextBlock
+                            Margin="0,16,0,0"
+                            Style="{StaticResource CaptionText}"
+                            Text="说明：手动动作直接写 PLC 点位，用于人工调试与设定设备坐标；自动线运行时请勿操作。"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

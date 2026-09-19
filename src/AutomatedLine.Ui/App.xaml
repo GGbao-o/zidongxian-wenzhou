@@ -37,6 +37,9 @@
             <DataTemplate DataType="{x:Type vm:ScreenViewModel}">
                 <views:ScreenPageView />
             </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ManualOperationViewModel}">
+                <views:ManualOperationPageView />
+            </DataTemplate>
             <DataTemplate DataType="{x:Type vm:AlarmViewModel}">
                 <views:AlarmPageView />
             </DataTemplate>

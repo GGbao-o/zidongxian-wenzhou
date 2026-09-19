@@ -29,6 +29,7 @@ public partial class ShellViewModel : ObservableObject
     /// <param name="process">工序展示</param>
     /// <param name="parameters">参数设置</param>
     /// <param name="screen">大屏展示</param>
+    /// <param name="manual">手动操作</param>
     /// <param name="alarm">报警处理</param>
     public ShellViewModel(
         MainViewModel main,
@@ -37,6 +38,7 @@ public partial class ShellViewModel : ObservableObject
         ProcessViewModel process,
         ParamsViewModel parameters,
         ScreenViewModel screen,
+        ManualOperationViewModel manual,
         AlarmViewModel alarm)
     {
         NavItems.Add(new NavItemViewModel("主页面", main));
@@ -45,6 +47,7 @@ public partial class ShellViewModel : ObservableObject
         NavItems.Add(new NavItemViewModel("工序展示", process));
         NavItems.Add(new NavItemViewModel("参数设置", parameters));
         NavItems.Add(new NavItemViewModel("大屏展示", screen));
+        NavItems.Add(new NavItemViewModel("手动操作", manual));
         NavItems.Add(new NavItemViewModel("报警处理", alarm));
 
         // 默认停留在主页面
