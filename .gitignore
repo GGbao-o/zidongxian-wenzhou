@@ -1,0 +1,19 @@
+# 生成产物
+[Bb]in/
+[Oo]bj/
+
+# IDE / 用户配置
+.vs/
+.idea/
+*.user
+*.suo
+
+# 运行期日志（按天生成，不入库）
+Logs/
+
+# 含数据库连接串等敏感信息，不入库；模板见 appsettings.Example.json
+src/AutomatedLine.Ui/appsettings.json
+
+# 操作系统生成文件
+Thumbs.db
+desktop.ini
