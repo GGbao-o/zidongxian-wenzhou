@@ -21,6 +21,21 @@ public sealed class AppOptions
 
     /// <summary>模拟相关参数（仅开发/联调期用）。</summary>
     public SimulationOptions Simulation { get; set; } = new();
+
+    /// <summary>手动操作相关参数。</summary>
+    public ManualOptions Manual { get; set; } = new();
+}
+
+/// <summary>
+/// 手动操作参数。手动操作页的默认速度与默认点动步长。
+/// </summary>
+public sealed class ManualOptions
+{
+    /// <summary>默认运动速度。</summary>
+    public double DefaultSpeed { get; set; } = 100;
+
+    /// <summary>默认相对运动步长（mm）。</summary>
+    public double DefaultStep { get; set; } = 100;
 }
 
 /// <summary>

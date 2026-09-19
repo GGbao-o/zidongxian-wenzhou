@@ -45,6 +45,19 @@ public sealed class DriverRegistry
     }
 
     /// <summary>
+    /// 按资源号获取驱动（手动操作下发时需要）。
+    /// </summary>
+    /// <param name="resourceId">设备号或天车号</param>
+    /// <returns>驱动；不存在返回 null</returns>
+    public IPlcDriver? Get(int resourceId)
+    {
+        lock (_sync)
+        {
+            return _drivers.TryGetValue(resourceId, out var driver) ? driver : null;
+        }
+    }
+
+    /// <summary>
     /// 获取全部驱动的快照。
     /// </summary>
     /// <returns>驱动列表快照</returns>
