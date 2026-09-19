@@ -107,4 +107,7 @@ public sealed class LoggingOptions
 
     /// <summary>单个日志文件最大容量（字节），超出后滚动。</summary>
     public long MaxFileSizeBytes { get; set; } = 10 * 1024 * 1024;
+
+    /// <summary>抽样日志间隔（秒）。高频循环（如采集）用它控制落盘频率，默认 20s。</summary>
+    public int SampleSeconds { get; set; } = 20;
 }

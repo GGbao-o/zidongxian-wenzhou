@@ -30,4 +30,13 @@ public interface IAppLogger
     /// <param name="message">日志内容</param>
     /// <param name="exception">关联异常，可为空</param>
     void Error(LogCategory category, string message, Exception? exception = null);
+
+    /// <summary>
+    /// 抽样写日志：同一抽样键在配置的间隔内只写一次，避免高频循环刷爆磁盘。
+    /// 适用于"采集 500ms 一次、但落盘 10~20s 一次"这类场景。
+    /// </summary>
+    /// <param name="category">日志类别</param>
+    /// <param name="key">抽样键（如"资源+内容"），相同键按间隔节流</param>
+    /// <param name="message">日志内容</param>
+    void Sample(LogCategory category, string key, string message);
 }
