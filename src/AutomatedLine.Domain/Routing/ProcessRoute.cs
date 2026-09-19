@@ -67,6 +67,35 @@ public sealed class ProcessRoute
     }
 
     /// <summary>
+    /// 计算指定工序之后下一道**可执行**的工序（可选工序在缺少对应设备时跳过）。
+    /// 现场按 §3.1"设备允许缺失"：若某个可选工序（如打号机/验点机）没有设备，
+    /// 工件应直接进入再下一道，而不是卡死。
+    /// </summary>
+    /// <param name="current">当前工序</param>
+    /// <param name="hasDevice">判断某设备类型当前是否有可用设备（启用且存在）</param>
+    /// <returns>下一道可执行工序；无则返回 null</returns>
+    public ProcessNode? GetNextAvailable(ProcessType current, Func<DeviceType, bool> hasDevice)
+    {
+        var index = _nodes.FindIndex(n => n.Process == current);
+        if (index < 0)
+        {
+            return null;
+        }
+
+        // 从当前工序往后找：必需工序直接返回；可选工序仅在"有设备"时才返回，否则跳过
+        for (var i = index + 1; i < _nodes.Count; i++)
+        {
+            var node = _nodes[i];
+            if (!node.IsOptional || hasDevice(node.DeviceType))
+            {
+                return node;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// 判断某工序是否已是最后一道。
     /// </summary>
     /// <param name="current">当前工序</param>

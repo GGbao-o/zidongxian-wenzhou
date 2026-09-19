@@ -160,7 +160,8 @@ public sealed class TransportTaskGenerator : IHostedService
                 continue;
             }
 
-            var next = _route.GetNext(runtime.CurrentProcess);
+            // 计算下一道可执行工序：可选工序缺设备时自动跳过（§3.1 设备允许缺失）
+            var next = _route.GetNextAvailable(runtime.CurrentProcess, type => HasUsableDevice(devices, type));
             if (next is null)
             {
                 // 已是最后一道工序：视为完成，退出候选
@@ -203,6 +204,15 @@ public sealed class TransportTaskGenerator : IHostedService
 
         return null;
     }
+
+    /// <summary>
+    /// 判断某设备类型当前是否存在可用（启用）设备，用于决定可选工序是否跳过。
+    /// </summary>
+    /// <param name="devices">设备快照</param>
+    /// <param name="type">设备类型</param>
+    /// <returns>存在启用设备返回 true</returns>
+    private static bool HasUsableDevice(IReadOnlyList<DeviceBase> devices, DeviceType type)
+        => devices.Any(d => d.Type == type && d.IsEnabled);
 
     /// <summary>
     /// 选择目标设备：同类型、启用、未被预约、加工范围匹配；优先空闲，再取离源最近。
