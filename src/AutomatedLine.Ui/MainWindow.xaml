@@ -13,6 +13,7 @@
     ExtendsContentIntoTitleBar="True"
     WindowBackdropType="Mica"
     WindowStartupLocation="CenterScreen"
+    WindowState="Maximized"
     mc:Ignorable="d">
     <Grid Background="{StaticResource PageBackgroundBrush}">
         <Grid.RowDefinitions>
