@@ -1,8 +1,10 @@
 using System.Windows;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Runtime;
 using AutomatedLine.Infrastructure.Config;
 using AutomatedLine.Infrastructure.Logging;
 using AutomatedLine.Infrastructure.Persistence;
+using AutomatedLine.Ui.Services;
 using AutomatedLine.Ui.ViewModels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -87,6 +89,14 @@ public partial class App : System.Windows.Application
             var connectionString = configService.GetConnectionString();
             options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 36)));
         });
+
+        // 运行态容器：全线唯一实例，跨页面/服务共享（架构文档 §7）
+        services.AddSingleton<IRuntimeTaskManager, RuntimeTaskManager>();
+        services.AddSingleton<DeviceRegistry>();
+        services.AddSingleton<CraneRegistry>();
+
+        // 弹窗服务：ViewModel 通过接口请求对话框，不直接依赖 View
+        services.AddSingleton<IDialogService, DialogService>();
 
         // 视图与视图模型：主窗口从容器解析，保证跨页面共享同一批服务实例
         services.AddTransient<MainViewModel>();

@@ -17,44 +17,81 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Fluent 自绘标题栏；配合 ExtendsContentIntoTitleBar 使用 -->
+        <!-- Fluent 自绘标题栏 -->
         <ui:TitleBar Grid.Row="0" Title="车间自动化调度系统" />
 
-        <!-- P0 骨架内容：仅验证 DI 链路与主题样式，后续页面在此基础上替换 -->
-        <StackPanel
-            Grid.Row="1"
-            Margin="32,24,32,32"
-            VerticalAlignment="Top">
-            <TextBlock
-                FontSize="14"
-                Opacity="0.65"
-                Text="当前线路状态" />
-            <TextBlock
-                FontSize="34"
-                FontWeight="SemiBold"
-                Text="{Binding LineStateText}" />
+        <!-- 顶部：线路状态与操作按钮 -->
+        <Grid Grid.Row="1" Margin="32,20,32,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-            <TextBlock
-                Margin="0,20,0,0"
-                FontSize="14"
-                Opacity="0.65"
-                Text="{Binding GenerateIntervalMs, StringFormat=候选任务生成周期：{0} ms}" />
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <TextBlock
+                    FontSize="13"
+                    Opacity="0.65"
+                    Text="当前线路状态" />
+                <TextBlock
+                    FontSize="28"
+                    FontWeight="SemiBold"
+                    Text="{Binding LineStateText}" />
+            </StackPanel>
 
-            <!-- 命令骨架：P0 仅切换状态文本，后续接入 LineControlService -->
             <StackPanel
-                Margin="0,28,0,0"
+                Grid.Column="1"
+                VerticalAlignment="Center"
                 Orientation="Horizontal">
                 <ui:Button
                     Margin="0,0,12,0"
                     Command="{Binding StartLineCommand}"
                     Content="启动线路" />
                 <ui:Button
+                    Margin="0,0,12,0"
                     Command="{Binding PauseLineCommand}"
                     Content="暂停线路" />
+                <ui:Button
+                    Appearance="Primary"
+                    Command="{Binding AddTaskCommand}"
+                    Content="添加任务" />
             </StackPanel>
-        </StackPanel>
+        </Grid>
+
+        <!-- 工件任务列表 -->
+        <DataGrid
+            Grid.Row="2"
+            Margin="32,0,32,32"
+            AutoGenerateColumns="False"
+            CanUserAddRows="False"
+            GridLinesVisibility="Horizontal"
+            HeadersVisibility="Column"
+            IsReadOnly="True"
+            ItemsSource="{Binding Tasks}">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="板号" Binding="{Binding PlateNo}" />
+                <DataGridTextColumn Header="序号" Binding="{Binding SerialNo}" />
+                <DataGridTextColumn Header="直径" Binding="{Binding Diameter}" />
+                <DataGridTextColumn Header="长度" Binding="{Binding Length}" />
+                <DataGridTextColumn Header="当前工序" Binding="{Binding ProcessText}" />
+                <DataGridTextColumn Header="位置" Binding="{Binding LocationText}" />
+                <DataGridTextColumn Header="状态" Binding="{Binding StateText}" />
+                <DataGridTemplateColumn Header="操作">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <!-- 命令在 DataGrid 的 DataContext（MainViewModel）上，参数为当前行 -->
+                            <ui:Button
+                                Padding="8,2"
+                                Command="{Binding DataContext.ClearTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                CommandParameter="{Binding}"
+                                Content="清除" />
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+            </DataGrid.Columns>
+        </DataGrid>
     </Grid>
 </ui:FluentWindow>
