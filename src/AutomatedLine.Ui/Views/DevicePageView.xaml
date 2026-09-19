@@ -21,7 +21,7 @@
                     FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{StaticResource TextPrimaryBrush}"
-                    Text="设备运行监控" />
+                    Text="设备配置与监控（数据来自数据库）" />
                 <ui:Button
                     HorizontalAlignment="Right"
                     Appearance="Primary"
@@ -29,7 +29,7 @@
                     Content="新增设备" />
             </Grid>
 
-            <!-- DataGrid 自带横竖滚动条，设备/列很多时可滚动查看 -->
+            <!-- 全字段展示；列多，DataGrid 自带横向与纵向滚动条 -->
             <DataGrid
                 Grid.Row="1"
                 AutoGenerateColumns="False"
@@ -43,15 +43,23 @@
                 RowBackground="Transparent"
                 AlternatingRowBackground="#F8FAFC">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="设备号" Binding="{Binding Id}" />
-                    <DataGridTextColumn Header="名称" Binding="{Binding Name}" />
+                    <DataGridTextColumn Header="设备号" Binding="{Binding Config.Id}" />
+                    <DataGridTextColumn Header="名称" Binding="{Binding Config.Name}" />
                     <DataGridTextColumn Header="类型" Binding="{Binding TypeText}" />
-                    <DataGridTextColumn Header="物理位置X" Binding="{Binding PositionX, StringFormat={}{0:0.0}}" />
+                    <DataGridTextColumn Header="协议" Binding="{Binding Config.Protocol}" />
+                    <DataGridTextColumn Header="IP" Binding="{Binding Config.IpAddress}" />
+                    <DataGridTextColumn Header="端口" Binding="{Binding Config.Port}" />
+                    <DataGridTextColumn Header="物理位置X" Binding="{Binding Config.PositionX}" />
+                    <DataGridTextColumn Header="安全位" Binding="{Binding Config.SafePosition}" />
+                    <DataGridTextColumn Header="最小直径" Binding="{Binding Config.MinDiameter}" />
+                    <DataGridTextColumn Header="最大直径" Binding="{Binding Config.MaxDiameter}" />
+                    <DataGridTextColumn Header="最小长度" Binding="{Binding Config.MinLength}" />
+                    <DataGridTextColumn Header="最大长度" Binding="{Binding Config.MaxLength}" />
+                    <DataGridTextColumn Header="启用" Binding="{Binding Config.IsEnabled}" />
                     <DataGridTextColumn Header="通信" Binding="{Binding ConnectionText}" />
                     <DataGridTextColumn Header="状态" Binding="{Binding StateText}" />
                     <DataGridTextColumn Header="当前工件" Binding="{Binding WorkpieceText}" />
                     <DataGridTextColumn Header="报警" Binding="{Binding AlarmText}" />
-                    <DataGridTextColumn Header="信号" Binding="{Binding SignalSummary}" />
                     <DataGridTemplateColumn Header="操作">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>

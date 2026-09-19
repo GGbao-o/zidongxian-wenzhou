@@ -12,11 +12,12 @@ namespace AutomatedLine.Ui.ViewModels;
 
 /// <summary>
 /// 设备管理页面 ViewModel。
-/// 展示所有设备的类型、位置、连接、状态、当前工件与信号；并支持对设备配置做增删改（写数据库后重载运行态）。
+/// **以数据库为准**：列出 DeviceConfig 全部字段（含未启用项），叠加运行态（连接/状态/工件/报警）。
+/// 支持新增/编辑/删除，改动后重载注册表并重新读取数据库。
 /// </summary>
 public partial class DeviceViewModel : ObservableObject
 {
-    /// <summary>设备注册表。</summary>
+    /// <summary>设备注册表（运行态）。</summary>
     private readonly DeviceRegistry _deviceRegistry;
 
     /// <summary>配置存储（数据库 CRUD）。</summary>
@@ -25,14 +26,17 @@ public partial class DeviceViewModel : ObservableObject
     /// <summary>配置装载器，配置改动后重载运行态。</summary>
     private readonly IConfigurationLoader _configurationLoader;
 
-    /// <summary>弹窗服务，用于配置编辑对话框。</summary>
+    /// <summary>弹窗服务。</summary>
     private readonly IDialogService _dialogService;
 
-    /// <summary>设备行集合（界面绑定源）。</summary>
-    public ObservableCollection<DeviceRowViewModel> Devices { get; } = new();
+    /// <summary>数据库配置缓存：设备号 → 配置。</summary>
+    private Dictionary<int, DeviceConfigDto> _configs = new();
+
+    /// <summary>设备行集合（数据库全字段 + 运行态）。</summary>
+    public ObservableCollection<DeviceConfigRowViewModel> Devices { get; } = new();
 
     /// <summary>
-    /// 构造函数。订阅节拍器定期刷新。
+    /// 构造函数。订阅节拍器刷新运行态，并异步加载数据库配置。
     /// </summary>
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="configurationStore">配置存储</param>
@@ -51,8 +55,47 @@ public partial class DeviceViewModel : ObservableObject
         _configurationLoader = configurationLoader;
         _dialogService = dialogService;
 
-        ticker.Tick += (_, _) => Refresh();
-        Refresh();
+        ticker.Tick += (_, _) => RefreshRuntime();
+        _ = LoadConfigsAsync();
+    }
+
+    /// <summary>从数据库重新加载全部设备配置并重建行。</summary>
+    private async Task LoadConfigsAsync()
+    {
+        try
+        {
+            var configs = await _configurationStore.GetDeviceConfigsAsync();
+            _configs = configs.ToDictionary(c => c.Id);
+            RebuildRows();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DeviceViewModel] 加载设备配置失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>重建行（差量）。</summary>
+    private void RebuildRows()
+    {
+        var dtos = _configs.Values.OrderBy(c => c.Id).ToList();
+        ObservableCollectionSync.SyncById(
+            Devices,
+            dtos,
+            row => row.Id,
+            dto => dto.Id,
+            dto => new DeviceConfigRowViewModel(dto, _deviceRegistry.Get(dto.Id)),
+            (row, dto) => row.ApplyConfig(dto));
+
+        RefreshRuntime();
+    }
+
+    /// <summary>刷新所有行的运行态字段。</summary>
+    private void RefreshRuntime()
+    {
+        foreach (var row in Devices)
+        {
+            row.ApplyRuntime(_deviceRegistry.Get(row.Id));
+        }
     }
 
     /// <summary>新增设备配置。</summary>
@@ -67,40 +110,33 @@ public partial class DeviceViewModel : ObservableObject
 
         await _configurationStore.SaveDeviceConfigAsync(dto);
         await _configurationLoader.LoadAsync();
-        Refresh();
+        await LoadConfigsAsync();
     }
 
     /// <summary>编辑设备配置。</summary>
     /// <param name="row">选中的设备行</param>
     [RelayCommand]
-    private async Task EditDeviceAsync(DeviceRowViewModel? row)
+    private async Task EditDeviceAsync(DeviceConfigRowViewModel? row)
     {
         if (row is null)
         {
             return;
         }
 
-        var configs = await _configurationStore.GetDeviceConfigsAsync();
-        var dto = configs.FirstOrDefault(d => d.Id == row.Id);
-        if (dto is null)
+        if (!EditDialog("编辑设备", row.Config))
         {
             return;
         }
 
-        if (!EditDialog("编辑设备", dto))
-        {
-            return;
-        }
-
-        await _configurationStore.SaveDeviceConfigAsync(dto);
+        await _configurationStore.SaveDeviceConfigAsync(row.Config);
         await _configurationLoader.LoadAsync();
-        Refresh();
+        await LoadConfigsAsync();
     }
 
     /// <summary>删除设备配置。</summary>
     /// <param name="row">选中的设备行</param>
     [RelayCommand]
-    private async Task DeleteDeviceAsync(DeviceRowViewModel? row)
+    private async Task DeleteDeviceAsync(DeviceConfigRowViewModel? row)
     {
         if (row is null)
         {
@@ -108,7 +144,7 @@ public partial class DeviceViewModel : ObservableObject
         }
 
         var confirm = System.Windows.MessageBox.Show(
-            $"确定删除设备【{row.Name}】的配置吗？", "删除确认",
+            $"确定删除设备【{row.Config.Name}】的配置吗？", "删除确认",
             System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Warning);
         if (confirm != System.Windows.MessageBoxResult.OK)
         {
@@ -117,11 +153,11 @@ public partial class DeviceViewModel : ObservableObject
 
         await _configurationStore.DeleteDeviceConfigAsync(row.Id);
         await _configurationLoader.LoadAsync();
-        Refresh();
+        await LoadConfigsAsync();
     }
 
     /// <summary>
-    /// 用通用编辑弹框编辑设备配置。字段顺序固定，确定后按顺序写回 DTO。
+    /// 用通用编辑弹框编辑设备配置（覆盖数据库全部字段）。字段顺序固定，确定后按顺序写回 DTO。
     /// </summary>
     /// <param name="title">弹框标题</param>
     /// <param name="dto">待编辑配置</param>
@@ -180,19 +216,4 @@ public partial class DeviceViewModel : ObservableObject
             : text.Trim() == "1" ? true
             : text.Trim() == "0" ? false
             : fallback;
-
-    /// <summary>
-    /// 差量刷新设备行。
-    /// </summary>
-    private void Refresh()
-    {
-        var devices = _deviceRegistry.Snapshot().OrderBy(d => d.Id).ToList();
-        ObservableCollectionSync.SyncById(
-            Devices,
-            devices,
-            row => row.Id,
-            device => device.Id,
-            device => new DeviceRowViewModel(device),
-            (row, device) => row.Refresh(device));
-    }
 }
