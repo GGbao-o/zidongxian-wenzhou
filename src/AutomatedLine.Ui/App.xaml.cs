@@ -62,10 +62,10 @@ public partial class App : System.Windows.Application
             Console.WriteLine($"[App] 冷启动核对发现 {blocks.Count} 个物理阻塞资源");
         }
 
-        // 从容器解析主窗口与主 ViewModel，DataContext 通过 DI 注入，View 不 new ViewModel
+        // 从容器解析主窗口与外壳 ViewModel，DataContext 通过 DI 注入，View 不 new ViewModel
         var mainWindow = _host.Services.GetRequiredService<MainWindow>();
-        var mainViewModel = _host.Services.GetRequiredService<MainViewModel>();
-        mainWindow.DataContext = mainViewModel;
+        var shellViewModel = _host.Services.GetRequiredService<ShellViewModel>();
+        mainWindow.DataContext = shellViewModel;
         mainWindow.Show();
     }
 
@@ -127,8 +127,22 @@ public partial class App : System.Windows.Application
         // 弹窗服务：ViewModel 通过接口请求对话框，不直接依赖 View
         services.AddSingleton<IDialogService, DialogService>();
 
-        // 视图与视图模型：主窗口从容器解析，保证跨页面共享同一批服务实例
-        services.AddTransient<MainViewModel>();
+        // 界面节拍器：所有页面共用同一个秒级刷新节拍，避免每页各起定时器
+        services.AddSingleton<IRuntimeTicker, RuntimeTicker>();
+
+        // 页面 ViewModel 全部单例：页面常驻、共享运行态，且避免重复订阅节拍器
+        services.AddSingleton<MainViewModel>();
+        services.AddSingleton<CraneViewModel>();
+        services.AddSingleton<DeviceViewModel>();
+        services.AddSingleton<ProcessViewModel>();
+        services.AddSingleton<ParamsViewModel>();
+        services.AddSingleton<ScreenViewModel>();
+        services.AddSingleton<AlarmViewModel>();
+
+        // 外壳：顶部导航 + 页面切换
+        services.AddSingleton<ShellViewModel>();
+
+        // 主窗口由容器解析
         services.AddTransient<MainWindow>();
     }
 }

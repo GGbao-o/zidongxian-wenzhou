@@ -1,0 +1,48 @@
+<UserControl
+    x:Class="AutomatedLine.Ui.Views.ProcessPageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
+    d:DataContext="{d:DesignInstance Type=vm:ProcessViewModel}"
+    mc:Ignorable="d">
+    <Border Margin="24,12,24,24" Style="{StaticResource CardBorder}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                <TextBlock
+                    FontSize="16"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource TextPrimaryBrush}"
+                    Text="工艺路线（只读）" />
+                <TextBlock Style="{StaticResource CaptionText}" Text="顺序固定在代码中；后续如确需运行期调整再改为配置驱动。" />
+            </StackPanel>
+
+            <DataGrid
+                Grid.Row="1"
+                AutoGenerateColumns="False"
+                Background="Transparent"
+                CanUserAddRows="False"
+                GridLinesVisibility="Horizontal"
+                HeadersVisibility="Column"
+                HorizontalGridLinesBrush="{StaticResource CardBorderBrush}"
+                IsReadOnly="True"
+                ItemsSource="{Binding Nodes}"
+                RowBackground="Transparent"
+                AlternatingRowBackground="#F8FAFC">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="顺序" Binding="{Binding Order}" />
+                    <DataGridTextColumn Header="工序" Binding="{Binding ProcessText}" />
+                    <DataGridTextColumn Header="设备类型" Binding="{Binding DeviceTypeText}" />
+                    <DataGridTextColumn Header="是否可选" Binding="{Binding OptionalText}" />
+                    <DataGridTextColumn Header="设备数量" Binding="{Binding DeviceCount}" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </Border>
+</UserControl>

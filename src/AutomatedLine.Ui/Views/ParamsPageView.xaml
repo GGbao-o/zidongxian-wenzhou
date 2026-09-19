@@ -1,0 +1,47 @@
+<UserControl
+    x:Class="AutomatedLine.Ui.Views.ParamsPageView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
+    d:DataContext="{d:DesignInstance Type=vm:ParamsViewModel}"
+    mc:Ignorable="d">
+    <Border Margin="24,12,24,24" Style="{StaticResource CardBorder}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" Margin="0,0,0,12">
+                <TextBlock
+                    FontSize="16"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource TextPrimaryBrush}"
+                    Text="参数设置（只读占位）" />
+                <TextBlock Style="{StaticResource CaptionText}" Text="参数来自 appsettings.json；编辑与保存、立即生效/下次生效标记后续补充。" />
+            </StackPanel>
+
+            <!-- 参数项可能很多，DataGrid 自带纵向与横向滚动条 -->
+            <DataGrid
+                Grid.Row="1"
+                AutoGenerateColumns="False"
+                Background="Transparent"
+                CanUserAddRows="False"
+                GridLinesVisibility="Horizontal"
+                HeadersVisibility="Column"
+                HorizontalGridLinesBrush="{StaticResource CardBorderBrush}"
+                IsReadOnly="True"
+                ItemsSource="{Binding Items}"
+                RowBackground="Transparent"
+                AlternatingRowBackground="#F8FAFC">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="分类" Binding="{Binding Category}" Width="120" />
+                    <DataGridTextColumn Header="参数名称" Binding="{Binding Name}" Width="260" />
+                    <DataGridTextColumn Header="当前值" Binding="{Binding Value}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Grid>
+    </Border>
+</UserControl>

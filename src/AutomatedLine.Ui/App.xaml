@@ -1,10 +1,13 @@
 <Application x:Class="AutomatedLine.Ui.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
+             xmlns:views="clr-namespace:AutomatedLine.Ui.Views">
     <!--
         应用级资源：WPF UI 主题与控件字典打底，再叠加自建的浅色风格资源。
         主题选 Light：车间光线偏暗，浅底深字更清晰；强调色与卡片样式见 Resources/Styles/AppStyles.xaml。
+        下面按"页面 ViewModel → 页面 View"注册 DataTemplate，外壳的 ContentControl 据此自动渲染当前页。
         注意：不使用 StartupUri，主窗口由 DI 容器解析后在 App.xaml.cs 中手动显示。
     -->
     <Application.Resources>
@@ -14,6 +17,29 @@
                 <ui:ControlsDictionary />
                 <ResourceDictionary Source="Resources/Styles/AppStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
+
+            <!-- 页面 ViewModel → View 映射 -->
+            <DataTemplate DataType="{x:Type vm:MainViewModel}">
+                <views:MainPageView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:CraneViewModel}">
+                <views:CranePageView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:DeviceViewModel}">
+                <views:DevicePageView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ProcessViewModel}">
+                <views:ProcessPageView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ParamsViewModel}">
+                <views:ParamsPageView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:ScreenViewModel}">
+                <views:ScreenPageView />
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:AlarmViewModel}">
+                <views:AlarmPageView />
+            </DataTemplate>
         </ResourceDictionary>
     </Application.Resources>
 </Application>
