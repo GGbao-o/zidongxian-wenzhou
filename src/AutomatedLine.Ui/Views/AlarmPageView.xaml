@@ -24,27 +24,15 @@
                 Foreground="{StaticResource TextPrimaryBrush}"
                 Text="活动报警（内存 + 磁盘 alarm.txt）" />
 
-            <!-- 人工处理按钮（受限） -->
+            <!-- 无人工清内存/解死锁按钮：异常由程序自动清理（架构文档 §10.4），这里只清报警列表 -->
             <StackPanel
                 Grid.Row="1"
                 Margin="0,12,0,12"
                 Orientation="Horizontal">
                 <ui:Button
-                    Margin="0,0,12,0"
-                    Command="{Binding ClearPhysicalBlockCommand}"
-                    Content="清除物理阻塞" />
-                <ui:Button
-                    Margin="0,0,12,0"
-                    Command="{Binding ReleaseLocksCommand}"
-                    Content="释放逻辑锁" />
-                <ui:Button
-                    Margin="0,0,12,0"
-                    Command="{Binding ReplenishCommand}"
-                    Content="补内存" />
-                <ui:Button
                     Appearance="Primary"
                     Command="{Binding ClearAllCommand}"
-                    Content="清除全部" />
+                    Content="清除报警列表" />
             </StackPanel>
 
             <!-- 报警可能很多，DataGrid 自带横竖滚动条 -->
