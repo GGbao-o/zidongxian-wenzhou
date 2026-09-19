@@ -1,0 +1,1193 @@
+# 车间自动化调度系统 — 架构设计文档
+
+| 项 | 内容 |
+|---|---|
+| 文档版本 | v1.3 |
+| 状态 | 讨论中 / 待评审 |
+| 技术栈 | C# / .NET 8 / WPF / CommunityToolkit.Mvvm / EF Core / MySQL |
+| 架构风格 | 单进程、模块化分层 + 集中式调度 + Worker 执行 + 状态机 + 内存运行态 + 区间路权 |
+
+### 修订记录
+
+| 版本 | 主要变更 |
+|---|---|
+| v1.0 | 初稿，建立分层与调度主框架 |
+| v1.1 | 依据讨论修正：路权改为「任务 X 区间互斥锁」；删除跨区段配置与信号配置表；明确信号点位定义在代码类中；明确工艺路线以现场为准；明确数据库仅存天车/设备/工艺配置；补充大量中文说明 |
+| v1.2 | 路权获取统一为「派发时由 Scheduler 原子获取」，删除状态机获取步骤与 `WaitingTraffic`、路权等待超时；异常按故障分级：通信闪断走重连重试，运动/交互/握手超时与 PLC 报警视为硬故障并丢弃任务、暂停线路；明确内存清理不得把物理有料资源判为空闲 |
+| v1.3 | UI 项目由 `AutomatedLine.Wpf` 更名为 `AutomatedLine.Ui`，避免与 WPF UI 的 `Wpf.Ui` 命名空间冲突；补正项目引用关系：Infrastructure 实际需引用 Application 才能实现其接口 |
+
+---
+
+## 1. 文档说明
+
+本文档描述车间自动化流水线调度系统的整体架构设计，内容包括：需求分析、分层结构、领域模型、运行时内存模型、路权模型、核心流程、状态定义、页面设计、配置与数据库设计以及开发阶段规划。
+
+本文档是项目开发前评审的依据。评审通过后，代码结构、命名、职责边界均以本文档为准。
+
+**阅读建议**：
+
+- 想了解系统"是什么"：看第 2、3 章
+- 想了解系统"怎么分层"：看第 4、5 章
+- 想了解"路权怎么算"：直接看第 8.7 节和第 18 章
+- 想了解"异常怎么办"：看第 10.4、10.5 节
+
+---
+
+## 2. 项目背景与目标
+
+### 2.1 系统定位
+
+本系统是一条**固定工艺自动产线**的上位机调度系统。上位机不直接做运动控制，而是承担"大脑"与"监视器"的角色：
+
+- 从 PLC 采集设备与天车状态
+- 在内存中维护工件任务与运行状态
+- 计算工序之间的搬运任务
+- 统一调度多台天车完成工件搬运
+- 提供配置、监控、大屏、报警等页面
+
+天车本身的 XYZ 三轴运动由天车 PLC 内部完成，上位机只负责把目标位置和动作指令写成 PLC 数据，再读回执行结果。
+
+### 2.2 系统本质
+
+> 本系统不是"设备控制系统"，而是**工件在固定工序间的流转编排 + 多天车区间路权互斥**。
+
+理解这句话非常关键：
+
+- **不是设备控制**：真正的电机、伺服、限位、加减速曲线都在 PLC 里，上位机不参与
+- **是流转编排**：工件从上料架出发，按固定工艺依次经过各设备，每一段由一个搬运任务完成
+- **是区间互斥**：多台天车的活动范围相邻且略有重叠（交叉区），必须保证同一时刻不会有两台天车进入冲突的 X 区间
+
+真正的难点不在单个设备，而在于三件事：
+
+1. **工件身份跟踪**：工件没有贴条码，系统只能靠内存中的对象引用在设备与天车之间转移来"记住"它
+2. **多车路权**：天车范围重叠，必须靠区间锁保证不撞
+3. **异常后状态一致性**：通信中断、报警、超时发生时，内存状态和现场实物必须尽量对齐
+
+因为系统是单进程、内存运行态、任务不落库，所以完全不需要微服务、消息队列、CQRS 等重型方案。固定产线用一套干净的分层架构就足够了。
+
+### 2.3 设计目标
+
+| 目标 | 说明 |
+|---|---|
+| 高内聚低耦合 | 分层清晰，层与层通过接口解耦，换协议不改业务 |
+| 单一事实来源 | 每个状态只有一个权威来源，避免多处重复导致分歧 |
+| 可重算 | 候选任务随时可基于当前状态重建，不维护脆弱的任务队列 |
+| 安全 | 异常时释放逻辑锁，但绝不把仍有实物的资源判为空闲 |
+| 可维护 | 新设备类型通过策略扩展，不改调度主体 |
+| 可模拟 | 未接 PLC 时可用模拟驱动跑通全流程，降低开发与联调风险 |
+
+---
+
+## 3. 需求分析
+
+### 3.1 物理产线
+
+一条笔直的线路。地面设备可能包括（依车间实际情况在数据库配置，**允许缺失**）：
+
+```
+上料架 → 货叉 → 双头镗 → 斜床(N台) → 研磨机(N台) → 动平衡机 → 打号机 → 验点机 → 下料架
+```
+
+需要强调几点：
+
+- 设备不是固定的，不同车间可能没有其中某几台
+- 哪些设备存在、有几台，全部通过数据库配置，程序不写死
+- 同类设备可能有多台（斜床 N 台、研磨机 N 台），调度时需要选择具体哪一台
+
+### 3.2 天车
+
+龙门架上安装若干台天车（典型为三台），用于在设备之间搬运工件。
+
+- 每台天车有可配置的**活动范围**，例如 30m 车间：
+  - 天车 1：0 ~ 10000
+  - 天车 2：8000 ~ 20000
+  - 天车 3：18000 ~ 30000
+- 活动范围是数据库配置，**不是写死的**
+- 相邻天车的活动范围存在**交叉区**（如天车1和天车2在 8000~10000 重叠）
+- 天车运动为 XYZ 三轴：XY 移动到目标位置 → 取板 → 送往下一工序
+- 天车**不使用运动控制卡**，上位机只向 PLC 发送数据
+- 天车有物理宽度，宽度也存放在数据库中，用于计算路权区间
+
+> **关于交叉区与碰撞**：本系统**不做动态避让**，而是采用「**任务区间路权互斥**」——一个任务在执行前先把它所涉及的 X 区间整段锁住，其它天车若任务区间与之相交，则本周期不执行、重试。这样从机制上保证两台天车不会同时进入冲突区间。详见第 8.7 节。
+
+### 3.3 功能需求
+
+| 页面 | 功能 |
+|---|---|
+| 主页面 | 启动线路；添加任务（弹窗录入工件信息）；当前任务显示栏（工序/下一工序/暂停/清除） |
+| 天车管理 | 天车配置（ID/序号/名称/协议/IP/端口/各轴速度/加减速/StartX-EndX 等）；运行状态监控 |
+| 设备管理 | 设备配置；实时 XYZ 坐标、加工长度、信号、当前工件 |
+| 工序管理 | 流程顺序（固定工艺，v1 只读展示） |
+| 参数设置 | 程序参数（周期、超时、日志等），存 appsettings.json |
+| 大屏展示 | 设备/天车信号、颜色状态、悬浮显示工件信息、当前锁定区间与可执行任务 |
+| 报警处理 | 报警内存展示 + 磁盘日志；人工异常处理按钮（补内存、释放逻辑锁、清除物理阻塞） |
+
+### 3.4 关键约束
+
+| 约束 | 说明 |
+|---|---|
+| 工件任务不落库 | 工件信息只存内存，程序关闭即消失（**刻意设计**） |
+| 报警不落库 | 报警只写磁盘日志 + 内存，页面直接读内存 |
+| 数据库只存配置 | 只保存天车、设备、工艺路线等配置，**不保存**任务与报警运行态 |
+| 信号点位不进库 | 设备/天车的信号地址、数据类型、读写权限**定义在代码类中**，不进数据库 |
+| 任务丢弃式异常处理 | 异常时直接丢弃当前任务、释放全部逻辑锁，避免死锁 |
+| 工艺固定 | v1 页面不允许修改流程；完整工艺路线以现场确认为准 |
+| 暂不接 PLC | 当前阶段不接现场 PLC，先以接口 + 模拟驱动开发验证 |
+
+### 3.5 设计难点与风险
+
+#### 难点 1：异常废弃后工件身份丢失（已确认策略）
+
+工件信息仅存内存，且实物没有条码/RFID 标识。异常丢弃任务后，若实物仍卡在设备或天车上，其板号/序号/直径/长度将永久丢失，无法重新关联。
+
+**已确认处理方式**：丢弃任务、释放全部逻辑锁（见 §10.4）。由此产生以下后果，需要现场配合：
+
+- 工件信息不可恢复（这是内存化设计的必然代价）
+- 仍有实物的资源保持 `BlockedByPhysicalState`，不参与调度
+- 操作员处理掉实物后，在报警页点击"清除该资源物理阻塞"恢复资源
+
+#### 难点 2：工件位置唯一事实来源
+
+设备与天车都持有"当前工件"的引用，如果两边各自写状态就会产生分歧。解决办法是引入唯一的 `CurrentLocation`（见 §6.1），设备/天车的当前工件只是查询派生结果。
+
+#### 难点 3：取放料成功判定
+
+内存中的引用转移（`Crane.CurrentWorkpiece = WP`）必须由现场物理信号确认，否则会出现"系统以为搬走了、实际还在地上"的脱节。判定规则见 §8.10，前提是 PLC 能提供有料/无料等反馈信号。
+
+#### 难点 4：多车区间互斥
+
+天车范围重叠，若不互斥会相撞。本系统用「任务 X 区间锁」解决（见 §8.7）。之所以不需要复杂的动态避让，是因为：
+
+- 任务结束后天车会回到**安全位置**
+- 安全位置由现场设置，保证不在互斥区，也不会影响其它天车
+- 因此空闲天车不占路权；路权在**派发时**取得，天车回到安全位后释放
+
+#### 难点 5：冷启动状态核对
+
+启动时内存任务为空，但现场可能残留工件。处理方式见 §10.5 的"冷启动核对"。
+
+---
+
+## 4. 架构总览
+
+### 4.1 分层架构图
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│                        Presentation（WPF）                     │
+│  MainView / CraneView / DeviceView / ProcessView               │
+│  ParamsView / ScreenView / AlarmView                           │
+│  只做：展示状态、接收操作、调用 Application 服务                 │
+└──────────────────────────────┬────────────────────────────────┘
+                               │
+                               ▼
+┌───────────────────────────────────────────────────────────────┐
+│                     Application（应用服务层）                   │
+│  LineControlService       启动 / 暂停 / 恢复线路                │
+│  DeviceStateCollector     采集 PLC / 天车状态                   │
+│  TransportTaskGenerator   生成候选搬运任务                      │
+│  CraneScheduler           唯一集中调度器                        │
+│  CraneWorker              每台天车独立执行                      │
+│  ResourceReservationManager  设备预约                           │
+│  RightOfWayManager        任务 X 区间路权互斥                   │
+│  AlarmManager             报警管理                              │
+│  TaskAbortCoordinator     异常任务丢弃                           │
+│  ITransferHandler         设备取放策略                          │
+└───────────┬───────────────────────────────┬───────────────────┘
+            │                               │
+            ▼                               ▼
+┌──────────────────────────────┐  ┌──────────────────────────────┐
+│      Domain（领域模型层）      │  │   Runtime Store（内存运行态）   │
+│  WorkpieceInfo               │  │  RuntimeTaskManager          │
+│  WorkpieceRuntime            │  │  DeviceRegistry              │
+│  WorkpieceTask               │  │  CraneRegistry               │
+│  DeviceBase / 各设备子类      │  │  CandidateTaskPool           │
+│  Crane                       │  │  ReservationManager          │
+│  TransportTask               │  │  RightOfWayManager（状态部分） │
+│  ProcessRoute / ProcessNode  │  │  ActiveAlarmStore            │
+│  XInterval（区间值对象）       │  │                              │
+└──────────────┬───────────────┘  └──────────────────────────────┘
+               │
+               ▼
+┌───────────────────────────────────────────────────────────────┐
+│                   Infrastructure（基础设施层）                  │
+│  DeviceDriver / CraneDriver（接口 + 模拟实现 + 真实实现占位）    │
+│  EF Core + MySQL（配置仓储 + 迁移）                             │
+│  ConfigService（appsettings.json）                             │
+│  Logger（Logs/日期/分类.txt）                                  │
+└───────────────────────────────────────────────────────────────┘
+```
+
+### 4.2 分层职责与依赖规则
+
+| 层 | 职责 | 依赖方向 |
+|---|---|---|
+| Presentation | 展示与交互 | 依赖 Application，不依赖 Infrastructure |
+| Application | 业务编排与调度 | 依赖 Domain、Runtime Store、基础设施接口 |
+| Domain | 纯业务对象，无外部依赖 | 不依赖任何层 |
+| Runtime Store | 内存运行态容器 | 由 Application 持有与访问 |
+| Infrastructure | 驱动、仓储、日志、配置 | 实现 Application 定义的接口，依赖 Domain |
+
+**硬性规则**：
+
+- Domain 不得引用 EF Core、PLC 库、WPF
+- Presentation 不得出现 SqlConnection、驱动 SDK、状态机步骤操作
+- Application 通过接口访问 Infrastructure，不直接 new 具体实现
+- 状态写入遵循"单写者原则"（见 §12.3）
+
+### 4.3 使用的设计模式
+
+| 模式 | 位置 | 解决什么问题 |
+|---|---|---|
+| Layered Architecture | UI / Application / Domain / Infrastructure | 边界清晰、可替换 |
+| Registry Pattern | DeviceRegistry、CraneRegistry | 保证设备/天车全局唯一实例 |
+| Centralized Scheduler | CraneScheduler | 避免多车抢任务产生竞态 |
+| Worker Pattern | CraneWorker（每台天车一个） | 集中分配、独立执行 |
+| State Machine Pattern | CraneStateMachine | 机械动作分步、不阻塞 |
+| Strategy Pattern | ITransferHandler（按设备类型） | 不同设备握手差异 |
+| Snapshot Pattern | Signals 快照、CandidateTaskPool | 解决信号一致性与任务重算 |
+| Reservation / Ownership | 设备预约 | 设备资源归属明确 |
+| Interval Lock | RightOfWayManager | 天车 X 区间互斥、防撞 |
+| Single Source of Truth | 工件唯一对象、位置唯一来源、预约唯一来源 | 避免状态分歧 |
+| Single Writer Principle | Collector 写 Signals，StateMachine 写 Step | 避免并发写 |
+| Dependency Injection | 全模块通过接口注入 | 解耦、可测试 |
+
+---
+
+## 5. 解决方案结构
+
+采用多项目分层，用编译期引用关系强制边界：
+
+```
+AutomatedLine.sln
+├─ src/
+│  ├─ AutomatedLine.Domain/
+│  │   ├─ Workpieces/   WorkpieceInfo, WorkpieceRuntime, WorkpieceTask, WorkpieceLocation
+│  │   ├─ Devices/      DeviceBase, ForkMachine, BoringMachine, LatheMachine,
+│  │   │                GrinderMachine, BalancingMachine, MarkerMachine, CheckMachine
+│  │   ├─ Cranes/       Crane, CraneConfig, CraneSignals, CraneRuntime
+│  │   ├─ Tasks/        TransportTask, TransportStep
+│  │   ├─ Routing/      ProcessRoute, ProcessNode
+│  │   └─ Spatial/      XInterval（路权区间值对象）
+│  │
+│  ├─ AutomatedLine.Application/
+│  │   ├─ Abstractions/     所有 I* 接口
+│  │   ├─ Line/             LineControlService
+│  │   ├─ Collection/       DeviceStateCollector
+│  │   ├─ Generation/       TransportTaskGenerator
+│  │   ├─ Scheduling/       CraneScheduler
+│  │   ├─ Workers/          CraneWorker, CraneStateMachine
+│  │   ├─ Reservations/     ResourceReservationManager
+│  │   ├─ RightOfWay/       RightOfWayManager
+│  │   ├─ Alarms/           AlarmManager, TaskAbortCoordinator
+│  │   └─ Handlers/         ITransferHandler + 各设备 Handler
+│  │
+│  ├─ AutomatedLine.Infrastructure/
+│  │   ├─ Drivers/          驱动接口实现 + 模拟驱动 Simulated*Driver
+│  │   ├─ Persistence/      AppDbContext, 配置实体, Repository, Migrations
+│  │   ├─ Config/           ConfigService（appsettings.json）
+│  │   └─ Logging/          Logger
+│  │
+│  └─ AutomatedLine.Ui/     （原 AutomatedLine.Wpf，见下方命名说明）
+│      ├─ App.xaml(.cs)     DI 装配
+│      ├─ Views/            Main, Crane, Device, Process, Params, Screen, Alarm
+│      ├─ ViewModels/
+│      ├─ Messages/
+│      ├─ Controls/
+│      ├─ Converters/
+│      ├─ Resources/
+│      └─ appsettings.json
+│
+├─ Docs/      Registers/ Protocols/ DataDictionary/ Architecture.md
+└─ Configs/
+```
+
+### 5.1 项目引用关系
+
+```
+AutomatedLine.Ui             → AutomatedLine.Application
+AutomatedLine.Ui             → AutomatedLine.Infrastructure   （仅用于 DI 注册）
+AutomatedLine.Application    → AutomatedLine.Domain
+AutomatedLine.Infrastructure → AutomatedLine.Application、AutomatedLine.Domain
+AutomatedLine.Domain         → （无）
+```
+
+> 说明：Ui 引用 Infrastructure 仅为在 `App.xaml.cs` 注册实现，ViewModel 不直接使用其类型。
+>
+> **命名说明**：UI 项目命名为 `AutomatedLine.Ui` 而非 `AutomatedLine.Wpf`。
+> 原因是 UI 采用 WPF UI（lepoco）主题库，其命名空间为 `Wpf.Ui`；
+> 若项目命名空间以 `.Wpf` 结尾，`Wpf.Ui` 会被解析为本地命名空间 `AutomatedLine.Wpf.Ui` 而产生编译错误，故改用 `Ui`。
+>
+> **依赖补充**：Infrastructure 需实现 Application 定义的接口（`IConfigService`、`IAppLogger` 等），
+> 因此实际引用 Application（§4.2 的"Infrastructure 实现 Application 定义的接口"），
+> 原 §5.1 仅写 Infrastructure → Domain 无法满足该职责，现已补正。
+
+---
+
+## 6. 领域模型（Domain）
+
+领域模型只表达业务对象，不关心数据库、PLC 协议、页面。
+
+### 6.1 工件模型
+
+```
+WorkpieceTask
+├── WorkpieceInfo       工件自身数据（不变）
+└── WorkpieceRuntime    运行状态（可变）
+```
+
+**WorkpieceInfo（只存工件本身，创建后不变）**
+
+| 字段 | 说明 |
+|---|---|
+| RuntimeId | 运行期唯一标识（内存生成） |
+| PlateNo | 板号 |
+| SerialNo | 序号 |
+| Diameter | 直径 |
+| Length | 长度 |
+| LeftPlugThickness | 左堵厚 |
+| RightPlugThickness | 右堵厚 |
+
+**WorkpieceRuntime（只存运行状态，随流程变化）**
+
+| 字段 | 说明 |
+|---|---|
+| CurrentProcess | 当前工序 |
+| CurrentLocation | **位置唯一事实来源** |
+| TaskState | 任务状态 |
+| CreatedAt | 创建时间 |
+
+**WorkpieceLocation（位置枚举，权威来源）**
+
+```
+Queue          在等待队列
+Device(id)     位于某台设备上
+Crane(id)      位于某台天车上
+Finished       已完成下线
+Discarded      已丢弃（异常）
+```
+
+> **位置唯一事实来源规则（重要）**
+>
+> 设备与天车的"当前工件"不得各自独立写状态。位置变化**只允许**由天车状态机在"取放料确认成功"的那一刻单点写入 `WorkpieceRuntime.CurrentLocation`；设备/天车的 `CurrentWorkpiece` 只是查询派生的结果或只读缓存，不作为权威状态。谁在什么时机写，见 §12.3 单写者原则。
+
+### 6.2 设备模型
+
+采用"**一个物理设备 = 一个运行时对象实例**"的方式。例如 `LatheMachine` 类会实例化出 `Lathe01 / Lathe02 / Lathe03`。
+
+```
+DeviceBase
+├── Config              数据库配置（身份、连接、位置、能力）
+├── Signals             PLC 当前快照
+├── IsConnected         连接状态
+├── CurrentWorkpiece    当前工件（只读派生）
+└── ResourceState       资源可用性
+```
+
+**设备分类（按需扩展）**
+
+| 类型 | 类 | 备注 |
+|---|---|---|
+| 上料架 | LoadRack | 仅上料，无加工 |
+| 货叉 | ForkMachine | 是否参与搬运以现场为准 |
+| 双头镗 | BoringMachine | |
+| 斜床 | LatheMachine | N 台 |
+| 研磨机 | GrinderMachine | N 台 |
+| 动平衡机 | BalancingMachine | |
+| 打号机 | MarkerMachine | 是否上线以现场为准 |
+| 验点机 | CheckMachine | 是否上线以现场为准 |
+| 下料架 | UnloadRack | 仅下料 |
+
+**关于信号（Signals）**：每个设备类内部定义自己的信号点位（地址、数据类型、含义、读写权限），这些定义写在**代码类**里，不进数据库。原因是点位与 PLC 程序强耦合，属于工程常量，放代码里更便于版本管理和review。
+
+### 6.3 天车模型
+
+"**一台物理天车 = 一个 Crane 实例**"。
+
+```
+Crane01
+├── Config              数据库配置（范围、宽度、速度、加减速、安全位等）
+├── Signals             PLC 快照（X/Y/Z、到位、报警、伴信号、连接）
+├── CurrentWorkpiece    当前工件（只读派生）
+└── Runtime
+    ├── CurrentTask     当前正式任务
+    ├── State           天车状态
+    ├── Step            状态机步骤
+    └── LockedInterval  当前持有的路权区间（执行期间）
+```
+
+### 6.4 搬运任务模型
+
+```
+TransportTask
+├── TaskId
+├── WorkpieceRuntimeId   关联工件
+├── SourceDeviceId       源设备
+├── TargetDeviceId       目标设备
+├── SourceX / TargetX    两端设备 X 坐标（用于计算路权区间）
+├── Priority
+└── State                分配给谁、执行到哪
+```
+
+### 6.5 工艺路线模型
+
+```
+ProcessRoute
+└── ProcessNode[]
+    ├── Process         工序枚举
+    ├── DeviceType      对应设备类型
+    └── IsOptional      是否可选
+```
+
+下一工序由 `ProcessRoute.GetNext(CurrentProcess)` **现算**，不持久化。工艺路线的最终内容以现场为准，v1 先按默认顺序内置，后续可改为从数据库读取。
+
+### 6.6 路权区间值对象（XInterval）
+
+```
+XInterval
+├── Min        区间左端（含）
+└── Max        区间右端（含）
+```
+
+提供两个关键能力：
+
+- `Overlaps(other)`：判断两个区间是否相交
+- `FromTask(sourceX, targetX, craneWidth, safetyMargin)`：由任务两端设备坐标和天车宽度计算区间
+
+具体计算规则见 §8.7。
+
+---
+
+## 7. 运行时内存层（Runtime Store）
+
+所有运行任务**只存在内存**，程序关闭后消失，这是刻意的设计。
+
+| 容器 | 职责 |
+|---|---|
+| RuntimeTaskManager | 全线工件任务内存总表（唯一） |
+| DeviceRegistry | 全线唯一设备对象目录 |
+| CraneRegistry | 全线唯一天车对象目录 |
+| CandidateTaskPool | 当前理论可执行任务快照 |
+| ReservationManager | 当前正式任务占用的设备资源 |
+| RightOfWayManager | 当前已锁定的天车 X 区间集合 |
+| ActiveAlarmStore | 当前活动报警 |
+
+**Registry 示例**
+
+```
+DeviceRegistry
+  1 → Fork01
+  2 → Boring01
+  3 → Lathe01
+  4 → Lathe02
+  5 → Grinder01
+```
+
+`DeviceRegistry.Get(3)` 永远返回**同一个** `Lathe01` 实例。这样就杜绝了"UI 显示一个 Lathe01、任务生成器又 new 一个 Lathe01"导致的状态不同步问题。
+
+---
+
+## 8. 应用服务层（Application）
+
+应用服务层是整个系统的控制中心。每个服务都定义接口，通过 DI 注入。
+
+### 8.1 LineControlService
+
+| 职责 | 说明 |
+|---|---|
+| StartLine | 启动线路，恢复调度与 Worker |
+| PauseLine | 请求暂停 |
+| ResumeLine | 恢复运行 |
+| EnterFaultPause | 故障暂停 |
+
+启动流程：`StartLine()` → 冷启动核对（§10.5）→ Scheduler 恢复派发 → Worker 恢复运行。
+
+### 8.2 DeviceStateCollector
+
+- 周期（默认 500ms）读取所有设备与天车 PLC 信号
+- 解析为完整 Signals 对象后**整体替换**，不逐字段更新
+- 更新连接状态、判定快照是否过期
+- **只采集，不调度，不发送工艺动作**
+
+之所以要"整体替换"而不是"逐字段更新"，是因为逐字段更新在读取过程中可能出现前后不一致（读到一半状态变了）。整体替换保证同一份快照来自同一个采集时刻。
+
+每份快照包含：
+
+```
+CapturedAt       采集时间
+Sequence         递增版本
+ConnectionState  Connected / Disconnected
+Quality          Good / Stale / Bad
+```
+
+### 8.3 TransportTaskGenerator
+
+每 500ms 根据当前内存状态**重建**候选任务池（Snapshot / Rebuild 模式，不是传统任务队列）。  这个就是根据plc信号 和内存的信号 生成理论可执行的任务 可能是有多个
+
+计算依据：
+
+```
+工件在什么位置？
+当前工序是什么？
+下一工序是什么？
+源设备是否具备出料条件？
+目标设备是否空闲、连接正常、可加工、请求上料？
+目标设备是否符合该工件加工范围（直径/长度）？
+该任务是否已被预约？
+多台同类设备时按 tie-break 规则选择（§8.3.1）
+```
+
+输出仅为候选：
+
+```
+CandidateTask
+  Workpiece → WP001
+  Source    → Boring01
+  Target    → Lathe02
+  Priority  → 100
+```
+
+**候选任务不代表已派发，也不代表天车已开始搬运**。它只是"当前理论上可以做的事"。
+
+#### 8.3.1 同类多设备目标选择规则
+
+当某个工序有多台同类设备（如两台斜床）时，按以下优先级选择：
+
+1. 加工范围匹配（直径/长度在设备能力内）
+2. 空闲且请求上料、连接正常、无报警
+3. 距离最近（由天车当前位置或源设备位置估算）
+4. 负载均衡（当前在制数量少者优先）
+
+### 8.4 CraneScheduler（集中式调度）
+
+全系统只有一个调度器，统一决定"哪个任务 → 哪台天车"，而不是让每台天车自己去抢任务。集中调度的好处是：**不会出现两台天车同时抢到同一个任务**。
+
+输入：
+
+```
+CandidateTaskPool
+CraneRegistry
+ReservationManager
+RightOfWayManager
+```
+
+判断：
+
+```
+天车是否 Idle、是否在安全位？（空闲车应已回到安全位）
+是否连接？
+是否报警？
+任务的源/目标 X 是否都在本天车 StartX/EndX 范围内？
+任务 Priority？
+距离？
+两端的设备是否可预约？
+路权区间是否可获取？（直接 TryAcquire，判断即加锁）
+```
+
+**派发流程**：
+
+```
+候选任务
+→ 按"范围匹配 + 优先级 + 距离"选出最合适的 Crane
+→ RightOfWayManager.TryAcquire(任务区间)     ← 失败：本周期跳过，任务留在池中（此时尚未占用天车，无需回滚）
+→ ReservationManager.TryReserve(Source, Target) ← 失败：释放路权，跳过
+→ 分配 Crane 执行锁
+→ Crane.CurrentTask = TransportTask
+→ CraneWorker 开始推进状态机
+```
+
+> **关于路权与竞态**：路权获取是**原子操作**，谁先拿到谁执行。即使两台天车的调度判断几乎同时发生（例如相隔 0.05s），后到的 `TryAcquire` 会因为区间相交而失败并直接返回，不会出现两台同时进入冲突区间的情况。详见 §8.7。
+
+> **关于路权获取时机（唯一入口）**：路权统一在**派发时**由 `CraneScheduler` 原子获取，状态机内**不再有获取步骤**。"判断路权是否可获取"与真正加锁就是同一次 `TryAcquire`，不存在"先审核再锁"的空档（§17 不变式 7）。拿不到路权的任务本周期不派发，天车也就永远不会处于"等待路权"状态。
+
+### 8.5 CraneWorker 与状态机
+
+一台天车一个 Worker，只推进自己的 `CurrentTask`，不抢别的任务。
+
+```
+Crane01Worker → 只推进 Crane01 状态机
+Crane02Worker → 只推进 Crane02 状态机
+```
+
+状态机（每周期只执行少量动作，**绝不阻塞数十秒**）：
+
+```
+Idle
+→ PreCheck                  检查连接、报警、范围（路权已在派发时取得）
+→ ConfirmSource             二次确认源设备状态
+→ MoveToSource              移动到位
+→ PickHandshake             取料握手
+→ PickConfirmed             取料确认
+→ RetractZ                  回安全高度
+→ MoveToTarget              移动到位
+→ PlaceHandshake            放料握手
+→ PlaceConfirmed            放料确认
+→ RetractZ                  回安全高度
+→ ReturnToSafeX             回到本车安全位置
+→ ReleaseRightOfWay         释放路权区间
+→ ReleaseReservation        释放设备预约
+→ Complete                  任务完成
+→ Idle
+```
+
+任一步运动/交互/握手超时或 PLC·天车报警 → `Faulted` → `TaskAbortCoordinator.Abort(task)`。（通信闪断不在此列，走重连重试，见 §10.4。）
+
+### 8.6 ResourceReservationManager
+
+- 管理**设备资源**的预约关系
+- 是设备预约状态的**唯一来源**；设备对象本身不保存 `IsReserved`
+- 提供 `TryReserve(source, target)`、`Release(taskId)`、超时回收
+
+### 8.7 RightOfWayManager（任务 X 区间路权）
+
+这是本系统防止天车相撞的核心机制。**管的是空间，和设备预约是两回事。**
+
+#### 8.7.1 路权单位
+
+**一个正在执行的任务 = 一个 X 区间锁。**
+
+区间由"源设备 X、目标设备 X、天车宽度"共同决定：
+
+```
+设 源设备 X = x1，目标设备 X = x2，天车宽度 = w，安全余量 = m（可选，默认 0）
+x_min = min(x1, x2)
+x_max = max(x1, x2)
+
+路权区间 = [ x_min - w/2 - m ,  x_max + w/2 + m ]
+```
+
+也就是两个设备 X 坐标形成的范围，两端各外扩半个天车宽度，再各加一点安全余量。天车宽度来自数据库 `CraneConfig.Width`。
+
+#### 8.7.2 核心规则
+
+| 规则 | 内容 |
+|---|---|
+| 锁单位 | 一个任务一个区间 |
+| 获取 | 原子 `TryAcquire`，与已锁集合求交，相交则失败 |
+| 获取时机 | **派发时**由 `CraneScheduler` 原子获取（判断即加锁，见 §8.4）；状态机内不再获取 |
+| 失败处理 | 本周期跳过该任务；调度器改派其它任务，或下周期重试（此时尚未占用天车，无回滚） |
+| 释放时机 | 任务完成、天车 X **回到安全位置后**，释放路权 + 天车锁 |
+| 安全位 | 不参与路权；由现场设置保证不在互斥区，也不影响其它天车 |
+| 死锁 | 由于空闲天车退出路权、任务结束即释放，不存在长期互等 |
+
+#### 8.7.3 示例（重点，直接体现正确性）
+
+假设：
+
+```
+天车1 活动范围 0 ~ 20000
+天车2 活动范围 15000 ~ 30000
+
+任务1 涉及设备 X = 5000 和 18000   → 只能分给天车1
+任务2 涉及设备 X = 17000 和 25000  → 只能分给天车2
+```
+
+执行过程：
+
+```
+时刻 T：
+  天车1 准备执行任务1，尝试锁 [5000 - w/2, 18000 + w/2] → 成功，加锁
+
+时刻 T + 0.05s：
+  天车2 准备执行任务2，尝试锁 [17000 - w/2, 25000 + w/2]
+  → 发现 17000 落在天车1已锁区间内（区间相交）
+  → TryAcquire 失败，直接 return
+  → 天车2 若有其它任务就执行其它的，没有就下个周期继续判断
+
+时刻 T + Δ：
+  天车1 完成任务，X 回到安全位置
+  → 释放路权区间 [5000 - w/2, 18000 + w/2]
+  → 释放天车锁，任务结束
+
+之后：
+  天车2 再尝试任务2 → 加锁成功 → 执行
+```
+
+这样就从机制上保证了**两台天车不可能同时进入冲突区间**，且不需要任何动态避让算法。
+
+> **唯一前提**：天车从安全位到源的往返路径，除任务区间本身外，不穿过其它天车的互斥区。该前提由现场安全位的设置来保证。
+
+#### 8.7.4 为什么不用"分段交叉区配置"
+
+早期方案考虑过把交叉区切成独立段（CrossZone），每段单独管理。讨论后放弃，原因：
+
+- 交叉区往往很小，配置成独立段意义不大
+- 天车任务本身就跨越一段连续 X 范围，用"任务区间锁"更自然
+- 区间锁实现简单、正确性一眼可验证
+- 安全位已经把空闲天车移出了互斥区，无需额外机制
+
+### 8.8 AlarmManager（横切）
+
+任何模块发现异常都可以调用 `_alarmManager.Raise(...)`：
+
+```
+PLC 通信失败 / 状态机超时 / 天车报警 / 设备报警 / 预约超时 / 路权异常
+        ↓
+AlarmManager
+        ↓
+内存 ActiveAlarm + Logger 落盘（alarm.txt）
+```
+
+报警页面直接读 `ActiveAlarmStore`，不需要读磁盘，保证页面刷新快。
+
+### 8.9 TaskAbortCoordinator
+
+任务异常终止的统一入口，详见 §10.4。
+
+### 8.10 ITransferHandler（策略）
+
+不同设备的取放料握手不完全一致（双头镗、斜床、研磨机各有差异），通过策略隔离，避免复制整套状态机：
+
+```csharp
+public interface ITransferHandler
+{
+    bool CanPick(BaseDevice device);
+    bool CanPlace(BaseDevice device);
+    Task RequestPickAsync(Crane crane, BaseDevice source, CancellationToken ct);
+    Task RequestPlaceAsync(Crane crane, BaseDevice target, CancellationToken ct);
+    bool IsPickCompleted(Crane crane, BaseDevice source);
+    bool IsPlaceCompleted(Crane crane, BaseDevice target);
+}
+```
+
+实现：`BoringTransferHandler`、`LatheTransferHandler`、`GrindingTransferHandler` 等。
+
+**取放料确认规则**（需与 PLC 点位对齐，点位在代码类中定义）：
+
+```
+取料确认 = 到位 + 设备允许取 + 抓取动作 + 天车有料信号=1 + 设备有料信号=0
+放料确认 = 到位 + 目标允许放 + 松开动作 + 目标有料信号=1 + 天车有料信号=0
+```
+
+确认成功后单点写入：
+
+```
+取料确认：Source.CurrentWorkpiece = null；Crane 持有；WorkpieceRuntime.CurrentLocation = Crane(id)
+放料确认：Crane.CurrentWorkpiece = null；Target.CurrentWorkpiece = WP；CurrentLocation = Device(id)
+          WorkpieceRuntime.CurrentProcess = 目标工序
+```
+
+---
+
+## 9. 基础设施层（Infrastructure）
+
+### 9.1 驱动
+
+| 驱动 | 说明 |
+|---|---|
+| IDeviceDriver | 设备 PLC 通信接口 |
+| ICraneDriver | 天车通信接口：写目标与动作字，读 X/Y/Z、到位、报警、伴信号 |
+| SimulatedDeviceDriver / SimulatedCraneDriver | 模拟实现，用于未接 PLC 时跑通全流程 |
+| 真实实现（Modbus / MC / TCP） | 待现场协议确定后补充 |
+
+设计要点：
+
+- 上层只依赖接口，不依赖具体协议
+- 信号点位（地址、数据类型）定义在设备/天车**代码类**中，不进数据库
+- 当前阶段不接现场 PLC，先用模拟驱动开发与验证，后续替换真实实现即可，业务层零改动
+
+### 9.2 数据库
+
+- EF Core + MySQL，Code First + Migration
+- 只保存配置，不保存工件任务与报警运行态
+
+### 9.3 配置
+
+- `appsettings.json` 保存程序参数（周期、超时、日志、重连等）
+- 页面"参数设置"读写该文件（或映射的 ConfigService 内存模型）
+- 敏感信息不硬编码
+
+### 9.4 日志
+
+```
+Logs/
+└── 2026-09-06/
+    ├── system.txt
+    ├── communication.txt
+    ├── task.txt
+    ├── alarm.txt
+    └── operation.txt
+```
+
+- 按天分目录、按类别分文件
+- 异常信息落盘的同时写入内存报警
+- 支持保留天数与单文件容量上限
+
+---
+
+## 10. 关键流程
+
+### 10.1 正常任务流
+
+```
+用户添加工件
+      ↓
+RuntimeTaskManager.Add(WP001) → WorkpieceRuntime.CurrentLocation = Queue
+      ↓
+Collector 采集设备快照（周期 500ms）
+      ↓
+Generator 发现：源设备已加工完成、目标设备空闲且请求上料
+      ↓
+CandidateTaskPool: WP001 Boring01 → Lathe02
+      ↓
+Scheduler 选中 Crane01 → 获取路权区间 → 预约 Boring01、Lathe02 → 派发
+      ↓
+Crane01Worker 推进状态机
+      ↓
+取料确认：Boring01.CurrentWorkpiece = null；Crane01 持有；Location = Crane(01)
+      ↓
+放料确认：Lathe02.CurrentWorkpiece = WP001；Location = Device(02)；CurrentProcess = Lathe
+      ↓
+回安全位 → 释放路权与预约
+      ↓
+下一周期继续生成下一道搬运任务
+```
+
+### 10.2 派发时序
+
+```
+CandidateTaskPool
+      ↓
+CraneScheduler
+      ↓
+RightOfWayManager.TryAcquire(任务区间)      ← 唯一获取入口；失败则跳过该任务
+      ↓
+ReservationManager.TryReserve(Source, Target) ← 失败则释放路权并跳过
+      ↓
+Acquire crane execution lock（此后才占用天车）
+      ↓
+Crane.CurrentTask = TransportTask
+      ↓
+CraneWorker 状态机启动
+```
+
+### 10.3 执行时序
+
+```
+CraneWorker
+      ↓
+CraneStateMachine
+      ↓
+ConfirmSource（路权已在派发时取得，此处不再获取）
+      ↓
+取料 → 引用转移 → 搬运 → 放料 → 引用转移
+      ↓
+更新 WorkpieceRuntime.CurrentProcess
+      ↓
+ReturnToSafeX（回安全位）
+      ↓
+释放 RightOfWay、释放 Reservation
+      ↓
+Crane.CurrentTask = null；State = Idle；Step = 0
+```
+
+### 10.4 异常任务放弃（已确认策略）
+
+异常按**故障分级**处理，并非所有异常都丢弃任务：
+
+| 级别 | 触发 | 处理 |
+|---|---|---|
+| 瞬时故障 | PLC 通信闪断、天车/设备连接丢失 | **不丢弃任务**：进入重连/重试，连接恢复后继续该任务；超过重连上限才升级为硬故障 |
+| 硬故障 | 运动到位超时、取料/放料/握手超时、设备报警、天车报警 | 走下方任务丢弃流程 |
+
+> 通信类问题默认按瞬时故障处理（重连重试）。一次通信抖动不应导致工件身份永久丢失，也不应暂停整线。
+
+**硬故障处理流程**：
+
+```
+设备报警 / 天车报警 / 运动·交互·握手超时
+        ↓
+   AlarmManager
+        ↓
+TaskAbortCoordinator.Abort(task)
+   1. 停止该任务后续 PLC 动作
+   2. 清除该任务握手输出
+   3. 终止状态机 → Faulted
+   4. 释放源设备预约
+   5. 释放目标设备预约
+   6. 释放天车执行锁
+   7. 释放该任务持有的路权区间
+   8. 清除设备/天车的任务运行态引用（CurrentWorkpiece、CurrentTask）
+   9. 从 RuntimeTaskManager 移除任务（丢弃，当作没这个任务）
+  10. 物理上仍有料的资源标 BlockedByPhysicalState（不得清成空闲，见安全不变式）
+  11. LineState = PausedByFault（整线暂停，此为显式决策）
+  12. 写 task.txt + alarm.txt
+```
+
+**安全不变式（必须保留）**：
+
+> 释放的仅限**逻辑锁**。可以清除的是任务与设备/天车的内存引用；资源能否被调度仍由实时 PLC 状态决定——若设备/天车物理上仍有料，`ResourceState = BlockedByPhysicalState`，不参与调度，绝不能被清成空闲。
+
+**已知后果**：工件信息随任务丢弃永久丢失。实物仍卡在资源上时，需要操作员处理掉实物后，在报警页点击 **"清除该资源物理阻塞"**（对应需求中的人工异常处理按钮）恢复资源。
+
+恢复线路：操作员回主页面点击"启动线路"，调度器重新评估所有 PLC 正常的资源。
+
+### 10.5 冷启动核对
+
+启动线路时执行：
+
+```
+采集全部设备/天车 PLC 状态
+      ↓
+内存任务为空
+      ↓
+若某资源显示"有料"但内存无对应任务
+      ↓
+   产生报警
+   该资源标记 BlockedByPhysicalState
+   不参与调度
+      ↓
+操作员处理实物后点击"清除该资源物理阻塞"
+```
+
+---
+
+## 11. 状态定义
+
+### LineState（线路状态）
+
+```
+Stopped          未启动
+Starting         启动中
+Running          自动运行
+PauseRequested   请求暂停
+Paused           已暂停
+PausedByFault    故障暂停
+```
+
+### WorkpieceState（工件任务状态）
+
+```
+Waiting      等待中
+Assigned     已派发
+Running      执行中
+Completed    已完成
+Discarded    已丢弃
+```
+
+### CraneState（天车状态）
+
+```
+Idle            空闲
+Reserved        已分配任务、尚未执行
+Running         执行中
+WaitingDevice   等待设备
+Paused          暂停
+Faulted         故障
+Unavailable     不可用
+```
+
+### ResourceState（资源可用性）
+
+```
+Available              可用
+Reserved               逻辑预约中
+Busy                   加工/占用中
+Alarm                  报警
+Disconnected           连接断开
+BlockedByPhysicalState 来自 PLC 真实状态（有未知工件/伴信号等）
+```
+
+> `Reserved` 为逻辑预约；`BlockedByPhysicalState` 为物理状态，二者独立，互不替代。
+
+---
+
+## 12. 线程与周期模型
+
+### 12.1 逻辑循环
+
+不使用固定系统线程，采用 `Task + async/await + CancellationToken` 创建长期运行的逻辑循环，实际线程由 .NET 线程池调度。
+
+```
+UI Thread
+  ├─ DeviceStateCollector     每 500ms
+  ├─ TransportTaskGenerator   每 500ms
+  ├─ CraneScheduler           每 500ms / 1s
+  ├─ CraneWorker × N          各自循环
+  └─ AlarmLogWriter                         报警落盘
+```
+
+### 12.2 周期可配置
+
+采集周期、候选生成周期、调度周期、各类超时均来自 `appsettings.json`。
+
+### 12.3 单写者原则
+
+每个关键状态只有一个"写者"，避免并发写导致状态错乱：
+
+| 数据 | 唯一写者 |
+|---|---|
+| Device.Signals / Crane.Signals | DeviceStateCollector |
+| Crane.Runtime.Step | 对应 CraneWorker / 状态机 |
+| Crane.CurrentTask | CraneScheduler（派发）/ Worker（完成清空） |
+| WorkpieceRuntime.CurrentLocation | 天车状态机（取放料确认时） |
+| Reservation 状态 | ResourceReservationManager |
+| 路权区间 | RightOfWayManager |
+| ActiveAlarm | AlarmManager |
+
+---
+
+## 13. 页面设计（Presentation）
+
+所有页面只做三件事：**展示状态、接收操作、调用应用服务**。绝不直接读写 PLC、不修改状态机步骤、不抢占锁。
+
+### 13.1 主页面
+
+- 线路状态：自动运行 / 已暂停 / 故障暂停 / 未启动
+- [启动线路]
+- 添加任务：弹窗录入工件信息 → `RuntimeTaskManager.Add(...)`
+- 当前任务列表：工件、当前设备、当前工序、下一工序、状态
+- 暂停 / 清除（仅允许清除尚未派发的等待任务）
+- 当前异常摘要
+
+### 13.2 天车管理
+
+- 列表：编号、名称、通信状态、IP、端口、协议、XYZ、状态、伴信号、当前任务、报警
+- 配置：各轴速度/加减速、StartX/EndX、天车宽度、安全位、安全 Z、重连参数（数据库）
+
+### 13.3 设备管理
+
+- 列表：编号、名称、类型、通信状态、IP、端口、物理位置、状态、当前工件、报警
+- 详情：基础配置 / 实时信号（按设备类型显示专属信号）/ 当前工件
+
+### 13.4 工序展示（只读）
+
+```
+上料架 → 双头镗 → 斜床 → 研磨机 → 动平衡 → 下料
+```
+
+每节点显示：关联设备、运行中数量、等待数量、可用设备数、报警设备数。
+（v1 只读；工艺顺序以现场确认为准。）
+
+### 13.5 参数设置
+
+按类别展示 `appsettings.json` 参数：采集、调度、状态机、日志等。标明"立即生效"或"下次启动线路生效"。
+
+### 13.6 大屏展示（只读）
+
+- 设备卡片 + 天车卡片，颜色状态：
+
+| 颜色 | 含义 |
+|---|---|
+| 灰色 | 未连接、数据过期、未启用 |
+| 绿色 | 空闲且可调度 |
+| 蓝色 | 运行中 |
+| 黄色 | 等待设备、暂停中 |
+| 红色 | PLC 报警、通信故障、不可调度 |
+| 紫色 | 任务已丢弃，现场状态未恢复 |
+
+- 悬浮显示：设备/天车信号、当前工件信息、当前工序、报警、XYZ、当前锁定区间、可执行任务
+- 大屏不提供任何控制按钮
+
+### 13.7 报警处理
+
+- 活动报警：时间、等级、来源、内容、关联工件、系统动作
+- 任务丢弃记录：时间、工件、异常来源、执行到哪一步、释放了哪些资源
+- 历史日志查询
+- 人工异常处理按钮（受限）：补内存、释放逻辑锁、清除物理阻塞
+
+---
+
+## 14. 配置与数据库设计
+
+### 14.1 appsettings.json 分类
+
+```
+Collection   设备采集周期、天车位置采集周期、通信超时
+Scheduling   候选任务生成周期、调度周期、设备预约超时
+StateMachine 到位超时、取料确认超时、放料确认超时、握手超时
+Logging      日志目录、保留天数、单文件最大容量
+```
+
+### 14.2 MySQL 配置表（初稿，字段待细化）
+
+| 表 | 说明 |
+|---|---|
+| CraneConfig | 天车 ID、序号、名称、协议、IP、端口、StartX/EndX、**天车宽度**、安全位 X、安全 Z、各轴速度/加减速 |
+| DeviceConfig | 设备 ID、名称、类型、协议、IP、端口、物理 X 位置、安全位、加工范围（直径/长度） |
+| ProcessRouteConfig | 工序顺序、对应设备类型、是否可选（v1 可先内置，后续再入库） |
+
+> 数据库**不保存**：工件任务、报警运行态、信号点位、交叉区配置。
+>
+> 信号点位定义在代码类中；路权区间由设备 X 和天车宽度实时计算，无需单独配置。
+
+---
+
+## 15. 开发阶段规划
+
+| 阶段 | 内容 | 依赖 |
+|---|---|---|
+| P0 | 解决方案骨架、4 个项目、DI、appsettings、日志、MySQL DbContext、基础枚举/接口、迁移 | 无 |
+| P1 | Domain、Registry、RuntimeTaskManager、主页面（内存任务增删） | P0 |
+| P2 | 采集层（驱动接口 + 模拟驱动 + 快照 + 连接状态 + 冷启动核对） | P0 |
+| P3 | 候选任务生成 + 调度 + 预约 + 路权 | P1/P2 |
+| P4 | 天车状态机 + Worker | P3 |
+| P5 | 大屏 + 报警页 | P4 |
+| P6 | 异常丢弃 + 人工恢复（释放锁 / 清除物理阻塞） | P4 |
+| P7 | 接真实 PLC（按现场协议实现驱动） | 现场协议确定 |
+
+> 因当前不接 PLC，P2~P6 全部可用模拟驱动推进，不被现场协议阻塞。
+
+---
+
+## 16. 待确认事项
+
+以下事项待现场或后续确认，**不再阻塞主体开发**（模拟驱动可先行）：
+
+1. **完整工艺路线**：逐节点列出；哪些设备可能缺失；货叉/打号机/验点机是否参与搬运（以现场为准）
+2. **PLC 协议与点位**：真实协议类型（Modbus TCP / 西门子 MC / 三菱 / 自定义 TCP）与各类信号地址，接入前确认；点位定义在代码类中
+3. **取放料物理反馈**：天车"有料/无料"、设备"夹紧/松开/请求上料"等信号是否齐备
+4. **配置表字段清单**：天车、设备、工艺表的最终字段定义
+5. **安全位坐标**：各天车安全位 X，需保证不在互斥区
+
+---
+
+## 17. 架构不变式（开发红线）
+
+1. 数据只有一个事实来源，谁修改谁明确
+2. 候选任务随时可以重算
+3. 正式任务一旦派发就属于某台天车
+4. 运动状态机不参与调度
+5. 设备预约与空间路权是两回事
+6. 异常只释放逻辑锁，绝不把仍有实物的资源判为空闲
+7. 路权获取必须原子，锁本身就是审核，不存在"先审核再锁"的空档
+8. 信号点位定义在代码类中，不进数据库
+
+---
+
+## 18. 附录：路权完整示例
+
+### 18.1 场景
+
+```
+天车1 活动范围：0 ~ 20000，宽度 w
+天车2 活动范围：15000 ~ 30000，宽度 w
+安全位：天车1 在 0，天车2 在 30000（均不在互斥区）
+```
+
+### 18.2 两个任务
+
+| 任务 | 设备A X | 设备B X | 路权区间 |
+|---|---|---|---|
+| 任务1 | 5000 | 18000 | [5000 - w/2, 18000 + w/2] |
+| 任务2 | 17000 | 25000 | [17000 - w/2, 25000 + w/2] |
+
+按天车范围，任务1 只能给天车1，任务2 只能给天车2。
+
+### 18.3 时序
+
+```
+T0        天车1 尝试锁 [5000-w/2, 18000+w/2] → 成功
+T0+0.05s  天车2 尝试锁 [17000-w/2, 25000+w/2]
+          → 17000 在 [5000-w/2, 18000+w/2] 内 → 相交 → 失败 return
+          天车2 不改动现场，若有其它任务则执行其它任务，否则下周期重试
+T0+Δ      天车1 完成任务 → X 回安全位 0 → 释放路权与天车锁
+T0+Δ+ε    天车2 重试 → 成功 → 执行任务2
+```
+
+### 18.4 结论
+
+- 两台天车**不可能同时进入冲突区间**
+- 无需动态避让算法
+- 无需交叉区分段配置
+- 唯一前提：安全位设置合理，往返路径不穿过他人互斥区
