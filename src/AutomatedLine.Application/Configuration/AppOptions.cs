@@ -18,6 +18,19 @@ public sealed class AppOptions
 
     /// <summary>日志类参数。</summary>
     public LoggingOptions Logging { get; set; } = new();
+
+    /// <summary>模拟相关参数（仅开发/联调期用）。</summary>
+    public SimulationOptions Simulation { get; set; } = new();
+}
+
+/// <summary>
+/// 模拟参数。用于未接现场 PLC 阶段自动生成样例配置，便于跑通全流程。
+/// 现场接入后应关闭，避免往配置表里塞演示数据。
+/// </summary>
+public sealed class SimulationOptions
+{
+    /// <summary>当设备/天车配置表为空时，是否自动写入一套样例数据。</summary>
+    public bool SeedSampleData { get; set; } = true;
 }
 
 /// <summary>采集参数。决定状态刷新的实时性与通信压力。</summary>

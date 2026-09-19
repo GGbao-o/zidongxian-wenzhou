@@ -1,5 +1,7 @@
 using System.Windows;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Collection;
+using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Infrastructure.Config;
 using AutomatedLine.Infrastructure.Logging;
@@ -42,7 +44,23 @@ public partial class App : System.Windows.Application
         ConfigureServices(builder.Services, builder.Configuration);
 
         _host = builder.Build();
+
+        // 先装载数据库配置为内存对象与驱动，再启动宿主：
+        // 这样采集器启动时注册表里已经有资源可采（架构文档 §8.2）
+        var loader = _host.Services.GetRequiredService<IConfigurationLoader>();
+        var loadResult = await loader.LoadAsync();
+        Console.WriteLine($"[App] 配置装载：设备 {loadResult.DeviceCount}、天车 {loadResult.CraneCount}、驱动 {loadResult.DriverCount}");
+
         await _host.StartAsync();
+
+        // 冷启动核对：等采集器跑一轮拿到信号后，检查现场是否有无法关联的内存在制品
+        var coldStartChecker = _host.Services.GetRequiredService<IColdStartChecker>();
+        await Task.Delay(700);
+        var blocks = coldStartChecker.Check();
+        if (blocks.Count > 0)
+        {
+            Console.WriteLine($"[App] 冷启动核对发现 {blocks.Count} 个物理阻塞资源");
+        }
 
         // 从容器解析主窗口与主 ViewModel，DataContext 通过 DI 注入，View 不 new ViewModel
         var mainWindow = _host.Services.GetRequiredService<MainWindow>();
@@ -94,6 +112,17 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IRuntimeTaskManager, RuntimeTaskManager>();
         services.AddSingleton<DeviceRegistry>();
         services.AddSingleton<CraneRegistry>();
+        services.AddSingleton<DriverRegistry>();
+
+        // 配置装载与冷启动核对
+        services.AddSingleton<IConfigurationLoader, ConfigurationLoader>();
+        services.AddSingleton<IColdStartChecker, ColdStartChecker>();
+
+        // 采集器：既作为 IDeviceStateCollector 供查询，也作为宿主后台服务随宿主启动/停止。
+        // 注册为单例并通过工厂复用同一实例，保证两者拿到的是同一个对象。
+        services.AddSingleton<DeviceStateCollector>();
+        services.AddSingleton<IDeviceStateCollector>(sp => sp.GetRequiredService<DeviceStateCollector>());
+        services.AddHostedService(sp => sp.GetRequiredService<DeviceStateCollector>());
 
         // 弹窗服务：ViewModel 通过接口请求对话框，不直接依赖 View
         services.AddSingleton<IDialogService, DialogService>();

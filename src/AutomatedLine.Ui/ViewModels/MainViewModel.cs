@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows.Media;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Line;
 using AutomatedLine.Ui.Services;
@@ -30,6 +31,9 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>弹窗服务。用于打开"添加工件"对话框。</summary>
     private readonly IDialogService _dialogService;
+
+    /// <summary>冷启动核对。启动线路时检查现场是否有无法关联的内存在制品。</summary>
+    private readonly IColdStartChecker _coldStartChecker;
 
     /// <summary>线路状态（枚举）。</summary>
     [ObservableProperty]
@@ -70,18 +74,21 @@ public partial class MainViewModel : ObservableObject
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="dialogService">弹窗服务</param>
+    /// <param name="coldStartChecker">冷启动核对</param>
     public MainViewModel(
         IConfigService configService,
         IRuntimeTaskManager taskManager,
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        IColdStartChecker coldStartChecker)
     {
         _configService = configService;
         _taskManager = taskManager;
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
         _dialogService = dialogService;
+        _coldStartChecker = coldStartChecker;
 
         // 任务表变化时刷新界面列表；事件可能在非 UI 线程触发，需切回 UI 线程
         _taskManager.Changed += OnTasksChanged;
@@ -134,8 +141,15 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void StartLine()
     {
+        // 启动前先做冷启动核对：现场有料但内存无任务 → 标记物理阻塞，防止被误判为空闲
+        var blocks = _coldStartChecker.Check();
+        if (blocks.Count > 0)
+        {
+            Console.WriteLine($"[MainViewModel] 冷启动核对发现 {blocks.Count} 个物理阻塞资源");
+        }
+
         LineState = LineState.Running;
-        Console.WriteLine("[MainViewModel] 启动线路（骨架占位）");
+        Console.WriteLine("[MainViewModel] 启动线路");
     }
 
     /// <summary>
