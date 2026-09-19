@@ -1,7 +1,8 @@
 # 数据字典（配置表）
 
 > 本文档是数据库配置表的字段定义来源，与 EF Core 实体一一对应。
-> 数据库**只存配置**：天车、设备、工艺路线；工件任务与报警运行态只存内存（见 Architecture.md §3.4、§14）。
+> 数据库**只存配置**：天车、设备；工件任务、报警运行态只存内存（见 Architecture.md §3.4、§14）。
+> 工艺路线顺序固定在代码中（Domain 的 `ProcessRoute`），不进数据库。
 > 枚举以字符串形式存储，便于现场直接读表排查问题。
 
 ## 1. CraneConfig（天车配置表）
@@ -48,19 +49,11 @@
 | Remark | varchar(200) | 否 | 备注 |
 | UpdatedAt | datetime | 是 | 最后更新时间（UTC） |
 
-## 3. ProcessRouteConfig（工艺路线配置表）
+## 3. 工艺路线（不进数据库）
 
-对应实体：`AutomatedLine.Infrastructure.Persistence.Entities.ProcessRouteConfig`
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| Id | int | 是 | 主键 |
-| StepOrder | int | 是 | 工艺链中的顺序，唯一 |
-| Process | varchar(30) | 是 | 工序枚举，见下方枚举表 |
-| DeviceType | varchar(30) | 是 | 该工序对应设备类型 |
-| IsOptional | bool | 是 | 是否可选（缺设备时可跳过） |
-| Remark | varchar(200) | 否 | 备注 |
-| UpdatedAt | datetime | 是 | 最后更新时间（UTC） |
+工艺顺序**固定在代码中**，由 `AutomatedLine.Domain.Routing.ProcessRoute` 提供。
+原因：车间排布一旦确定就不再调换设备，只有坐标可能微调，而坐标已由 `DeviceConfig.PositionX` 管理，
+固定顺序无需表驱动，避免多一处可能不一致的配置（Architecture.md §6.5 已同步）。
 
 ## 4. 枚举定义
 
@@ -72,4 +65,4 @@
 
 `Unknown` / `Loading` / `Forking` / `Boring` / `Lathing` / `Grinding` / `Balancing` / `Marking` / `Checking` / `Unloading`
 
-> 工艺顺序以现场确认为准；v1 先按默认固定流程内置，后续可改为完全由 ProcessRouteConfig 表驱动（Architecture.md §6.5、§16.1）。
+> 工艺顺序以现场确认为准；v1 固定内置在代码中，若将来确需运行期调整再改为表驱动（Architecture.md §6.5、§16.1）。

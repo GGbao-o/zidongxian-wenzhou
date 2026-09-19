@@ -86,38 +86,10 @@ namespace AutomatedLine.Infrastructure.Persistence.Migrations
                 })
                 .Annotation("MySql:CharSet", "utf8mb4");
 
-            migrationBuilder.CreateTable(
-                name: "ProcessRouteConfig",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "int", nullable: false)
-                        .Annotation("MySql:ValueGenerationStrategy", MySqlValueGenerationStrategy.IdentityColumn),
-                    StepOrder = table.Column<int>(type: "int", nullable: false),
-                    Process = table.Column<string>(type: "varchar(30)", maxLength: 30, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    DeviceType = table.Column<string>(type: "varchar(30)", maxLength: 30, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    IsOptional = table.Column<bool>(type: "tinyint(1)", nullable: false),
-                    Remark = table.Column<string>(type: "varchar(200)", maxLength: 200, nullable: true)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    UpdatedAt = table.Column<DateTime>(type: "datetime(6)", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ProcessRouteConfig", x => x.Id);
-                })
-                .Annotation("MySql:CharSet", "utf8mb4");
-
             migrationBuilder.CreateIndex(
                 name: "IX_CraneConfig_No",
                 table: "CraneConfig",
                 column: "No",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ProcessRouteConfig_StepOrder",
-                table: "ProcessRouteConfig",
-                column: "StepOrder",
                 unique: true);
         }
 
@@ -129,9 +101,6 @@ namespace AutomatedLine.Infrastructure.Persistence.Migrations
 
             migrationBuilder.DropTable(
                 name: "DeviceConfig");
-
-            migrationBuilder.DropTable(
-                name: "ProcessRouteConfig");
         }
     }
 }

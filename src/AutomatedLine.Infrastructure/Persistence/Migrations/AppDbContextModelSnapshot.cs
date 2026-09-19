@@ -174,45 +174,6 @@ namespace AutomatedLine.Infrastructure.Persistence.Migrations
 
                     b.ToTable("DeviceConfig", (string)null);
                 });
-
-            modelBuilder.Entity("AutomatedLine.Infrastructure.Persistence.Entities.ProcessRouteConfig", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("DeviceType")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)");
-
-                    b.Property<bool>("IsOptional")
-                        .HasColumnType("tinyint(1)");
-
-                    b.Property<string>("Process")
-                        .IsRequired()
-                        .HasMaxLength(30)
-                        .HasColumnType("varchar(30)");
-
-                    b.Property<string>("Remark")
-                        .HasMaxLength(200)
-                        .HasColumnType("varchar(200)");
-
-                    b.Property<int>("StepOrder")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime(6)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("StepOrder")
-                        .IsUnique();
-
-                    b.ToTable("ProcessRouteConfig", (string)null);
-                });
 #pragma warning restore 612, 618
         }
     }

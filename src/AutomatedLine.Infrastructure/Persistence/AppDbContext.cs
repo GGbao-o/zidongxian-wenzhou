@@ -5,7 +5,8 @@ namespace AutomatedLine.Infrastructure.Persistence;
 
 /// <summary>
 /// 应用数据库上下文（EF Core + MySQL）。
-/// 只保存配置类数据（天车 / 设备 / 工艺），不保存工件任务与报警运行态（架构文档 §3.4、§14）。
+/// 只保存配置类数据（天车 / 设备），不保存工件任务与报警运行态（架构文档 §3.4、§14）。
+/// 工艺路线顺序固定在代码中（见 Domain 的 ProcessRoute），不进数据库。
 /// </summary>
 public class AppDbContext : DbContext
 {
@@ -22,9 +23,6 @@ public class AppDbContext : DbContext
 
     /// <summary>设备配置表。</summary>
     public DbSet<DeviceConfig> DeviceConfigs => Set<DeviceConfig>();
-
-    /// <summary>工艺路线配置表。</summary>
-    public DbSet<ProcessRouteConfig> ProcessRouteConfigs => Set<ProcessRouteConfig>();
 
     /// <summary>
     /// 模型配置。表名、列长度、枚举存储形式、索引都在这里集中定义，避免散落在实体特性上。
@@ -56,17 +54,6 @@ public class AppDbContext : DbContext
             entity.Property(e => e.IpAddress).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Remark).HasMaxLength(200);
             entity.Property(e => e.DeviceType).HasConversion<string>().HasMaxLength(30);
-        });
-
-        // 工艺路线配置：工序与设备类型同样以字符串存储
-        modelBuilder.Entity<ProcessRouteConfig>(entity =>
-        {
-            entity.ToTable("ProcessRouteConfig");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Process).HasConversion<string>().HasMaxLength(30);
-            entity.Property(e => e.DeviceType).HasConversion<string>().HasMaxLength(30);
-            entity.Property(e => e.Remark).HasMaxLength(200);
-            entity.HasIndex(e => e.StepOrder).IsUnique();
         });
     }
 }
