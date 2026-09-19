@@ -1,5 +1,6 @@
 using System.Windows;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Collection;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Manual;
@@ -122,6 +123,10 @@ public partial class App : System.Windows.Application
 
         // 手动操作服务：写天车 PLC，供手动操作页使用
         services.AddSingleton<IManualOperationService, ManualOperationService>();
+
+        // 报警：内存活动报警 + 磁盘日志，供各模块 Raise 与报警页读取
+        services.AddSingleton<ActiveAlarmStore>();
+        services.AddSingleton<AlarmManager>();
 
         // 采集器：既作为 IDeviceStateCollector 供查询，也作为宿主后台服务随宿主启动/停止。
         // 注册为单例并通过工厂复用同一实例，保证两者拿到的是同一个对象。

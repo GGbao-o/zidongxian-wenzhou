@@ -4,26 +4,80 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
     d:DataContext="{d:DesignInstance Type=vm:AlarmViewModel}"
     mc:Ignorable="d">
     <Border Margin="24,12,24,24" Style="{StaticResource CardBorder}">
-        <!-- 内容可能较长，保证横竖都能滚动 -->
-        <ScrollViewer
-            HorizontalScrollBarVisibility="Auto"
-            VerticalScrollBarVisibility="Auto">
-            <StackPanel>
-                <TextBlock
-                    FontSize="16"
-                    FontWeight="SemiBold"
-                    Foreground="{StaticResource TextPrimaryBrush}"
-                    Text="报警处理（占位）" />
-                <TextBlock
-                    Margin="0,12,0,0"
-                    MaxWidth="900"
-                    Text="{Binding Description}"
-                    TextWrapping="Wrap" />
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock
+                Grid.Row="0"
+                FontSize="16"
+                FontWeight="SemiBold"
+                Foreground="{StaticResource TextPrimaryBrush}"
+                Text="活动报警（内存 + 磁盘 alarm.txt）" />
+
+            <!-- 人工处理按钮（受限） -->
+            <StackPanel
+                Grid.Row="1"
+                Margin="0,12,0,12"
+                Orientation="Horizontal">
+                <ui:Button
+                    Margin="0,0,12,0"
+                    Command="{Binding ClearPhysicalBlockCommand}"
+                    Content="清除物理阻塞" />
+                <ui:Button
+                    Margin="0,0,12,0"
+                    Command="{Binding ReleaseLocksCommand}"
+                    Content="释放逻辑锁" />
+                <ui:Button
+                    Margin="0,0,12,0"
+                    Command="{Binding ReplenishCommand}"
+                    Content="补内存" />
+                <ui:Button
+                    Appearance="Primary"
+                    Command="{Binding ClearAllCommand}"
+                    Content="清除全部" />
             </StackPanel>
-        </ScrollViewer>
+
+            <!-- 报警可能很多，DataGrid 自带横竖滚动条 -->
+            <DataGrid
+                Grid.Row="2"
+                AutoGenerateColumns="False"
+                Background="Transparent"
+                CanUserAddRows="False"
+                GridLinesVisibility="Horizontal"
+                HeadersVisibility="Column"
+                HorizontalGridLinesBrush="{StaticResource CardBorderBrush}"
+                IsReadOnly="True"
+                ItemsSource="{Binding Alarms}"
+                RowBackground="Transparent"
+                AlternatingRowBackground="#F8FAFC"
+                SelectedItem="{Binding SelectedAlarm, Mode=TwoWay}">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="时间" Binding="{Binding TimeText}" />
+                    <DataGridTextColumn Header="级别" Binding="{Binding LevelText}" />
+                    <DataGridTextColumn Header="来源" Binding="{Binding Source}" />
+                    <DataGridTextColumn Header="内容" Binding="{Binding Message}" Width="*" />
+                    <DataGridTextColumn Header="系统动作" Binding="{Binding SystemAction}" />
+                    <DataGridTextColumn Header="次数" Binding="{Binding Count}" />
+                    <DataGridTextColumn Header="关联资源" Binding="{Binding ResourceText}" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <TextBlock
+                Grid.Row="3"
+                Margin="0,12,0,0"
+                Foreground="{StaticResource BrandBlueBrush}"
+                Text="{Binding Message}"
+                TextWrapping="Wrap" />
+        </Grid>
     </Border>
 </UserControl>

@@ -1,5 +1,7 @@
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Domain.Alarms;
 using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Domain.Signals;
 using Microsoft.Extensions.Hosting;
@@ -28,6 +30,9 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
+    /// <summary>报警管理器。采集失败时产生通信类报警。</summary>
+    private readonly AlarmManager _alarmManager;
+
     /// <summary>取消源。</summary>
     private CancellationTokenSource? _cts;
 
@@ -45,18 +50,21 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="configService">配置服务</param>
     /// <param name="logger">日志</param>
+    /// <param name="alarmManager">报警管理器</param>
     public DeviceStateCollector(
         DriverRegistry driverRegistry,
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
         IConfigService configService,
-        IAppLogger logger)
+        IAppLogger logger,
+        AlarmManager alarmManager)
     {
         _driverRegistry = driverRegistry;
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
         _configService = configService;
         _logger = logger;
+        _alarmManager = alarmManager;
     }
 
     /// <inheritdoc />
@@ -170,12 +178,36 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
                     new Dictionary<string, object?>());
 
                 ApplySnapshot(driver, snapshot);
-                _logger.Warn(LogCategory.Communication, $"资源 {Describe(driver)} 采集失败：{ex.Message}");
+
+                // 采集失败属瞬时故障：产生 Warning 报警（合并计数），不丢弃任务、不暂停整线
+                var (resourceId, isCrane) = ResolveResource(driver);
+                _alarmManager.Raise(
+                    AlarmLevel.Warning,
+                    Describe(driver),
+                    $"采集失败：{ex.Message}",
+                    "重连重试",
+                    resourceId,
+                    isCrane);
             }
         }
 
         LastCollectedAt = DateTime.Now;
+
+        // 采集是高频循环（默认 500ms），成功日志按抽样间隔（默认 20s）落盘，避免刷爆磁盘
+        _logger.Sample(LogCategory.Collection, "collection-cycle", $"采集完成，序号 {sequence}，驱动 {drivers.Count} 个");
     }
+
+    /// <summary>
+    /// 解析驱动对应的资源号与是否天车。
+    /// </summary>
+    /// <param name="driver">驱动</param>
+    /// <returns>资源号与是否天车</returns>
+    private static (int? ResourceId, bool IsCrane) ResolveResource(IPlcDriver driver) => driver switch
+    {
+        IDeviceDriver d => (d.DeviceId, false),
+        ICraneDriver c => (c.CraneId, true),
+        _ => (null, false)
+    };
 
     /// <summary>
     /// 把快照整体写到对应的设备或天车对象上（整体替换，不逐字段更新）。
