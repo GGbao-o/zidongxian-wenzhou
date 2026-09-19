@@ -16,6 +16,17 @@ public sealed class DeviceRegistry
     private readonly object _sync = new();
 
     /// <summary>
+    /// 清空注册表。配置在界面上增删改后重新装载前调用，避免残留旧实例。
+    /// </summary>
+    public void Clear()
+    {
+        lock (_sync)
+        {
+            _devices.Clear();
+        }
+    }
+
+    /// <summary>
     /// 注册一台设备。重复的 Id 会被覆盖并给出提示（配置错误应尽早暴露）。
     /// </summary>
     /// <param name="device">设备对象</param>

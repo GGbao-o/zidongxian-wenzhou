@@ -66,6 +66,11 @@ public class ConfigurationLoader : IConfigurationLoader
     /// <inheritdoc />
     public async Task<ConfigurationLoadResult> LoadAsync(CancellationToken cancellationToken = default)
     {
+        // 重新装载前先清空，保证界面上删除的配置不会残留在内存
+        _deviceRegistry.Clear();
+        _craneRegistry.Clear();
+        _driverRegistry.Clear();
+
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 

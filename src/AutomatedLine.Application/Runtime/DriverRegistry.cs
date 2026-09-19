@@ -15,6 +15,17 @@ public sealed class DriverRegistry
     private readonly object _sync = new();
 
     /// <summary>
+    /// 清空注册表。配置变更后重新装载前调用，避免残留旧驱动。
+    /// </summary>
+    public void Clear()
+    {
+        lock (_sync)
+        {
+            _drivers.Clear();
+        }
+    }
+
+    /// <summary>
     /// 注册一个驱动。资源号来自设备/天车配置，重复注册会覆盖并提示。
     /// </summary>
     /// <param name="driver">驱动实例</param>

@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
     d:DataContext="{d:DesignInstance Type=vm:CraneViewModel}"
     mc:Ignorable="d">
@@ -14,13 +15,19 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <TextBlock
-                Grid.Row="0"
-                Margin="0,0,0,12"
-                FontSize="16"
-                FontWeight="SemiBold"
-                Foreground="{StaticResource TextPrimaryBrush}"
-                Text="天车运行监控" />
+            <Grid Grid.Row="0" Margin="0,0,0,12">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="16"
+                    FontWeight="SemiBold"
+                    Foreground="{StaticResource TextPrimaryBrush}"
+                    Text="天车运行监控" />
+                <ui:Button
+                    HorizontalAlignment="Right"
+                    Appearance="Primary"
+                    Command="{Binding AddCraneCommand}"
+                    Content="新增天车" />
+            </Grid>
 
             <!-- DataGrid 自带横竖滚动条，天车/列很多时可滚动查看 -->
             <DataGrid
@@ -46,6 +53,25 @@
                     <DataGridTextColumn Header="当前任务" Binding="{Binding TaskText}" />
                     <DataGridTextColumn Header="报警" Binding="{Binding AlarmText}" />
                     <DataGridTextColumn Header="信号" Binding="{Binding SignalSummary}" />
+                    <DataGridTemplateColumn Header="操作">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:Button
+                                        Margin="0,0,8,0"
+                                        Padding="8,2"
+                                        Command="{Binding DataContext.EditCraneCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}"
+                                        Content="编辑" />
+                                    <ui:Button
+                                        Padding="8,2"
+                                        Command="{Binding DataContext.DeleteCraneCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                        CommandParameter="{Binding}"
+                                        Content="删除" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                 </DataGrid.Columns>
             </DataGrid>
         </Grid>

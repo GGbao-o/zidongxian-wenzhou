@@ -115,8 +115,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<CraneRegistry>();
         services.AddSingleton<DriverRegistry>();
 
-        // 配置装载与冷启动核对
+        // 配置装载、配置存储（CRUD）与冷启动核对
         services.AddSingleton<IConfigurationLoader, ConfigurationLoader>();
+        services.AddSingleton<IConfigurationStore, ConfigurationStore>();
         services.AddSingleton<IColdStartChecker, ColdStartChecker>();
 
         // 手动操作服务：写天车 PLC，供手动操作页使用

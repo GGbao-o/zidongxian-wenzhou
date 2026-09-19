@@ -15,6 +15,17 @@ public sealed class CraneRegistry
     private readonly object _sync = new();
 
     /// <summary>
+    /// 清空注册表。配置在界面上增删改后重新装载前调用，避免残留旧实例。
+    /// </summary>
+    public void Clear()
+    {
+        lock (_sync)
+        {
+            _cranes.Clear();
+        }
+    }
+
+    /// <summary>
     /// 注册一台天车。
     /// </summary>
     /// <param name="crane">天车对象</param>
