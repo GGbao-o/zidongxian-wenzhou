@@ -1,3 +1,4 @@
+using AutomatedLine.Domain.Signals;
 using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Domain.Devices;
@@ -41,6 +42,18 @@ public abstract class DeviceBase
 
     /// <summary>资源可用性。逻辑预约与物理阻塞是两回事（架构文档 §11）。</summary>
     public ResourceState ResourceState { get; set; } = ResourceState.Available;
+
+    /// <summary>
+    /// 最近一次采集的信号快照。由 DeviceStateCollector 整体替换写入，业务层只读。
+    /// 为 null 表示尚未采集过。
+    /// </summary>
+    public SignalSnapshot? Signals { get; internal set; }
+
+    /// <summary>是否已连接（依据最近快照）。</summary>
+    public bool IsConnected => Signals is not null && Signals.IsConnected;
+
+    /// <summary>本设备类型对应的信号点位（逻辑点名，地址待点位表补入）。</summary>
+    public IReadOnlyList<SignalPoint> SignalPoints => DeviceSignalCatalog.Get(Type);
 
     /// <summary>
     /// 当前工件。这是**只读派生缓存**，不是权威状态：
