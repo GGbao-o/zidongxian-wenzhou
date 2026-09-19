@@ -35,11 +35,11 @@ public sealed class ManualOperationService : IManualOperationService
     }
 
     /// <inheritdoc />
-    public Task<bool> MoveAbsoluteAsync(int craneId, double x, double y, double z, double speed, CancellationToken cancellationToken = default)
-        => SendAsync(craneId, $"绝对运动→({x:0.###},{y:0.###},{z:0.###}) 速度{speed:0.###}", async driver =>
+    public Task<bool> MoveAbsoluteAsync(int craneId, double x, double y, double z, TripleAxisMotionParameters parameters, CancellationToken cancellationToken = default)
+        => SendAsync(craneId, $"绝对运动→({x:0.###},{y:0.###},{z:0.###})", async driver =>
         {
             await driver.WriteSignalAsync("MoveMode", 0, cancellationToken).ConfigureAwait(false);
-            await driver.WriteSignalAsync("MoveSpeed", speed, cancellationToken).ConfigureAwait(false);
+            await WriteParametersAsync(driver, parameters, cancellationToken).ConfigureAwait(false);
             await driver.WriteSignalAsync("TargetX", x, cancellationToken).ConfigureAwait(false);
             await driver.WriteSignalAsync("TargetY", y, cancellationToken).ConfigureAwait(false);
             await driver.WriteSignalAsync("TargetZ", z, cancellationToken).ConfigureAwait(false);
@@ -47,7 +47,7 @@ public sealed class ManualOperationService : IManualOperationService
         }, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<bool> MoveRelativeAsync(int craneId, CraneAxis axis, double delta, double speed, CancellationToken cancellationToken = default)
+    public async Task<bool> MoveRelativeAsync(int craneId, CraneAxis axis, double delta, TripleAxisMotionParameters parameters, CancellationToken cancellationToken = default)
     {
         // 相对运动由上位机换算为绝对目标：读取当前坐标 + 位移
         var crane = _craneRegistry.Get(craneId);
@@ -69,13 +69,12 @@ public sealed class ManualOperationService : IManualOperationService
                 break;
         }
 
-        return await MoveAbsoluteAsync(craneId, x, y, z, speed, cancellationToken).ConfigureAwait(false);
+        return await MoveAbsoluteAsync(craneId, x, y, z, parameters, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public Task<bool> SetSpeedAsync(int craneId, double speed, CancellationToken cancellationToken = default)
-        => SendAsync(craneId, $"设置速度={speed:0.###}", driver =>
-            driver.WriteSignalAsync("MoveSpeed", speed, cancellationToken), cancellationToken);
+    public Task<bool> SetParametersAsync(int craneId, TripleAxisMotionParameters parameters, CancellationToken cancellationToken = default)
+        => SendAsync(craneId, "设置三轴参数", driver => WriteParametersAsync(driver, parameters, cancellationToken), cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> ClearAlarmAsync(int craneId, CancellationToken cancellationToken = default)
@@ -98,13 +97,31 @@ public sealed class ManualOperationService : IManualOperationService
         => SendAsync(craneId, "下压", driver => driver.WriteSignalAsync("PressDown", true, cancellationToken), cancellationToken);
 
     /// <summary>
+    /// 下发三轴速度/加速度/减速度（共 9 个点位）。
+    /// </summary>
+    /// <param name="driver">驱动</param>
+    /// <param name="p">三轴参数</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    private static async Task WriteParametersAsync(IPlcDriver driver, TripleAxisMotionParameters p, CancellationToken cancellationToken)
+    {
+        await driver.WriteSignalAsync("MoveSpeedX", p.X.Speed, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveAccelX", p.X.Accel, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveDecelX", p.X.Decel, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveSpeedY", p.Y.Speed, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveAccelY", p.Y.Accel, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveDecelY", p.Y.Decel, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveSpeedZ", p.Z.Speed, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveAccelZ", p.Z.Accel, cancellationToken).ConfigureAwait(false);
+        await driver.WriteSignalAsync("MoveDecelZ", p.Z.Decel, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// 下发一次"启动运动"脉冲（置真再复位），避免 PLC 粘住命令。
     /// </summary>
     /// <param name="driver">驱动</param>
     /// <param name="cancellationToken">取消令牌</param>
     private static async Task PulseMoveStartAsync(IPlcDriver driver, CancellationToken cancellationToken)
     {
-        // 置真再复位，形成一次脉冲，避免 PLC 粘住"启动"命令
         await driver.WriteSignalAsync("MoveStart", true, cancellationToken).ConfigureAwait(false);
         await driver.WriteSignalAsync("MoveStart", false, cancellationToken).ConfigureAwait(false);
     }

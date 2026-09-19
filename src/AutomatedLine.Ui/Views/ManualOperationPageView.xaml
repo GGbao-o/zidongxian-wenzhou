@@ -78,17 +78,16 @@
                         <ui:TextBox Text="{Binding AbsoluteY, UpdateSourceTrigger=PropertyChanged}" />
                         <TextBlock Margin="0,8,0,0" Text="目标 Z" />
                         <ui:TextBox Text="{Binding AbsoluteZ, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="0,8,0,0" Text="速度" />
-                        <ui:TextBox Text="{Binding Speed, UpdateSourceTrigger=PropertyChanged}" />
                         <ui:Button
                             Margin="0,14,0,0"
                             Appearance="Primary"
                             Command="{Binding MoveAbsoluteCommand}"
                             Content="绝对运动" />
-                        <ui:Button
+                        <TextBlock
                             Margin="0,8,0,0"
-                            Command="{Binding SetSpeedCommand}"
-                            Content="设置速度" />
+                            Style="{StaticResource CaptionText}"
+                            Text="运动使用的三轴速度/加速度/减速度见右侧『三轴运动参数』。"
+                            TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
 
@@ -140,6 +139,53 @@
                                 CommandParameter="Z-"
                                 Content="Z-" />
                         </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- 三轴运动参数：每轴速度/加速度/减速度 -->
+                <Border
+                    Width="340"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="三轴运动参数" />
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="32" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="1" FontSize="12" Text="速度" />
+                            <TextBlock Grid.Row="0" Grid.Column="2" FontSize="12" Text="加速度" />
+                            <TextBlock Grid.Row="0" Grid.Column="3" FontSize="12" Text="减速度" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="X" />
+                            <ui:TextBox Grid.Row="1" Grid.Column="1" Margin="2" Text="{Binding SpeedX, UpdateSourceTrigger=PropertyChanged}" />
+                            <ui:TextBox Grid.Row="1" Grid.Column="2" Margin="2" Text="{Binding AccelX, UpdateSourceTrigger=PropertyChanged}" />
+                            <ui:TextBox Grid.Row="1" Grid.Column="3" Margin="2" Text="{Binding DecelX, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Y" />
+                            <ui:TextBox Grid.Row="2" Grid.Column="1" Margin="2" Text="{Binding SpeedY, UpdateSourceTrigger=PropertyChanged}" />
+                            <ui:TextBox Grid.Row="2" Grid.Column="2" Margin="2" Text="{Binding AccelY, UpdateSourceTrigger=PropertyChanged}" />
+                            <ui:TextBox Grid.Row="2" Grid.Column="3" Margin="2" Text="{Binding DecelY, UpdateSourceTrigger=PropertyChanged}" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Z" />
+                            <ui:TextBox Grid.Row="3" Grid.Column="1" Margin="2" Text="{Binding SpeedZ, UpdateSourceTrigger=PropertyChanged}" />
+                            <ui:TextBox Grid.Row="3" Grid.Column="2" Margin="2" Text="{Binding AccelZ, UpdateSourceTrigger=PropertyChanged}" />
+                            <ui:TextBox Grid.Row="3" Grid.Column="3" Margin="2" Text="{Binding DecelZ, UpdateSourceTrigger=PropertyChanged}" />
+                        </Grid>
+                        <ui:Button
+                            Margin="0,12,0,0"
+                            Command="{Binding SetParametersCommand}"
+                            Content="设置参数" />
                     </StackPanel>
                 </Border>
 

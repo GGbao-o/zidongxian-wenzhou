@@ -30,7 +30,15 @@ public sealed class SimulatedCraneDriver : ICraneDriver
         _values["TargetY"] = 0d;
         _values["TargetZ"] = 0d;
         _values["MoveMode"] = 0;
-        _values["MoveSpeed"] = 0d;
+        _values["MoveSpeedX"] = 0d;
+        _values["MoveAccelX"] = 0d;
+        _values["MoveDecelX"] = 0d;
+        _values["MoveSpeedY"] = 0d;
+        _values["MoveAccelY"] = 0d;
+        _values["MoveDecelY"] = 0d;
+        _values["MoveSpeedZ"] = 0d;
+        _values["MoveAccelZ"] = 0d;
+        _values["MoveDecelZ"] = 0d;
         _values["MoveStart"] = false;
 
         // 状态与信号

@@ -31,8 +31,14 @@ public sealed class AppOptions
 /// </summary>
 public sealed class ManualOptions
 {
-    /// <summary>默认运动速度。</summary>
+    /// <summary>默认运动速度（三轴初值）。</summary>
     public double DefaultSpeed { get; set; } = 100;
+
+    /// <summary>默认加速度（三轴初值）。</summary>
+    public double DefaultAccel { get; set; } = 100;
+
+    /// <summary>默认减速度（三轴初值）。</summary>
+    public double DefaultDecel { get; set; } = 100;
 
     /// <summary>默认相对运动步长（mm）。</summary>
     public double DefaultStep { get; set; } = 100;
