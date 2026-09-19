@@ -118,10 +118,6 @@ public partial class ParamsViewModel : ObservableObject
         logging.Items.Add(LongItem("单文件上限(字节)", () => _options.Logging.MaxFileSizeBytes, v => _options.Logging.MaxFileSizeBytes = v));
         Categories.Add(logging);
 
-        var simulation = new ParamCategoryViewModel("模拟", "仅联调用；接现场后删除模拟模块");
-        simulation.Items.Add(BoolItem("配置表为空时写入样例数据", () => _options.Simulation.SeedSampleData, v => _options.Simulation.SeedSampleData = v));
-        Categories.Add(simulation);
-
         var manual = new ParamCategoryViewModel("手动", "手动操作页默认速度与步长");
         manual.Items.Add(DoubleItem("默认速度", () => _options.Manual.DefaultSpeed, v => _options.Manual.DefaultSpeed = v));
         manual.Items.Add(DoubleItem("默认步长(mm)", () => _options.Manual.DefaultStep, v => _options.Manual.DefaultStep = v));
@@ -140,9 +136,6 @@ public partial class ParamsViewModel : ObservableObject
     private static ParamItemViewModel LongItem(string name, Func<long> get, Action<long> set)
         => new(name, get().ToString(), text => set(long.TryParse(text, out var v) ? v : 0));
 
-    /// <summary>构造布尔参数项。</summary>
-    private static ParamItemViewModel BoolItem(string name, Func<bool> get, Action<bool> set)
-        => new(name, get() ? "true" : "false", text => set(text.Trim().Equals("true", StringComparison.OrdinalIgnoreCase) || text.Trim() == "1"));
 
     /// <summary>构造文本参数项。</summary>
     private static ParamItemViewModel TextItem(string name, Func<string> get, Action<string> set)

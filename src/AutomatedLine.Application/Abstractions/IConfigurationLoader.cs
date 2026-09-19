@@ -20,9 +20,7 @@ public interface IConfigurationLoader
 /// <param name="DeviceCount">装载的设备数</param>
 /// <param name="CraneCount">装载的天车数</param>
 /// <param name="DriverCount">创建的驱动数</param>
-/// <param name="SeededSampleData">是否自动写入了样例数据</param>
 public sealed record ConfigurationLoadResult(
     int DeviceCount,
     int CraneCount,
-    int DriverCount,
-    bool SeededSampleData);
+    int DriverCount);

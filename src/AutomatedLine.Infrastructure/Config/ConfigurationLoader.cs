@@ -6,7 +6,6 @@ using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Infrastructure.Drivers;
 using AutomatedLine.Infrastructure.Persistence;
 using AutomatedLine.Infrastructure.Persistence.Entities;
-using AutomatedLine.Infrastructure.Simulation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -32,9 +31,6 @@ public class ConfigurationLoader : IConfigurationLoader
     /// <summary>驱动注册表。</summary>
     private readonly DriverRegistry _driverRegistry;
 
-    /// <summary>配置服务。</summary>
-    private readonly IConfigService _configService;
-
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
@@ -45,21 +41,18 @@ public class ConfigurationLoader : IConfigurationLoader
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="driverRegistry">驱动注册表</param>
-    /// <param name="configService">配置服务</param>
     /// <param name="logger">日志</param>
     public ConfigurationLoader(
         IServiceScopeFactory scopeFactory,
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
         DriverRegistry driverRegistry,
-        IConfigService configService,
         IAppLogger logger)
     {
         _scopeFactory = scopeFactory;
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
         _driverRegistry = driverRegistry;
-        _configService = configService;
         _logger = logger;
     }
 
@@ -74,11 +67,7 @@ public class ConfigurationLoader : IConfigurationLoader
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var options = _configService.GetAppOptions();
-
-        // 联调期样例数据：实现集中在 SimulationDataSeeder，接现场前整体删除该类即可，不影响真实路径
-        var seeded = options.Simulation.SeedSampleData && SimulationDataSeeder.SeedIfEmpty(db, _logger);
-
+        // 全部配置来自数据库；不再写入任何样例数据（模拟数据已移除）
         var deviceConfigs = db.DeviceConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.Id).ToList();
         var craneConfigs = db.CraneConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.No).ToList();
 
@@ -116,9 +105,9 @@ public class ConfigurationLoader : IConfigurationLoader
         }
 
         _logger.Info(LogCategory.System,
-            $"配置装载完成：设备 {deviceConfigs.Count} 台、天车 {craneConfigs.Count} 台、驱动 {driverCount} 个、样例数据={seeded}");
+            $"配置装载完成：设备 {deviceConfigs.Count} 台、天车 {craneConfigs.Count} 台、驱动 {driverCount} 个");
 
-        return new ConfigurationLoadResult(deviceConfigs.Count, craneConfigs.Count, driverCount, seeded);
+        return new ConfigurationLoadResult(deviceConfigs.Count, craneConfigs.Count, driverCount);
     }
 
     /// <summary>
