@@ -115,8 +115,7 @@ public partial class CraneViewModel : ObservableObject
         }
 
         await _configurationStore.SaveCraneConfigAsync(dto);
-        await _configurationLoader.LoadAsync();
-        await LoadConfigsAsync();
+        await ReloadAsync();
     }
 
     /// <summary>编辑天车配置。</summary>
@@ -135,8 +134,7 @@ public partial class CraneViewModel : ObservableObject
         }
 
         await _configurationStore.SaveCraneConfigAsync(row.Config);
-        await _configurationLoader.LoadAsync();
-        await LoadConfigsAsync();
+        await ReloadAsync();
     }
 
     /// <summary>删除天车配置。</summary>
@@ -158,7 +156,23 @@ public partial class CraneViewModel : ObservableObject
         }
 
         await _configurationStore.DeleteCraneConfigAsync(row.Id);
-        await _configurationLoader.LoadAsync();
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// 重载运行态并重新读库。重载失败只记录，不让配置问题把程序打崩。
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            await _configurationLoader.LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CraneViewModel] 重载天车配置失败：{ex.Message}");
+        }
+
         await LoadConfigsAsync();
     }
 

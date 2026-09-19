@@ -143,7 +143,7 @@ public sealed class ManualOperationService : IManualOperationService
             return false;
         }
 
-        var driver = _driverRegistry.Get(craneId);
+        var driver = _driverRegistry.GetCrane(craneId);
         if (driver is null)
         {
             _logger.Warn(LogCategory.Operation, $"手动操作失败：天车{craneId} 无驱动");

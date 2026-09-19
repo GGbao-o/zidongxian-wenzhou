@@ -109,8 +109,7 @@ public partial class DeviceViewModel : ObservableObject
         }
 
         await _configurationStore.SaveDeviceConfigAsync(dto);
-        await _configurationLoader.LoadAsync();
-        await LoadConfigsAsync();
+        await ReloadAsync();
     }
 
     /// <summary>编辑设备配置。</summary>
@@ -129,8 +128,7 @@ public partial class DeviceViewModel : ObservableObject
         }
 
         await _configurationStore.SaveDeviceConfigAsync(row.Config);
-        await _configurationLoader.LoadAsync();
-        await LoadConfigsAsync();
+        await ReloadAsync();
     }
 
     /// <summary>删除设备配置。</summary>
@@ -152,7 +150,23 @@ public partial class DeviceViewModel : ObservableObject
         }
 
         await _configurationStore.DeleteDeviceConfigAsync(row.Id);
-        await _configurationLoader.LoadAsync();
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// 重载运行态并重新读库。重载失败只记录，不让配置问题把程序打崩。
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            await _configurationLoader.LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DeviceViewModel] 重载设备配置失败：{ex.Message}");
+        }
+
         await LoadConfigsAsync();
     }
 

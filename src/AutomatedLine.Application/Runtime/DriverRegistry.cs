@@ -3,80 +3,84 @@ using AutomatedLine.Application.Abstractions;
 namespace AutomatedLine.Application.Runtime;
 
 /// <summary>
-/// 驱动注册表：保存"资源号 → 驱动实例"。
-/// 驱动在配置装载时按协议创建（当前为模拟驱动），采集器每周期从这里取全部驱动读取快照。
+/// 驱动注册表：保存设备驱动与天车驱动。
+/// 设备号与天车号是**两个独立的命名空间**（例如设备1与天车1可以同时存在），因此分两个字典保存，
+/// 绝不能用同一个键混存，否则会互相覆盖。
+/// 采集器每周期从 <see cref="Snapshot"/> 取全部驱动读快照。
 /// </summary>
 public sealed class DriverRegistry
 {
-    /// <summary>资源号 → 驱动。</summary>
-    private readonly Dictionary<int, IPlcDriver> _drivers = new();
+    /// <summary>设备号 → 设备驱动。</summary>
+    private readonly Dictionary<int, IDeviceDriver> _deviceDrivers = new();
+
+    /// <summary>天车号 → 天车驱动。</summary>
+    private readonly Dictionary<int, ICraneDriver> _craneDrivers = new();
 
     /// <summary>保护锁。</summary>
     private readonly object _sync = new();
 
-    /// <summary>
-    /// 清空注册表。配置变更后重新装载前调用，避免残留旧驱动。
-    /// </summary>
+    /// <summary>清空注册表。配置变更后重新装载前调用，避免残留旧驱动。</summary>
     public void Clear()
     {
         lock (_sync)
         {
-            _drivers.Clear();
+            _deviceDrivers.Clear();
+            _craneDrivers.Clear();
         }
     }
 
-    /// <summary>
-    /// 注册一个驱动。资源号来自设备/天车配置，重复注册会覆盖并提示。
-    /// </summary>
-    /// <param name="driver">驱动实例</param>
-    public void Register(IPlcDriver driver)
+    /// <summary>注册设备驱动。</summary>
+    /// <param name="driver">设备驱动</param>
+    public void RegisterDevice(IDeviceDriver driver)
     {
-        var id = driver switch
-        {
-            IDeviceDriver deviceDriver => deviceDriver.DeviceId,
-            ICraneDriver craneDriver => craneDriver.CraneId,
-            _ => -1
-        };
-
-        if (id < 0)
-        {
-            Console.WriteLine("[DriverRegistry] 未知驱动类型，已忽略");
-            return;
-        }
-
         lock (_sync)
         {
-            if (_drivers.ContainsKey(id))
-            {
-                Console.WriteLine($"[DriverRegistry] 资源号 {id} 驱动重复注册，已覆盖");
-            }
-
-            _drivers[id] = driver;
+            _deviceDrivers[driver.DeviceId] = driver;
         }
     }
 
-    /// <summary>
-    /// 按资源号获取驱动（手动操作下发时需要）。
-    /// </summary>
-    /// <param name="resourceId">设备号或天车号</param>
+    /// <summary>注册天车驱动。</summary>
+    /// <param name="driver">天车驱动</param>
+    public void RegisterCrane(ICraneDriver driver)
+    {
+        lock (_sync)
+        {
+            _craneDrivers[driver.CraneId] = driver;
+        }
+    }
+
+    /// <summary>按设备号获取设备驱动。</summary>
+    /// <param name="deviceId">设备号</param>
     /// <returns>驱动；不存在返回 null</returns>
-    public IPlcDriver? Get(int resourceId)
+    public IDeviceDriver? GetDevice(int deviceId)
     {
         lock (_sync)
         {
-            return _drivers.TryGetValue(resourceId, out var driver) ? driver : null;
+            return _deviceDrivers.TryGetValue(deviceId, out var driver) ? driver : null;
         }
     }
 
-    /// <summary>
-    /// 获取全部驱动的快照。
-    /// </summary>
+    /// <summary>按天车号获取天车驱动。</summary>
+    /// <param name="craneId">天车号</param>
+    /// <returns>驱动；不存在返回 null</returns>
+    public ICraneDriver? GetCrane(int craneId)
+    {
+        lock (_sync)
+        {
+            return _craneDrivers.TryGetValue(craneId, out var driver) ? driver : null;
+        }
+    }
+
+    /// <summary>获取全部驱动（设备 + 天车）的快照，供采集器遍历。</summary>
     /// <returns>驱动列表快照</returns>
     public IReadOnlyList<IPlcDriver> Snapshot()
     {
         lock (_sync)
         {
-            return _drivers.Values.ToList();
+            var all = new List<IPlcDriver>(_deviceDrivers.Count + _craneDrivers.Count);
+            all.AddRange(_deviceDrivers.Values);
+            all.AddRange(_craneDrivers.Values);
+            return all;
         }
     }
 }

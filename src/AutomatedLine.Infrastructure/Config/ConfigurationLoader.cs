@@ -78,10 +78,10 @@ public class ConfigurationLoader : IConfigurationLoader
             var device = CreateDevice(config);
             _deviceRegistry.Register(device);
 
-            // 按协议创建驱动；模拟协议由 DriverFactory 返回模拟实现
+            // 创建并注册设备驱动（设备号与天车号是两个命名空间，分开注册）
             var driver = DriverFactory.CreateDeviceDriver(config);
             await driver.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            _driverRegistry.Register(driver);
+            _driverRegistry.RegisterDevice(driver);
             driverCount++;
         }
 
@@ -100,7 +100,7 @@ public class ConfigurationLoader : IConfigurationLoader
 
             var driver = DriverFactory.CreateCraneDriver(config);
             await driver.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            _driverRegistry.Register(driver);
+            _driverRegistry.RegisterCrane(driver);
             driverCount++;
         }
 

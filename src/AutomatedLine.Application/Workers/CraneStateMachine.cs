@@ -176,12 +176,12 @@ public sealed class CraneStateMachine
     /// <summary>取料握手：下发取料请求与抓取。</summary>
     private async Task StepPickHandshakeAsync(Crane crane, TransportTask task, CancellationToken cancellationToken)
     {
-        if (_driverRegistry.Get(task.SourceDeviceId) is { } sourceDriver)
+        if (_driverRegistry.GetDevice(task.SourceDeviceId) is { } sourceDriver)
         {
             await sourceDriver.WriteSignalAsync("PickRequest", true, cancellationToken).ConfigureAwait(false);
         }
 
-        if (_driverRegistry.Get(crane.Id) is { } craneDriver)
+        if (_driverRegistry.GetCrane(crane.Id) is { } craneDriver)
         {
             await craneDriver.WriteSignalAsync("Grip", true, cancellationToken).ConfigureAwait(false);
         }
@@ -203,13 +203,13 @@ public sealed class CraneStateMachine
         workpieceTask.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
 
         // 同步模拟信号，保持大屏一致（真实实现改为读取 PLC 反馈）
-        if (_driverRegistry.Get(task.SourceDeviceId) is { } sourceDriver)
+        if (_driverRegistry.GetDevice(task.SourceDeviceId) is { } sourceDriver)
         {
             await sourceDriver.WriteSignalAsync("HasMaterial", false, cancellationToken).ConfigureAwait(false);
             await sourceDriver.WriteSignalAsync("PickRequest", false, cancellationToken).ConfigureAwait(false);
         }
 
-        if (_driverRegistry.Get(crane.Id) is { } craneDriver)
+        if (_driverRegistry.GetCrane(crane.Id) is { } craneDriver)
         {
             await craneDriver.WriteSignalAsync("HasMaterial", true, cancellationToken).ConfigureAwait(false);
         }
@@ -236,12 +236,12 @@ public sealed class CraneStateMachine
     /// <summary>放料握手：下发放料请求与松开。</summary>
     private async Task StepPlaceHandshakeAsync(Crane crane, TransportTask task, CancellationToken cancellationToken)
     {
-        if (_driverRegistry.Get(task.TargetDeviceId) is { } targetDriver)
+        if (_driverRegistry.GetDevice(task.TargetDeviceId) is { } targetDriver)
         {
             await targetDriver.WriteSignalAsync("PlaceRequest", true, cancellationToken).ConfigureAwait(false);
         }
 
-        if (_driverRegistry.Get(crane.Id) is { } craneDriver)
+        if (_driverRegistry.GetCrane(crane.Id) is { } craneDriver)
         {
             await craneDriver.WriteSignalAsync("Release", true, cancellationToken).ConfigureAwait(false);
         }
@@ -263,13 +263,13 @@ public sealed class CraneStateMachine
         workpieceTask.Runtime.CurrentProcess = task.TargetProcess;
 
         // 同步模拟信号
-        if (_driverRegistry.Get(task.TargetDeviceId) is { } targetDriver)
+        if (_driverRegistry.GetDevice(task.TargetDeviceId) is { } targetDriver)
         {
             await targetDriver.WriteSignalAsync("HasMaterial", true, cancellationToken).ConfigureAwait(false);
             await targetDriver.WriteSignalAsync("PlaceRequest", false, cancellationToken).ConfigureAwait(false);
         }
 
-        if (_driverRegistry.Get(crane.Id) is { } craneDriver)
+        if (_driverRegistry.GetCrane(crane.Id) is { } craneDriver)
         {
             await craneDriver.WriteSignalAsync("HasMaterial", false, cancellationToken).ConfigureAwait(false);
         }
@@ -305,7 +305,7 @@ public sealed class CraneStateMachine
     /// <summary>写天车目标并触发一次启动运动脉冲。</summary>
     private async Task WriteCraneTargetAsync(Crane crane, double x, double y, double z, CancellationToken cancellationToken)
     {
-        if (_driverRegistry.Get(crane.Id) is not { } driver)
+        if (_driverRegistry.GetCrane(crane.Id) is not { } driver)
         {
             throw new InvalidOperationException($"天车 {crane.Id} 无驱动");
         }
