@@ -1,3 +1,4 @@
+using AutomatedLine.Domain.Routing;
 using AutomatedLine.Domain.Spatial;
 
 namespace AutomatedLine.Domain.Tasks;
@@ -26,6 +27,9 @@ public sealed class TransportTask
 
     /// <summary>目标设备 X 坐标，用于计算路权区间。</summary>
     public double TargetX { get; init; }
+
+    /// <summary>搬运完成后工件进入的工序。放料确认时写入工件运行态。</summary>
+    public ProcessType TargetProcess { get; init; }
 
     /// <summary>优先级。数值越大越优先。</summary>
     public int Priority { get; init; }
