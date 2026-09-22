@@ -94,6 +94,9 @@ public class ConfigurationLoader : IConfigurationLoader
                 Width = config.Width,
                 SafeX = config.SafeX,
                 SafeZ = config.SafeZ,
+                OffsetX = config.OffsetX,
+                OffsetY = config.OffsetY,
+                OffsetZ = config.OffsetZ,
                 IsEnabled = config.IsEnabled
             };
             _craneRegistry.Register(crane);

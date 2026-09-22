@@ -54,6 +54,9 @@
                     <DataGridTextColumn Header="宽度" Binding="{Binding Config.Width}" />
                     <DataGridTextColumn Header="安全位X" Binding="{Binding Config.SafeX}" />
                     <DataGridTextColumn Header="安全位Z" Binding="{Binding Config.SafeZ}" />
+                    <DataGridTextColumn Header="X偏移" Binding="{Binding Config.OffsetX}" />
+                    <DataGridTextColumn Header="Y偏移" Binding="{Binding Config.OffsetY}" />
+                    <DataGridTextColumn Header="Z偏移" Binding="{Binding Config.OffsetZ}" />
                     <DataGridTextColumn Header="X速度" Binding="{Binding Config.SpeedX}" />
                     <DataGridTextColumn Header="X加速度" Binding="{Binding Config.AccelX}" />
                     <DataGridTextColumn Header="X减速度" Binding="{Binding Config.DecelX}" />

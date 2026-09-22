@@ -197,6 +197,9 @@ public partial class CraneViewModel : ObservableObject
             new("天车宽度", dto.Width.ToString("0.###"), _ => { }),
             new("安全位X", dto.SafeX.ToString("0.###"), _ => { }),
             new("安全位Z", dto.SafeZ.ToString("0.###"), _ => { }),
+            new("X偏移", dto.OffsetX.ToString("0.###"), _ => { }),
+            new("Y偏移", dto.OffsetY.ToString("0.###"), _ => { }),
+            new("Z偏移", dto.OffsetZ.ToString("0.###"), _ => { }),
             new("X速度", dto.SpeedX.ToString("0.###"), _ => { }),
             new("X加速度", dto.AccelX.ToString("0.###"), _ => { }),
             new("X减速度", dto.DecelX.ToString("0.###"), _ => { }),
@@ -227,16 +230,19 @@ public partial class CraneViewModel : ObservableObject
         dto.Width = ParseDouble(v[8].Value, dto.Width);
         dto.SafeX = ParseDouble(v[9].Value, dto.SafeX);
         dto.SafeZ = ParseDouble(v[10].Value, dto.SafeZ);
-        dto.SpeedX = ParseDouble(v[11].Value, dto.SpeedX);
-        dto.AccelX = ParseDouble(v[12].Value, dto.AccelX);
-        dto.DecelX = ParseDouble(v[13].Value, dto.DecelX);
-        dto.SpeedY = ParseDouble(v[14].Value, dto.SpeedY);
-        dto.AccelY = ParseDouble(v[15].Value, dto.AccelY);
-        dto.DecelY = ParseDouble(v[16].Value, dto.DecelY);
-        dto.SpeedZ = ParseDouble(v[17].Value, dto.SpeedZ);
-        dto.AccelZ = ParseDouble(v[18].Value, dto.AccelZ);
-        dto.DecelZ = ParseDouble(v[19].Value, dto.DecelZ);
-        dto.IsEnabled = ParseBool(v[20].Value, dto.IsEnabled);
+        dto.OffsetX = ParseDouble(v[11].Value, dto.OffsetX);
+        dto.OffsetY = ParseDouble(v[12].Value, dto.OffsetY);
+        dto.OffsetZ = ParseDouble(v[13].Value, dto.OffsetZ);
+        dto.SpeedX = ParseDouble(v[14].Value, dto.SpeedX);
+        dto.AccelX = ParseDouble(v[15].Value, dto.AccelX);
+        dto.DecelX = ParseDouble(v[16].Value, dto.DecelX);
+        dto.SpeedY = ParseDouble(v[17].Value, dto.SpeedY);
+        dto.AccelY = ParseDouble(v[18].Value, dto.AccelY);
+        dto.DecelY = ParseDouble(v[19].Value, dto.DecelY);
+        dto.SpeedZ = ParseDouble(v[20].Value, dto.SpeedZ);
+        dto.AccelZ = ParseDouble(v[21].Value, dto.AccelZ);
+        dto.DecelZ = ParseDouble(v[22].Value, dto.DecelZ);
+        dto.IsEnabled = ParseBool(v[23].Value, dto.IsEnabled);
         return true;
     }
 

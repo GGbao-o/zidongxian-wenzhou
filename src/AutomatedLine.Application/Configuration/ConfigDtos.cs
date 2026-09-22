@@ -42,6 +42,15 @@ public sealed class CraneConfigDto
     /// <summary>安全位 Z。</summary>
     public double SafeZ { get; set; }
 
+    /// <summary>X 轴偏移量（坐标标定/微调）。</summary>
+    public double OffsetX { get; set; }
+
+    /// <summary>Y 轴偏移量。</summary>
+    public double OffsetY { get; set; }
+
+    /// <summary>Z 轴偏移量。</summary>
+    public double OffsetZ { get; set; }
+
     /// <summary>X 轴速度。</summary>
     public double SpeedX { get; set; }
 

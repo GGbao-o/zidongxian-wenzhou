@@ -139,6 +139,9 @@ public class ConfigurationStore : IConfigurationStore
         Width = e.Width,
         SafeX = e.SafeX,
         SafeZ = e.SafeZ,
+        OffsetX = e.OffsetX,
+        OffsetY = e.OffsetY,
+        OffsetZ = e.OffsetZ,
         SpeedX = e.SpeedX,
         SpeedY = e.SpeedY,
         SpeedZ = e.SpeedZ,
@@ -164,6 +167,9 @@ public class ConfigurationStore : IConfigurationStore
         e.Width = dto.Width;
         e.SafeX = dto.SafeX;
         e.SafeZ = dto.SafeZ;
+        e.OffsetX = dto.OffsetX;
+        e.OffsetY = dto.OffsetY;
+        e.OffsetZ = dto.OffsetZ;
         e.SpeedX = dto.SpeedX;
         e.SpeedY = dto.SpeedY;
         e.SpeedZ = dto.SpeedZ;

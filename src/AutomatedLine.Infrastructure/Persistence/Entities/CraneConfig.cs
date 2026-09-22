@@ -40,6 +40,15 @@ public class CraneConfig
     /// <summary>安全位 Z 坐标（安全高度），移动前的抬升高度。</summary>
     public double SafeZ { get; set; }
 
+    /// <summary>X 轴偏移量。用于坐标标定/微调（实际目标 = 现场坐标 + 偏移）。</summary>
+    public double OffsetX { get; set; }
+
+    /// <summary>Y 轴偏移量。</summary>
+    public double OffsetY { get; set; }
+
+    /// <summary>Z 轴偏移量。</summary>
+    public double OffsetZ { get; set; }
+
     /// <summary>X 轴速度。</summary>
     public double SpeedX { get; set; }
 
