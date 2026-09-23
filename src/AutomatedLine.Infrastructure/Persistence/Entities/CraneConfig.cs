@@ -76,6 +76,9 @@ public class CraneConfig
     /// <summary>Z 轴减速度。</summary>
     public double DecelZ { get; set; }
 
+    /// <summary>运动到位超时（毫秒）。默认 60000（60s）。</summary>
+    public int MoveTimeoutMs { get; set; } = 60_000;
+
     /// <summary>是否启用。停用的天车不参与调度。</summary>
     public bool IsEnabled { get; set; } = true;
 

@@ -78,6 +78,9 @@ public sealed class CraneConfigDto
     /// <summary>Z 轴减速度。</summary>
     public double DecelZ { get; set; }
 
+    /// <summary>运动到位超时（毫秒）。默认 60000。</summary>
+    public int MoveTimeoutMs { get; set; } = 60_000;
+
     /// <summary>是否启用。</summary>
     public bool IsEnabled { get; set; } = true;
 }

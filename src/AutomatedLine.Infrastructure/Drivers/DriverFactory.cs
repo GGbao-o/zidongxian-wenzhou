@@ -29,6 +29,6 @@ public static class DriverFactory
     /// <returns>天车驱动</returns>
     public static ICraneDriver CreateCraneDriver(CraneConfig config, IAppLogger logger)
     {
-        return new CraneService(config.Id, config.Name, config.IpAddress, logger);
+        return new CraneService(config.Id, config.Name, config.IpAddress, logger, config.MoveTimeoutMs);
     }
 }

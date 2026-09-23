@@ -151,6 +151,7 @@ public class ConfigurationStore : IConfigurationStore
         DecelX = e.DecelX,
         DecelY = e.DecelY,
         DecelZ = e.DecelZ,
+        MoveTimeoutMs = e.MoveTimeoutMs,
         IsEnabled = e.IsEnabled
     };
 
@@ -179,6 +180,7 @@ public class ConfigurationStore : IConfigurationStore
         e.DecelX = dto.DecelX;
         e.DecelY = dto.DecelY;
         e.DecelZ = dto.DecelZ;
+        e.MoveTimeoutMs = dto.MoveTimeoutMs;
         e.IsEnabled = dto.IsEnabled;
     }
 

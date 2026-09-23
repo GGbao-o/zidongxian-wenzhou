@@ -46,6 +46,33 @@ public sealed class CraneStatus
 
     /// <summary>有版。</summary>
     public bool HasRoller { get; init; }
+
+    /// <summary>X 绝对速度。</summary>
+    public int XSpeed { get; init; }
+
+    /// <summary>X 绝对加速度。</summary>
+    public int XAccel { get; init; }
+
+    /// <summary>X 绝对减速度。</summary>
+    public int XDecel { get; init; }
+
+    /// <summary>Y 绝对速度。</summary>
+    public int YSpeed { get; init; }
+
+    /// <summary>Y 绝对加速度。</summary>
+    public int YAccel { get; init; }
+
+    /// <summary>Y 绝对减速度。</summary>
+    public int YDecel { get; init; }
+
+    /// <summary>Z 绝对速度。</summary>
+    public int ZSpeed { get; init; }
+
+    /// <summary>Z 绝对加速度。</summary>
+    public int ZAccel { get; init; }
+
+    /// <summary>Z 绝对减速度。</summary>
+    public int ZDecel { get; init; }
 }
 
 /// <summary>
@@ -64,8 +91,8 @@ public sealed class CraneService : ICraneDriver
     /// <summary>到位容差默认值（mm）。</summary>
     private const int DefaultTolerance = 5;
 
-    /// <summary>运动超时默认值（毫秒）。</summary>
-    private const int DefaultTimeoutMs = 120_000;
+    /// <summary>运动超时兜底值（毫秒）：配置非法时使用 60s。</summary>
+    private const int FallbackMoveTimeoutMs = 60_000;
 
     /// <summary>底层 Modbus 客户端。</summary>
     private readonly ModbusTcpClient _client;
@@ -79,6 +106,9 @@ public sealed class CraneService : ICraneDriver
     /// <summary>是否已确认处于手动模式（缓存，避免重复写 D4001/D4500）。</summary>
     private bool _manualModeSet;
 
+    /// <summary>运动到位超时（毫秒，来自天车配置）。</summary>
+    private readonly int _moveTimeoutMs;
+
     /// <summary>
     /// 构造函数。
     /// </summary>
@@ -86,13 +116,15 @@ public sealed class CraneService : ICraneDriver
     /// <param name="name">天车名称（日志用）</param>
     /// <param name="ip">PLC IP（来自数据库）</param>
     /// <param name="logger">日志</param>
-    public CraneService(int craneId, string name, string ip, IAppLogger logger)
+    /// <param name="moveTimeoutMs">运动到位超时（毫秒），来自数据库配置；非法时用 60s</param>
+    public CraneService(int craneId, string name, string ip, IAppLogger logger, int moveTimeoutMs = FallbackMoveTimeoutMs)
     {
         CraneId = craneId;
         _name = name;
         _logger = logger;
+        _moveTimeoutMs = moveTimeoutMs > 0 ? moveTimeoutMs : FallbackMoveTimeoutMs;
         _client = new ModbusTcpClient(ip, PlcPort, UnitId);
-        _logger.Info(LogCategory.System, $"天车[{name}] 创建服务，IP={ip}:{PlcPort}（端口/协议固定）");
+        _logger.Info(LogCategory.System, $"天车[{name}] 创建服务，IP={ip}:{PlcPort}（端口/协议固定），运动超时={_moveTimeoutMs}ms");
     }
 
     /// <inheritdoc />
@@ -122,6 +154,8 @@ public sealed class CraneService : ICraneDriver
     public async Task<CraneStatus> ReadStatusAsync(CancellationToken cancellationToken = default)
     {
         var r = await _client.ReadRegistersAsync(CraneAddress.StatusStart, CraneAddress.StatusCount, cancellationToken).ConfigureAwait(false);
+        // 速度区 D2501~D2521 共 21 个：X=+0~2, Y=+9~11, Z=+18~20
+        var spd = await _client.ReadRegistersAsync(CraneAddress.XAbsSpeed, 21, cancellationToken).ConfigureAwait(false);
 
         return new CraneStatus
         {
@@ -137,7 +171,16 @@ public sealed class CraneService : ICraneDriver
             YPosition = r[22],
             ZEncoder = r[23],
             ZPosition = r[25],
-            HasRoller = r[29] != 0
+            HasRoller = r[29] != 0,
+            XSpeed = spd[0],
+            XAccel = spd[1],
+            XDecel = spd[2],
+            YSpeed = spd[9],
+            YAccel = spd[10],
+            YDecel = spd[11],
+            ZSpeed = spd[18],
+            ZAccel = spd[19],
+            ZDecel = spd[20]
         };
     }
 
@@ -476,7 +519,7 @@ public sealed class CraneService : ICraneDriver
     /// <param name="cancellationToken">取消令牌</param>
     private async Task PollAxesAsync(int targetX, int targetY, int targetZ, bool pollEncoder, int tolerance, CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow.AddMilliseconds(DefaultTimeoutMs);
+        var deadline = DateTime.UtcNow.AddMilliseconds(_moveTimeoutMs);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
