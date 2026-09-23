@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Threading;
+using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Collection;
@@ -52,6 +54,11 @@ public partial class App : System.Windows.Application
 
         _host = builder.Build();
 
+        // 全局兜底：任何漏网的未处理异常都记录下来，绝不让程序崩溃退出
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
         // 先装载数据库配置为内存对象与驱动，再启动宿主：
         // 这样采集器启动时注册表里已经有资源可采（架构文档 §8.2）。
         // 数据库不可达时不阻塞界面启动：记录报警后继续，界面仍可打开，稍后重启线路再试。
@@ -102,6 +109,60 @@ public partial class App : System.Windows.Application
         }
 
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// UI 线程未处理异常：记录日志并提示，标记已处理以阻止进程退出。
+    /// </summary>
+    /// <param name="sender">事件源</param>
+    /// <param name="e">事件参数</param>
+    private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        HandleUnhandled("UI 未处理异常", e.Exception);
+        System.Windows.MessageBox.Show($"发生未处理异常（已记录，程序继续运行）：{e.Exception.Message}",
+            "异常", MessageBoxButton.OK, MessageBoxImage.Warning);
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// 非 UI 线程未处理异常：只记录日志。
+    /// </summary>
+    /// <param name="sender">事件源</param>
+    /// <param name="e">事件参数</param>
+    private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        HandleUnhandled("后台未处理异常", e.ExceptionObject as Exception);
+    }
+
+    /// <summary>
+    /// 未观察的任务异常：记录并标记已观察，避免影响进程。
+    /// </summary>
+    /// <param name="sender">事件源</param>
+    /// <param name="e">事件参数</param>
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        HandleUnhandled("未观察的任务异常", e.Exception);
+        e.SetObserved();
+    }
+
+    /// <summary>
+    /// 统一记录未处理异常：优先写日志，失败则退化为控制台输出。
+    /// </summary>
+    /// <param name="source">来源描述</param>
+    /// <param name="exception">异常</param>
+    private void HandleUnhandled(string source, Exception? exception)
+    {
+        var message = $"{source}：{exception?.Message}";
+        try
+        {
+            _host?.Services.GetService<IAppLogger>()?.Error(LogCategory.System, message, exception);
+        }
+        catch
+        {
+            // 日志本身失败也不能再抛
+        }
+
+        Console.WriteLine($"[App] {message}");
     }
 
     /// <summary>
