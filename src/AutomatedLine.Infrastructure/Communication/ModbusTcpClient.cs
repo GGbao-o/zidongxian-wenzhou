@@ -72,7 +72,21 @@ public sealed class ModbusTcpClient : IDisposable
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         linked.CancelAfter(_timeoutMs);
-        await tcp.ConnectAsync(_ip, _port, linked.Token).ConfigureAwait(false);
+        try
+        {
+            await tcp.ConnectAsync(_ip, _port, linked.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // 自己的超时触发的取消：转成明确的超时异常，避免被误读为“外部取消”
+            tcp.Dispose();
+            throw new TimeoutException($"连接 {_ip}:{_port} 超时（{_timeoutMs}ms）");
+        }
+        catch
+        {
+            tcp.Dispose();
+            throw;
+        }
 
         _tcp = tcp;
         _stream = tcp.GetStream();

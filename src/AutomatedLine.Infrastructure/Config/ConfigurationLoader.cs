@@ -57,7 +57,7 @@ public class ConfigurationLoader : IConfigurationLoader
     }
 
     /// <inheritdoc />
-    public async Task<ConfigurationLoadResult> LoadAsync(CancellationToken cancellationToken = default)
+    public Task<ConfigurationLoadResult> LoadAsync(CancellationToken cancellationToken = default)
     {
         // 重新装载前先清空，保证界面上删除的配置不会残留在内存
         _deviceRegistry.Clear();
@@ -78,9 +78,9 @@ public class ConfigurationLoader : IConfigurationLoader
             var device = CreateDevice(config);
             _deviceRegistry.Register(device);
 
-            // 创建并注册设备驱动（设备号与天车号是两个命名空间，分开注册）
+            // 创建并注册设备驱动（设备号与天车号是两个命名空间，分开注册）。
+            // 不在此处主动连接：驱动在首次读/写时惰性连接，避免现场设备离线拖慢甚至阻断配置装载。
             var driver = DriverFactory.CreateDeviceDriver(config);
-            await driver.ConnectAsync(cancellationToken).ConfigureAwait(false);
             _driverRegistry.RegisterDevice(driver);
             driverCount++;
         }
@@ -101,8 +101,8 @@ public class ConfigurationLoader : IConfigurationLoader
             };
             _craneRegistry.Register(crane);
 
+            // 同样不主动连接：天车 PLC 离线时不影响配置装载，首次操作时再连。
             var driver = DriverFactory.CreateCraneDriver(config, _logger);
-            await driver.ConnectAsync(cancellationToken).ConfigureAwait(false);
             _driverRegistry.RegisterCrane(driver);
             driverCount++;
         }
@@ -110,7 +110,7 @@ public class ConfigurationLoader : IConfigurationLoader
         _logger.Info(LogCategory.System,
             $"配置装载完成：设备 {deviceConfigs.Count} 台、天车 {craneConfigs.Count} 台、驱动 {driverCount} 个");
 
-        return new ConfigurationLoadResult(deviceConfigs.Count, craneConfigs.Count, driverCount);
+        return Task.FromResult(new ConfigurationLoadResult(deviceConfigs.Count, craneConfigs.Count, driverCount));
     }
 
     /// <summary>
