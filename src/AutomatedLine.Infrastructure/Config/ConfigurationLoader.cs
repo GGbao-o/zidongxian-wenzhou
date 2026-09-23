@@ -101,7 +101,7 @@ public class ConfigurationLoader : IConfigurationLoader
             };
             _craneRegistry.Register(crane);
 
-            var driver = DriverFactory.CreateCraneDriver(config);
+            var driver = DriverFactory.CreateCraneDriver(config, _logger);
             await driver.ConnectAsync(cancellationToken).ConfigureAwait(false);
             _driverRegistry.RegisterCrane(driver);
             driverCount++;
