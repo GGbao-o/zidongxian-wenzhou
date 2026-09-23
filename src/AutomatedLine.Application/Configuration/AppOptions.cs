@@ -18,27 +18,6 @@ public sealed class AppOptions
 
     /// <summary>日志类参数。</summary>
     public LoggingOptions Logging { get; set; } = new();
-
-    /// <summary>手动操作相关参数。</summary>
-    public ManualOptions Manual { get; set; } = new();
-}
-
-/// <summary>
-/// 手动操作参数。手动操作页的默认速度与默认点动步长。
-/// </summary>
-public sealed class ManualOptions
-{
-    /// <summary>默认运动速度（三轴初值）。</summary>
-    public double DefaultSpeed { get; set; } = 100;
-
-    /// <summary>默认加速度（三轴初值）。</summary>
-    public double DefaultAccel { get; set; } = 100;
-
-    /// <summary>默认减速度（三轴初值）。</summary>
-    public double DefaultDecel { get; set; } = 100;
-
-    /// <summary>默认相对运动步长（mm）。</summary>
-    public double DefaultStep { get; set; } = 100;
 }
 
 /// <summary>采集参数。决定状态刷新的实时性与通信压力。</summary>

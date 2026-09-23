@@ -118,15 +118,7 @@ public partial class ParamsViewModel : ObservableObject
         logging.Items.Add(LongItem("单文件上限(字节)", () => _options.Logging.MaxFileSizeBytes, v => _options.Logging.MaxFileSizeBytes = v));
         Categories.Add(logging);
 
-        var manual = new ParamCategoryViewModel("手动", "手动操作页默认速度与步长");
-        manual.Items.Add(DoubleItem("默认速度", () => _options.Manual.DefaultSpeed, v => _options.Manual.DefaultSpeed = v));
-        manual.Items.Add(DoubleItem("默认步长(mm)", () => _options.Manual.DefaultStep, v => _options.Manual.DefaultStep = v));
-        Categories.Add(manual);
     }
-
-    /// <summary>构造浮点参数项。</summary>
-    private static ParamItemViewModel DoubleItem(string name, Func<double> get, Action<double> set)
-        => new(name, get().ToString("0.###"), text => set(double.TryParse(text, out var v) ? v : 0));
 
     /// <summary>构造整数参数项。</summary>
     private static ParamItemViewModel IntItem(string name, Func<int> get, Action<int> set)
