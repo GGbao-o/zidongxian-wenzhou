@@ -105,25 +105,27 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>Z 减速度。</summary>
     [ObservableProperty] private int _zDecelDisp;
 
-    // ── X 区信号 ──
+    // ── X 区信号（显示文本）──
+    // 用文本而非 bool 的原因：线圈读取失败时值为"未知"，不能显示成 0/False
+    // （按 0 显示会把通信故障误读成"无板 / 未下压"）。读到的电平显示"是/否"，失败显示"—"。
     /// <summary>X0 接液盘门开到位。</summary>
-    [ObservableProperty] private bool _x0DrainOpen;
+    [ObservableProperty] private string _x0DrainOpenText = "—";
     /// <summary>X1 接液盘门关到位。</summary>
-    [ObservableProperty] private bool _x1DrainClose;
+    [ObservableProperty] private string _x1DrainCloseText = "—";
     /// <summary>X2 磁铁下压限位。</summary>
-    [ObservableProperty] private bool _x2Pressure;
+    [ObservableProperty] private string _x2PressureText = "—";
     /// <summary>X3 X 轴物理原点。</summary>
-    [ObservableProperty] private bool _x3HomeX;
+    [ObservableProperty] private string _x3HomeXText = "—";
     /// <summary>X4 Y 轴物理原点。</summary>
-    [ObservableProperty] private bool _x4HomeY;
+    [ObservableProperty] private string _x4HomeYText = "—";
     /// <summary>X5 Z 轴物理原点。</summary>
-    [ObservableProperty] private bool _x5HomeZ;
+    [ObservableProperty] private string _x5HomeZText = "—";
     /// <summary>X6 充磁反馈。</summary>
-    [ObservableProperty] private bool _x6Magnetize;
+    [ObservableProperty] private string _x6MagnetizeText = "—";
     /// <summary>X7 退磁反馈。</summary>
-    [ObservableProperty] private bool _x7Demagnetize;
+    [ObservableProperty] private string _x7DemagnetizeText = "—";
     /// <summary>X11 检测有版。</summary>
-    [ObservableProperty] private bool _x11HasPlate;
+    [ObservableProperty] private string _x11HasPlateText = "—";
 
     // ── 绝对移动输入 ──
     /// <summary>用户输入 X 绝对值。</summary>
@@ -230,15 +232,16 @@ public partial class ManualOperationViewModel : ObservableObject
         ZSpeedDisp = status.ZSpeed;
         ZAccelDisp = status.ZAccel;
         ZDecelDisp = status.ZDecel;
-        X0DrainOpen = status.DrainOpen;
-        X1DrainClose = status.DrainClose;
-        X2Pressure = status.PressureLimit;
-        X3HomeX = status.PhysicalHomeX;
-        X4HomeY = status.PhysicalHomeY;
-        X5HomeZ = status.PhysicalHomeZ;
-        X6Magnetize = status.MagnetizeFeedback;
-        X7Demagnetize = status.DemagnetizeFeedback;
-        X11HasPlate = status.HasPlate;
+        // X 区线圈：读到显示"是/否"，单点读取失败显示"—"（不影响其它点位与坐标显示）
+        X0DrainOpenText = FormatLevel(status.DrainOpen);
+        X1DrainCloseText = FormatLevel(status.DrainClose);
+        X2PressureText = FormatLevel(status.PressureLimit);
+        X3HomeXText = FormatLevel(status.PhysicalHomeX);
+        X4HomeYText = FormatLevel(status.PhysicalHomeY);
+        X5HomeZText = FormatLevel(status.PhysicalHomeZ);
+        X6MagnetizeText = FormatLevel(status.MagnetizeFeedback);
+        X7DemagnetizeText = FormatLevel(status.DemagnetizeFeedback);
+        X11HasPlateText = FormatLevel(status.HasPlate);
 
         SetState(status.HasAlarm ? CraneConnectionState.Alarm : CraneConnectionState.Connected,
             status.HasAlarm ? "天车报警" : "已连接");
@@ -342,6 +345,15 @@ public partial class ManualOperationViewModel : ObservableObject
             await RefreshAsync();
         }
     }
+
+    /// <summary>
+    /// 把 X 区线圈电平转成显示文本。
+    /// 读到电平显示"是/否"；读取失败（null）显示"—"，**不显示成 0/否**，
+    /// 避免把"读不到"误读成"无板 / 未下压"。
+    /// </summary>
+    /// <param name="level">线圈电平；null 表示该点读取失败</param>
+    /// <returns>显示文本</returns>
+    private static string FormatLevel(bool? level) => level is null ? "—" : level.Value ? "是" : "否";
 
     /// <summary>设置连接状态显示。</summary>
     /// <param name="state">状态</param>

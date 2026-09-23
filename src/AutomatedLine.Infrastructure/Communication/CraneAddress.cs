@@ -51,8 +51,7 @@ public static class CraneAddress
     /// <summary>D5025 Z 显示值坐标。</summary>
     public const int ZPosition = 5025;
 
-    /// <summary>D5029 有版。</summary>
-    public const int HasRoller = 5029;
+    // 注意：D5029 经现场确认**不是**有板信号，已不再使用；有板一律取 X11 线圈（见下方 X11_HasPlate）。
 
     // ── X 区输入（FC01 读线圈，八进制编号）──
     /// <summary>X0 接液盘门开到位。</summary>
@@ -79,7 +78,7 @@ public static class CraneAddress
     /// <summary>X7 退磁反馈。</summary>
     public const int X7_DemagnetizeOk = 63495;
 
-    /// <summary>X11 检测有版。</summary>
+    /// <summary>X11 检测有版（现场确认：这是唯一的有板信号，D5029 不是）。</summary>
     public const int X11_HasPlate = 63497;
 
     // ── 速度/加减速：D2501~D2527（FC06）──

@@ -69,32 +69,35 @@ public sealed class CraneStatusDto
     /// <summary>Z 绝对减速度。</summary>
     public int ZDecel { get; init; }
 
-    /// <summary>有版（D5029）。</summary>
-    public bool HasPlate { get; init; }
+    // 以下 X 区线圈点位均为 bool?：true/false 为实际读到的电平，**null 表示该点读取失败（未知）**。
+    // 之所以用可空类型，是因为"读不到"不能等同于"0/无板"——按 0 处理会把通信故障误判成现场状态。
+
+    /// <summary>有版（X11 线圈 63497）。现场确认 D5029 不是有板信号。</summary>
+    public bool? HasPlate { get; init; }
 
     /// <summary>充磁反馈（X6）。</summary>
-    public bool MagnetizeFeedback { get; init; }
+    public bool? MagnetizeFeedback { get; init; }
 
     /// <summary>退磁反馈（X7）。</summary>
-    public bool DemagnetizeFeedback { get; init; }
+    public bool? DemagnetizeFeedback { get; init; }
 
     /// <summary>磁铁下压限位（X2）。</summary>
-    public bool PressureLimit { get; init; }
+    public bool? PressureLimit { get; init; }
 
     /// <summary>接液盘门开到位（X0）。</summary>
-    public bool DrainOpen { get; init; }
+    public bool? DrainOpen { get; init; }
 
     /// <summary>接液盘门关到位（X1）。</summary>
-    public bool DrainClose { get; init; }
+    public bool? DrainClose { get; init; }
 
     /// <summary>X 轴物理原点输入（X3）。</summary>
-    public bool PhysicalHomeX { get; init; }
+    public bool? PhysicalHomeX { get; init; }
 
     /// <summary>Y 轴物理原点输入（X4）。</summary>
-    public bool PhysicalHomeY { get; init; }
+    public bool? PhysicalHomeY { get; init; }
 
     /// <summary>Z 轴物理原点输入（X5）。</summary>
-    public bool PhysicalHomeZ { get; init; }
+    public bool? PhysicalHomeZ { get; init; }
 
     /// <summary>是否任一报警非 0。</summary>
     public bool HasAlarm => ServoAlarm != 0 || PlcServoAlarm != 0 || PlcAlarm != 0;

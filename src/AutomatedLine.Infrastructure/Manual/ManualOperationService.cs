@@ -41,46 +41,81 @@ public sealed class ManualOperationService : IManualOperationService
             return null;
         }
 
+        // 第一段：批量读 D5000~D5029 与速度区。
+        // 这一段拿不到就没有坐标可显示，返回 null 让页面提示"连接失败"，并记录一条日志。
+        CraneStatus s;
         try
         {
-            var s = await crane.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
-            return new CraneStatusDto
-            {
-                XDisplay = s.XPosition,
-                YDisplay = s.YPosition,
-                ZDisplay = s.ZPosition,
-                XEncoder = s.XEncoder,
-                YEncoder = s.YEncoder,
-                ZEncoder = s.ZEncoder,
-                XHomeCompleted = s.XHomeCompleted,
-                YHomeCompleted = s.YHomeCompleted,
-                ZHomeCompleted = s.ZHomeCompleted,
-                ServoAlarm = s.ServoAlarm,
-                PlcServoAlarm = s.PlcServoAlarm,
-                PlcAlarm = s.PlcAlarm,
-                XSpeed = s.XSpeed,
-                XAccel = s.XAccel,
-                XDecel = s.XDecel,
-                YSpeed = s.YSpeed,
-                YAccel = s.YAccel,
-                YDecel = s.YDecel,
-                ZSpeed = s.ZSpeed,
-                ZAccel = s.ZAccel,
-                ZDecel = s.ZDecel,
-                HasPlate = s.HasRoller,
-                MagnetizeFeedback = await crane.ReadCoilAsync(CraneAddress.X6_MagnetizeOk, cancellationToken).ConfigureAwait(false),
-                DemagnetizeFeedback = await crane.ReadCoilAsync(CraneAddress.X7_DemagnetizeOk, cancellationToken).ConfigureAwait(false),
-                PressureLimit = await crane.ReadCoilAsync(CraneAddress.X2_MagnetDownLimit, cancellationToken).ConfigureAwait(false),
-                DrainOpen = await crane.ReadCoilAsync(CraneAddress.X0_DrainOpen, cancellationToken).ConfigureAwait(false),
-                DrainClose = await crane.ReadCoilAsync(CraneAddress.X1_DrainClose, cancellationToken).ConfigureAwait(false),
-                PhysicalHomeX = await crane.ReadCoilAsync(CraneAddress.X3_HomeX, cancellationToken).ConfigureAwait(false),
-                PhysicalHomeY = await crane.ReadCoilAsync(CraneAddress.X4_HomeY, cancellationToken).ConfigureAwait(false),
-                PhysicalHomeZ = await crane.ReadCoilAsync(CraneAddress.X5_HomeZ, cancellationToken).ConfigureAwait(false)
-            };
+            s = await crane.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.Warn(LogCategory.Communication, $"手动页读取天车[{craneId}] 状态失败：{ex.Message}");
+            _logger.Warn(LogCategory.Communication,
+                $"手动页读取天车[{craneId}] 状态失败（D5000~D5029 批量读 + 速度区 D2501~D2521）：{ex.Message}");
+            return null;
+        }
+
+        // 第二段：X 区线圈逐个读。任一点失败只把该点标记为"未知"（null），
+        // 不再让整个状态区一起消失——坐标、编码器、报警仍可正常显示。
+        // 失败原因按点名写日志，便于区分到底哪个点读不到，而不是笼统一句"读取失败"。
+        var dto = new CraneStatusDto
+        {
+            XDisplay = s.XPosition,
+            YDisplay = s.YPosition,
+            ZDisplay = s.ZPosition,
+            XEncoder = s.XEncoder,
+            YEncoder = s.YEncoder,
+            ZEncoder = s.ZEncoder,
+            XHomeCompleted = s.XHomeCompleted,
+            YHomeCompleted = s.YHomeCompleted,
+            ZHomeCompleted = s.ZHomeCompleted,
+            ServoAlarm = s.ServoAlarm,
+            PlcServoAlarm = s.PlcServoAlarm,
+            PlcAlarm = s.PlcAlarm,
+            XSpeed = s.XSpeed,
+            XAccel = s.XAccel,
+            XDecel = s.XDecel,
+            YSpeed = s.YSpeed,
+            YAccel = s.YAccel,
+            YDecel = s.YDecel,
+            ZSpeed = s.ZSpeed,
+            ZAccel = s.ZAccel,
+            ZDecel = s.ZDecel,
+            HasPlate = await ReadCoilAsync(crane, craneId, CraneAddress.X11_HasPlate, "X11 检测有版", cancellationToken).ConfigureAwait(false),
+            MagnetizeFeedback = await ReadCoilAsync(crane, craneId, CraneAddress.X6_MagnetizeOk, "X6 充磁反馈", cancellationToken).ConfigureAwait(false),
+            DemagnetizeFeedback = await ReadCoilAsync(crane, craneId, CraneAddress.X7_DemagnetizeOk, "X7 退磁反馈", cancellationToken).ConfigureAwait(false),
+            PressureLimit = await ReadCoilAsync(crane, craneId, CraneAddress.X2_MagnetDownLimit, "X2 磁铁下压限位", cancellationToken).ConfigureAwait(false),
+            DrainOpen = await ReadCoilAsync(crane, craneId, CraneAddress.X0_DrainOpen, "X0 接液盘门开到位", cancellationToken).ConfigureAwait(false),
+            DrainClose = await ReadCoilAsync(crane, craneId, CraneAddress.X1_DrainClose, "X1 接液盘门关到位", cancellationToken).ConfigureAwait(false),
+            PhysicalHomeX = await ReadCoilAsync(crane, craneId, CraneAddress.X3_HomeX, "X3 X 轴物理原点", cancellationToken).ConfigureAwait(false),
+            PhysicalHomeY = await ReadCoilAsync(crane, craneId, CraneAddress.X4_HomeY, "X4 Y 轴物理原点", cancellationToken).ConfigureAwait(false),
+            PhysicalHomeZ = await ReadCoilAsync(crane, craneId, CraneAddress.X5_HomeZ, "X5 Z 轴物理原点", cancellationToken).ConfigureAwait(false)
+        };
+
+        return dto;
+    }
+
+    /// <summary>
+    /// 读单个 X 区线圈。
+    /// 读取失败返回 null（未知）并记录一条含点名的日志，**绝不按 0 处理**——
+    /// 否则通信故障会被误读成"无板 / 未下压"，进而做出错误的现场判断。
+    /// </summary>
+    /// <param name="crane">天车服务</param>
+    /// <param name="craneId">天车号（日志用）</param>
+    /// <param name="address">线圈地址</param>
+    /// <param name="name">点位名称（日志用）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>true/false 为实际电平；null 表示该点读取失败</returns>
+    private async Task<bool?> ReadCoilAsync(CraneService crane, int craneId, int address, string name, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await crane.ReadCoilAsync(address, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.Communication,
+                $"手动页读取天车[{craneId}] {name}（线圈 {address}）失败：{ex.Message}");
             return null;
         }
     }

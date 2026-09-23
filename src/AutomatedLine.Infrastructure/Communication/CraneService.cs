@@ -44,9 +44,6 @@ public sealed class CraneStatus
     /// <summary>Z 绝对编码器坐标。</summary>
     public int ZEncoder { get; init; }
 
-    /// <summary>有版。</summary>
-    public bool HasRoller { get; init; }
-
     /// <summary>X 绝对速度。</summary>
     public int XSpeed { get; init; }
 
@@ -171,7 +168,6 @@ public sealed class CraneService : ICraneDriver
             YPosition = r[22],
             ZEncoder = r[23],
             ZPosition = r[25],
-            HasRoller = r[29] != 0,
             XSpeed = spd[0],
             XAccel = spd[1],
             XDecel = spd[2],
@@ -195,13 +191,18 @@ public sealed class CraneService : ICraneDriver
     public async Task<IReadOnlyDictionary<string, object?>> ReadAllSignalsAsync(CancellationToken cancellationToken = default)
     {
         var status = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+
+        // 有板信号取 X11 线圈（现场确认 D5029 不是有板信号）。
+        // 采集周期内比原先多一次线圈读；读失败按通信瞬时故障处理，由采集器标记断开并告警。
+        var hasPlate = await _client.ReadCoilAsync(CraneAddress.X11_HasPlate, cancellationToken).ConfigureAwait(false);
+
         return new Dictionary<string, object?>
         {
             ["X"] = (double)status.XPosition,
             ["Y"] = (double)status.YPosition,
             ["Z"] = (double)status.ZPosition,
             ["Alarm"] = status.ServoAlarm != 0 || status.PlcServoAlarm != 0 || status.PlcAlarm != 0,
-            ["HasMaterial"] = status.HasRoller,
+            ["HasMaterial"] = hasPlate,
             ["XHome"] = status.XHomeCompleted,
             ["YHome"] = status.YHomeCompleted,
             ["ZHome"] = status.ZHomeCompleted
@@ -425,13 +426,14 @@ public sealed class CraneService : ICraneDriver
         _logger.Info(LogCategory.Operation, $"天车[{_name}] 减速停止");
     }
 
-    /// <summary>急停：D4518=2 → 0（不切手动，紧急直写）。</summary>
+    /// <summary>急停：D4518=2 → 200ms → 0（不切手动，紧急直写）。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     public async Task EmergencyStopAsync(CancellationToken cancellationToken = default)
     {
-        await _client.WriteRegisterAsync(CraneAddress.ManualEStop, 2, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ManualEStop, 0, cancellationToken).ConfigureAwait(false);
-        _logger.Warn(LogCategory.Operation, $"天车[{_name}] 急停 D4518");
+        // 急停与其余脉冲命令一样必须保证 200ms 脉冲宽度，否则 PLC 可能采不到这个脉冲。
+        // 它与其它命令的唯一区别是"不切手动"——不走 D4001/D4500 前置，以便紧急情况下直接下发。
+        await PulseAsync(CraneAddress.ManualEStop, true, 200, cancellationToken).ConfigureAwait(false);
+        _logger.Warn(LogCategory.Operation, $"天车[{_name}] 急停 D4518=2→200ms→0");
     }
 
     /// <summary>开接液盘：D4512=2 → 0。</summary>

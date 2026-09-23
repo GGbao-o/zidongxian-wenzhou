@@ -111,15 +111,15 @@
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
                             Text="X 区信号" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X0DrainOpen, StringFormat=X0 接液盘门开：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X1DrainClose, StringFormat=X1 接液盘门关：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X2Pressure, StringFormat=X2 下压限位：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X3HomeX, StringFormat=X3 X物理原点：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X4HomeY, StringFormat=X4 Y物理原点：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X5HomeZ, StringFormat=X5 Z物理原点：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X6Magnetize, StringFormat=X6 充磁反馈：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X7Demagnetize, StringFormat=X7 退磁反馈：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X11HasPlate, StringFormat=X11 检测有版：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X0DrainOpenText, StringFormat=X0 接液盘门开：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X1DrainCloseText, StringFormat=X1 接液盘门关：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X2PressureText, StringFormat=X2 下压限位：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X3HomeXText, StringFormat=X3 X物理原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X4HomeYText, StringFormat=X4 Y物理原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X5HomeZText, StringFormat=X5 Z物理原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X6MagnetizeText, StringFormat=X6 充磁反馈：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X7DemagnetizeText, StringFormat=X7 退磁反馈：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X11HasPlateText, StringFormat=X11 检测有版：{0}}" />
                     </StackPanel>
                 </Border>
 
