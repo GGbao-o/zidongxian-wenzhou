@@ -616,16 +616,16 @@ public sealed class CraneService : ICraneDriver
     }
 
     /// <summary>
-    /// 下压到位处理：D4523 下压急停 → 使手动前置缓存失效 → 清除报警 D4514。
-    /// 下压是正常工艺到位（不是报警/故障），但仍按下压急停 + 清报警流程收尾。
+    /// 下压到位处理：急停 D4518=2 → 200ms → 0 → 使手动前置缓存失效 → 清除报警 D4514。
+    /// 下压是正常工艺到位（不是报警/故障），但仍按急停 + 清报警流程收尾。
     /// 用不可取消令牌，保证该动作即使在被取消/超时时也能完整下发。
     /// </summary>
     private async Task PressureStopAsync()
     {
         var ct = CancellationToken.None;
 
-        // 下压急停是专用寄存器 D4523（与通用急停 D4518 区分）
-        await PulseAsync(CraneAddress.PressureEStop, true, 200, ct).ConfigureAwait(false);
+        // 天车急停只有 D4518（见《手动操作页面.md》按钮表），下压到位也走它，不存在单独的下压急停寄存器
+        await PulseAsync(CraneAddress.ManualEStop, true, 200, ct).ConfigureAwait(false);
 
         // 下压急停后手动使能失效，必须重写 D4001/D4500，否则后续命令不生效
         _manualModeSet = false;
@@ -635,7 +635,7 @@ public sealed class CraneService : ICraneDriver
         await Task.Delay(200, ct).ConfigureAwait(false);
         await _client.WriteRegisterAsync(CraneAddress.ManualClearAlarm, 0, ct).ConfigureAwait(false);
 
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 到达下压限位 X2：已下压急停（D4523）并清除报警（D4514），视为正常结束");
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 到达下压限位 X2：已急停（D4518）并清除报警（D4514），视为正常结束");
     }
 
     /// <summary>写寄存器，失败仅记录不抛出（用于 finally 复位）。</summary>
