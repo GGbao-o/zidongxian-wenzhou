@@ -15,7 +15,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- 顶栏：选择天车 + 刷新 + 连接状态徽章 -->
+        <!--  顶栏：选择天车 + 刷新 + 连接状态徽章  -->
         <StackPanel
             Grid.Row="0"
             Margin="0,0,0,12"
@@ -47,38 +47,70 @@
             </Border>
         </StackPanel>
 
-        <!-- 内容：多卡片，横竖可滚动 -->
+        <!--  内容：多卡片，横竖可滚动  -->
         <ScrollViewer
             Grid.Row="1"
             HorizontalScrollBarVisibility="Auto"
             VerticalScrollBarVisibility="Auto">
             <StackPanel Orientation="Horizontal">
 
-                <!-- 状态显示 -->
-                <Border Width="330" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                <!--  状态显示  -->
+                <Border
+                    Width="330"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CardTitle}" Text="状态" />
-                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="显示值坐标" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="SemiBold"
+                            Text="显示值坐标" />
                         <TextBlock FontFamily="Consolas" Text="{Binding XDisplay, StringFormat=X：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding YDisplay, StringFormat=Y：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding ZDisplay, StringFormat=Z：{0}}" />
 
-                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="绝对编码器坐标" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="SemiBold"
+                            Text="绝对编码器坐标" />
                         <TextBlock FontFamily="Consolas" Text="{Binding XEncoder, StringFormat=X：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding YEncoder, StringFormat=Y：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding ZEncoder, StringFormat=Z：{0}}" />
 
-                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="回原点" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="SemiBold"
+                            Text="三轴速度 / 加速度 / 减速度" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XSpeedDisp, StringFormat=X 速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XAccelDisp, StringFormat=X 加速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XDecelDisp, StringFormat=X 减速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YSpeedDisp, StringFormat=Y 速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YAccelDisp, StringFormat=Y 加速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YDecelDisp, StringFormat=Y 减速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZSpeedDisp, StringFormat=Z 速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZAccelDisp, StringFormat=Z 加速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZDecelDisp, StringFormat=Z 减速度：{0}}" />
+
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="SemiBold"
+                            Text="回原点" />
                         <TextBlock FontFamily="Consolas" Text="{Binding XHome, StringFormat=X 已回原点：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding YHome, StringFormat=Y 已回原点：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding ZHome, StringFormat=Z 已回原点：{0}}" />
 
-                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="报警" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="SemiBold"
+                            Text="报警" />
                         <TextBlock FontFamily="Consolas" Text="{Binding ServoAlarm, StringFormat=伺服报警：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding PlcServoAlarm, StringFormat=PLC伺服指令报警：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding PlcAlarm, StringFormat=PLC报警：{0}}" />
 
-                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="X 区信号" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="SemiBold"
+                            Text="X 区信号" />
                         <TextBlock FontFamily="Consolas" Text="{Binding X0DrainOpen, StringFormat=X0 接液盘门开：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding X1DrainClose, StringFormat=X1 接液盘门关：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding X2Pressure, StringFormat=X2 下压限位：{0}}" />
@@ -91,26 +123,47 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 设置速度（绝对速度） -->
-                <Border Width="240" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                <!--  设置速度（绝对速度）  -->
+                <Border
+                    Width="330"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CardTitle}" Text="设置速度（绝对）" />
                         <TextBlock Margin="0,8,0,0" Text="X 速度 / 加速 / 减速" />
                         <StackPanel Orientation="Horizontal">
-                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding SpeedX}" />
-                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding AccelX}" />
+                            <ui:TextBox
+                                Width="70"
+                                Margin="0,0,4,0"
+                                Text="{Binding SpeedX}" />
+                            <ui:TextBox
+                                Width="70"
+                                Margin="0,0,4,0"
+                                Text="{Binding AccelX}" />
                             <ui:TextBox Width="70" Text="{Binding DecelX}" />
                         </StackPanel>
                         <TextBlock Margin="0,8,0,0" Text="Y 速度 / 加速 / 减速" />
                         <StackPanel Orientation="Horizontal">
-                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding SpeedY}" />
-                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding AccelY}" />
+                            <ui:TextBox
+                                Width="70"
+                                Margin="0,0,4,0"
+                                Text="{Binding SpeedY}" />
+                            <ui:TextBox
+                                Width="70"
+                                Margin="0,0,4,0"
+                                Text="{Binding AccelY}" />
                             <ui:TextBox Width="70" Text="{Binding DecelY}" />
                         </StackPanel>
                         <TextBlock Margin="0,8,0,0" Text="Z 速度 / 加速 / 减速" />
                         <StackPanel Orientation="Horizontal">
-                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding SpeedZ}" />
-                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding AccelZ}" />
+                            <ui:TextBox
+                                Width="70"
+                                Margin="0,0,4,0"
+                                Text="{Binding SpeedZ}" />
+                            <ui:TextBox
+                                Width="70"
+                                Margin="0,0,4,0"
+                                Text="{Binding AccelZ}" />
                             <ui:TextBox Width="70" Text="{Binding DecelZ}" />
                         </StackPanel>
                         <ui:Button
@@ -121,11 +174,18 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 绝对移动 -->
-                <Border Width="220" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                <!--  绝对移动  -->
+                <Border
+                    Width="220"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CardTitle}" Text="绝对移动" />
-                        <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionText}" Text="输入目标绝对值（以编码器为基准）" TextWrapping="Wrap" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            Style="{StaticResource CaptionText}"
+                            Text="输入目标绝对值（以编码器为基准）"
+                            TextWrapping="Wrap" />
                         <TextBlock Margin="0,8,0,0" Text="X 绝对值" />
                         <ui:TextBox Text="{Binding AbsX}" />
                         <TextBlock Margin="0,6,0,0" Text="Y 绝对值" />
@@ -140,11 +200,18 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 相对移动 -->
-                <Border Width="220" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                <!--  相对移动  -->
+                <Border
+                    Width="220"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CardTitle}" Text="相对移动" />
-                        <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionText}" Text="以显示值为基准（0=该轴不动）" TextWrapping="Wrap" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            Style="{StaticResource CaptionText}"
+                            Text="以显示值为基准（0=该轴不动）"
+                            TextWrapping="Wrap" />
                         <TextBlock Margin="0,8,0,0" Text="X 相对值" />
                         <ui:TextBox Text="{Binding RelX}" />
                         <TextBlock Margin="0,6,0,0" Text="Y 相对值" />
@@ -159,27 +226,68 @@
                     </StackPanel>
                 </Border>
 
-                <!-- 动作 -->
-                <Border Width="260" Style="{StaticResource CardBorder}">
+                <!--  动作  -->
+                <Border Width="300" Style="{StaticResource CardBorder}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CardTitle}" Text="动作" />
                         <UniformGrid Margin="0,8,0,0" Columns="2">
-                            <ui:Button Margin="0,0,6,6" Command="{Binding ClearAlarmCommand}" Content="清除报警" />
-                            <ui:Button Margin="0,0,0,6" Command="{Binding EmergencyStopCommand}" Content="急停" />
-                            <ui:Button Margin="0,0,6,6" Command="{Binding SlowStopCommand}" Content="减速停止" />
-                            <ui:Button Margin="0,0,0,6" Command="{Binding ServoOnCommand}" Content="伺服通电" />
-                            <ui:Button Margin="0,0,6,6" Command="{Binding ServoOffCommand}" Content="伺服断电" />
-                            <ui:Button Margin="0,0,0,6" Command="{Binding MagnetOnCommand}" Content="充磁" />
-                            <ui:Button Margin="0,0,6,6" Command="{Binding MagnetOffCommand}" Content="放磁" />
-                            <ui:Button Margin="0,0,0,6" Command="{Binding DrainOpenCommand}" Content="接液盘打开" />
-                            <ui:Button Margin="0,0,6,0" Command="{Binding DrainCloseCommand}" Content="接液盘关闭" />
+                            <ui:Button
+                                Margin="0,0,6,6"
+                                Command="{Binding ClearAlarmCommand}"
+                                Content="清除报警" />
+                            <ui:Button
+                                Margin="0,0,0,6"
+                                Command="{Binding EmergencyStopCommand}"
+                                Content="急停" />
+                            <ui:Button
+                                Margin="0,0,6,6"
+                                Command="{Binding SlowStopCommand}"
+                                Content="减速停止" />
+                            <ui:Button
+                                Margin="0,0,0,6"
+                                Command="{Binding ServoOnCommand}"
+                                Content="伺服通电" />
+                            <ui:Button
+                                Margin="0,0,6,6"
+                                Command="{Binding ServoOffCommand}"
+                                Content="伺服断电" />
+                            <ui:Button
+                                Margin="0,0,0,6"
+                                Command="{Binding MagnetOnCommand}"
+                                Content="充磁" />
+                            <ui:Button
+                                Margin="0,0,6,6"
+                                Command="{Binding MagnetOffCommand}"
+                                Content="放磁" />
+                            <ui:Button
+                                Margin="0,0,0,6"
+                                Command="{Binding DrainOpenCommand}"
+                                Content="接液盘打开" />
+                            <ui:Button
+                                Margin="0,0,6,0"
+                                Command="{Binding DrainCloseCommand}"
+                                Content="接液盘关闭" />
                         </UniformGrid>
 
-                        <TextBlock Margin="0,12,0,0" Style="{StaticResource CardTitle}" Text="回原点" />
+                        <TextBlock
+                            Margin="0,12,0,0"
+                            Style="{StaticResource CardTitle}"
+                            Text="回原点" />
                         <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
-                            <ui:Button Margin="0,0,6,0" Command="{Binding HomeAxisCommand}" CommandParameter="X" Content="X 回原点" />
-                            <ui:Button Margin="0,0,6,0" Command="{Binding HomeAxisCommand}" CommandParameter="Y" Content="Y 回原点" />
-                            <ui:Button Command="{Binding HomeAxisCommand}" CommandParameter="Z" Content="Z 回原点" />
+                            <ui:Button
+                                Margin="0,0,6,0"
+                                Command="{Binding HomeAxisCommand}"
+                                CommandParameter="X"
+                                Content="X 回原点" />
+                            <ui:Button
+                                Margin="0,0,6,0"
+                                Command="{Binding HomeAxisCommand}"
+                                CommandParameter="Y"
+                                Content="Y 回原点" />
+                            <ui:Button
+                                Command="{Binding HomeAxisCommand}"
+                                CommandParameter="Z"
+                                Content="Z 回原点" />
                         </StackPanel>
                     </StackPanel>
                 </Border>

@@ -42,6 +42,33 @@ public sealed class CraneStatusDto
     /// <summary>PLC 报警。</summary>
     public int PlcAlarm { get; init; }
 
+    /// <summary>X 绝对速度。</summary>
+    public int XSpeed { get; init; }
+
+    /// <summary>X 绝对加速度。</summary>
+    public int XAccel { get; init; }
+
+    /// <summary>X 绝对减速度。</summary>
+    public int XDecel { get; init; }
+
+    /// <summary>Y 绝对速度。</summary>
+    public int YSpeed { get; init; }
+
+    /// <summary>Y 绝对加速度。</summary>
+    public int YAccel { get; init; }
+
+    /// <summary>Y 绝对减速度。</summary>
+    public int YDecel { get; init; }
+
+    /// <summary>Z 绝对速度。</summary>
+    public int ZSpeed { get; init; }
+
+    /// <summary>Z 绝对加速度。</summary>
+    public int ZAccel { get; init; }
+
+    /// <summary>Z 绝对减速度。</summary>
+    public int ZDecel { get; init; }
+
     /// <summary>有版（D5029）。</summary>
     public bool HasPlate { get; init; }
 

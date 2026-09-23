@@ -85,6 +85,26 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>PLC 报警。</summary>
     [ObservableProperty] private int _plcAlarm;
 
+    // ── 三轴速度显示（读回当前速度参数）──
+    /// <summary>X 速度。</summary>
+    [ObservableProperty] private int _xSpeedDisp;
+    /// <summary>X 加速度。</summary>
+    [ObservableProperty] private int _xAccelDisp;
+    /// <summary>X 减速度。</summary>
+    [ObservableProperty] private int _xDecelDisp;
+    /// <summary>Y 速度。</summary>
+    [ObservableProperty] private int _ySpeedDisp;
+    /// <summary>Y 加速度。</summary>
+    [ObservableProperty] private int _yAccelDisp;
+    /// <summary>Y 减速度。</summary>
+    [ObservableProperty] private int _yDecelDisp;
+    /// <summary>Z 速度。</summary>
+    [ObservableProperty] private int _zSpeedDisp;
+    /// <summary>Z 加速度。</summary>
+    [ObservableProperty] private int _zAccelDisp;
+    /// <summary>Z 减速度。</summary>
+    [ObservableProperty] private int _zDecelDisp;
+
     // ── X 区信号 ──
     /// <summary>X0 接液盘门开到位。</summary>
     [ObservableProperty] private bool _x0DrainOpen;
@@ -201,6 +221,15 @@ public partial class ManualOperationViewModel : ObservableObject
         ServoAlarm = status.ServoAlarm;
         PlcServoAlarm = status.PlcServoAlarm;
         PlcAlarm = status.PlcAlarm;
+        XSpeedDisp = status.XSpeed;
+        XAccelDisp = status.XAccel;
+        XDecelDisp = status.XDecel;
+        YSpeedDisp = status.YSpeed;
+        YAccelDisp = status.YAccel;
+        YDecelDisp = status.YDecel;
+        ZSpeedDisp = status.ZSpeed;
+        ZAccelDisp = status.ZAccel;
+        ZDecelDisp = status.ZDecel;
         X0DrainOpen = status.DrainOpen;
         X1DrainClose = status.DrainClose;
         X2Pressure = status.PressureLimit;
