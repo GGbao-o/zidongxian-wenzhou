@@ -118,9 +118,9 @@ public partial class App : System.Windows.Application
     /// <param name="e">事件参数</param>
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        // 只记日志、不弹窗：业务异常（超时/报警等）都已在状态机/服务内本地处理，
+        // 这里只兜底真正漏网的意外，弹窗只会刷屏。
         HandleUnhandled("UI 未处理异常", e.Exception);
-        System.Windows.MessageBox.Show($"发生未处理异常（已记录，程序继续运行）：{e.Exception.Message}",
-            "异常", MessageBoxButton.OK, MessageBoxImage.Warning);
         e.Handled = true;
     }
 
