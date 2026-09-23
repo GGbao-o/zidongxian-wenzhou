@@ -286,28 +286,29 @@ public sealed class CraneService : ICraneDriver
 
         try
         {
+            // 触发统一为“写 2 → 500ms → 写 0”，复位后再轮询到位；
+            // 同一阶段的轴并行脉冲（一起写 2、一起写 0），不是写 2 后一直轮询再写 0。
+            var xy = new[] { (CraneAddress.ManualXAbsMove, writeX != -1), (CraneAddress.ManualYAbsMove, writeY != -1) };
+            var z = new[] { (CraneAddress.ManualZAbsMove, writeZ != -1) };
+
             if (zDirection == 1)
             {
-                // Z 下降：先 XY 后 Z
-                await PulseAsync(CraneAddress.ManualXAbsMove, writeX != -1, 500, cancellationToken).ConfigureAwait(false);
-                await PulseAsync(CraneAddress.ManualYAbsMove, writeY != -1, 500, cancellationToken).ConfigureAwait(false);
+                // Z 下降：先 XY（并行）后 Z
+                await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
                 await PollAxesAsync(targetX, targetY, -1, pollEncoder, tolerance, cancellationToken).ConfigureAwait(false);
-                await PulseAsync(CraneAddress.ManualZAbsMove, writeZ != -1, 500, cancellationToken).ConfigureAwait(false);
+                await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
             }
             else if (zDirection == 2)
             {
-                // Z 上升：先 Z 后 XY
-                await PulseAsync(CraneAddress.ManualZAbsMove, writeZ != -1, 500, cancellationToken).ConfigureAwait(false);
+                // Z 上升：先 Z 后 XY（并行）
+                await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
                 await PollAxesAsync(-1, -1, targetZ, pollEncoder, tolerance, cancellationToken).ConfigureAwait(false);
-                await PulseAsync(CraneAddress.ManualXAbsMove, writeX != -1, 500, cancellationToken).ConfigureAwait(false);
-                await PulseAsync(CraneAddress.ManualYAbsMove, writeY != -1, 500, cancellationToken).ConfigureAwait(false);
+                await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 // Z 不变：三轴并行
-                await PulseAsync(CraneAddress.ManualXAbsMove, writeX != -1, 500, cancellationToken).ConfigureAwait(false);
-                await PulseAsync(CraneAddress.ManualYAbsMove, writeY != -1, 500, cancellationToken).ConfigureAwait(false);
-                await PulseAsync(CraneAddress.ManualZAbsMove, writeZ != -1, 500, cancellationToken).ConfigureAwait(false);
+                await PulseManyAsync(new[] { xy[0], xy[1], z[0] }, 500, cancellationToken).ConfigureAwait(false);
             }
 
             await PollAxesAsync(targetX, targetY, targetZ, pollEncoder, tolerance, cancellationToken).ConfigureAwait(false);
@@ -465,6 +466,41 @@ public sealed class CraneService : ICraneDriver
         await _client.WriteRegisterAsync(register, 2, cancellationToken).ConfigureAwait(false);
         await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
         await _client.WriteRegisterAsync(register, 0, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 多寄存器并行脉冲：对全部启用寄存器一起写 2 → 延时 → 一起写 0。
+    /// </summary>
+    /// <param name="targets">(寄存器, 是否启用) 列表</param>
+    /// <param name="delayMs">2 与 0 之间的间隔（毫秒）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    private async Task PulseManyAsync(IReadOnlyList<(int Register, bool Enabled)> targets, int delayMs, CancellationToken cancellationToken)
+    {
+        var active = new List<int>();
+        foreach (var (register, enabled) in targets)
+        {
+            if (enabled)
+            {
+                active.Add(register);
+            }
+        }
+
+        if (active.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var register in active)
+        {
+            await _client.WriteRegisterAsync(register, 2, cancellationToken).ConfigureAwait(false);
+        }
+
+        await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+
+        foreach (var register in active)
+        {
+            await _client.WriteRegisterAsync(register, 0, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>磁铁脉冲：写 2 → 轮询反馈 → 复位；最多 3 次、单次 3s。</summary>
