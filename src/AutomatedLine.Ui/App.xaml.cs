@@ -156,10 +156,10 @@ public partial class App : System.Windows.Application
         // P3 后台循环：候选生成、集中调度、天车执行（同一实例既作服务也作宿主服务）
         services.AddSingleton<TransportTaskGenerator>();
         services.AddSingleton<CraneScheduler>();
-        services.AddSingleton<CraneExecutionService>();
+        services.AddSingleton<CraneWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<TransportTaskGenerator>());
         services.AddHostedService(sp => sp.GetRequiredService<CraneScheduler>());
-        services.AddHostedService(sp => sp.GetRequiredService<CraneExecutionService>());
+        services.AddHostedService(sp => sp.GetRequiredService<CraneWorker>());
 
         // 采集器：既作为 IDeviceStateCollector 供查询，也作为宿主后台服务随宿主启动/停止。
         // 注册为单例并通过工厂复用同一实例，保证两者拿到的是同一个对象。

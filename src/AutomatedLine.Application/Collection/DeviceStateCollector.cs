@@ -115,13 +115,29 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        var interval = Math.Max(50, _configService.GetAppOptions().Collection.DeviceIntervalMs);
+        var options = _configService.GetAppOptions().Collection;
+        // 设备与天车各有独立采集周期：设备=DeviceIntervalMs，天车=CraneIntervalMs
+        var deviceInterval = Math.Max(50, options.DeviceIntervalMs);
+        var craneInterval = Math.Max(50, options.CraneIntervalMs);
 
+        var deviceLoop = LoopAsync(cranes: false, deviceInterval, cancellationToken);
+        var craneLoop = LoopAsync(cranes: true, craneInterval, cancellationToken);
+        await Task.WhenAll(deviceLoop, craneLoop).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// 单个采集循环：按周期采集设备或天车。
+    /// </summary>
+    /// <param name="cranes">true 采天车、false 采设备</param>
+    /// <param name="intervalMs">周期（毫秒）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    private async Task LoopAsync(bool cranes, int intervalMs, CancellationToken cancellationToken)
+    {
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await CollectOnceAsync(cancellationToken).ConfigureAwait(false);
+                await CollectAsync(cranes, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -135,7 +151,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
 
             try
             {
-                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(intervalMs, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -145,16 +161,19 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     }
 
     /// <summary>
-    /// 执行一轮采集：遍历所有驱动，读成功后整体替换快照。
+    /// 执行一轮采集：只遍历指定类别的驱动，读成功后整体替换快照。
     /// </summary>
+    /// <param name="cranes">true 采天车、false 采设备</param>
     /// <param name="cancellationToken">取消令牌</param>
-    private async Task CollectOnceAsync(CancellationToken cancellationToken)
+    private async Task CollectAsync(bool cranes, CancellationToken cancellationToken)
     {
         var sequence = Interlocked.Increment(ref _sequence);
-        var drivers = _driverRegistry.Snapshot();
+        var drivers = _driverRegistry.Snapshot()
+            .Where(d => cranes ? d is ICraneDriver : d is IDeviceDriver)
+            .ToList();
         if (drivers.Count == 0)
         {
-            // 尚未装载配置，无事可做
+            // 该类别暂无驱动，无事可做
             return;
         }
 
@@ -193,8 +212,9 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
 
         LastCollectedAt = DateTime.Now;
 
-        // 采集是高频循环（默认 500ms），成功日志按抽样间隔（默认 20s）落盘，避免刷爆磁盘
-        _logger.Sample(LogCategory.Collection, "collection-cycle", $"采集完成，序号 {sequence}，驱动 {drivers.Count} 个");
+        // 高频循环，成功日志按抽样间隔（默认 20s）落盘，避免刷爆磁盘
+        _logger.Sample(LogCategory.Collection, cranes ? "collection-crane" : "collection-device",
+            $"采集完成，序号 {sequence}，{(cranes ? "天车" : "设备")} {drivers.Count} 个");
     }
 
     /// <summary>

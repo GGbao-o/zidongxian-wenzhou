@@ -110,6 +110,7 @@ public partial class ParamsViewModel : ObservableObject
         stateMachine.Items.Add(IntItem("取料确认超时(ms)", () => _options.StateMachine.PickTimeoutMs, v => _options.StateMachine.PickTimeoutMs = v));
         stateMachine.Items.Add(IntItem("放料确认超时(ms)", () => _options.StateMachine.PlaceTimeoutMs, v => _options.StateMachine.PlaceTimeoutMs = v));
         stateMachine.Items.Add(IntItem("握手超时(ms)", () => _options.StateMachine.HandshakeTimeoutMs, v => _options.StateMachine.HandshakeTimeoutMs = v));
+        stateMachine.Items.Add(IntItem("状态机推进周期(ms)", () => _options.StateMachine.ExecuteIntervalMs, v => _options.StateMachine.ExecuteIntervalMs = v));
         Categories.Add(stateMachine);
 
         var logging = new ParamCategoryViewModel("日志", "目录与滚动策略");

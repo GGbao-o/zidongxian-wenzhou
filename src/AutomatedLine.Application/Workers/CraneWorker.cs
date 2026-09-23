@@ -7,11 +7,11 @@ using Microsoft.Extensions.Hosting;
 namespace AutomatedLine.Application.Workers;
 
 /// <summary>
-/// 天车执行服务：按固定周期推进各天车的状态机（架构文档 §8.5 Worker 模式）。
+/// 天车 Worker：按固定周期推进各天车的状态机（架构文档 §8.5「CraneWorker 与状态机」）。
 /// 说明：P3 用一个循环统一推进每台天车一步；若后续需要各车独立节拍，再拆成"每车一个 Worker 任务"。
-/// 只有线路处于自动运行时才推进。
+/// 只有线路处于自动运行时才推进。推进周期来自 <c>StateMachine.ExecuteIntervalMs</c>。
 /// </summary>
-public sealed class CraneExecutionService : IHostedService
+public sealed class CraneWorker : IHostedService
 {
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
@@ -42,7 +42,7 @@ public sealed class CraneExecutionService : IHostedService
     /// <param name="lineControl">线路控制</param>
     /// <param name="configService">配置服务</param>
     /// <param name="logger">日志</param>
-    public CraneExecutionService(
+    public CraneWorker(
         CraneRegistry craneRegistry,
         CraneStateMachine stateMachine,
         LineControlService lineControl,
@@ -62,7 +62,7 @@ public sealed class CraneExecutionService : IHostedService
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _loop = Task.Run(() => RunAsync(_cts.Token), CancellationToken.None);
-        Console.WriteLine("[CraneExecutionService] 天车执行循环已启动");
+        Console.WriteLine("[CraneWorker] 天车状态机推进循环已启动");
         return Task.CompletedTask;
     }
 
@@ -89,7 +89,7 @@ public sealed class CraneExecutionService : IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        var interval = Math.Max(50, _configService.GetAppOptions().Collection.CraneIntervalMs);
+        var interval = Math.Max(50, _configService.GetAppOptions().StateMachine.ExecuteIntervalMs);
         while (!cancellationToken.IsCancellationRequested)
         {
             if (_lineControl.IsRunning)

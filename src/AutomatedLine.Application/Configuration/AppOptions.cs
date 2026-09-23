@@ -60,6 +60,9 @@ public sealed class StateMachineOptions
 
     /// <summary>握手信号超时（毫秒）。</summary>
     public int HandshakeTimeoutMs { get; set; } = 10000;
+
+    /// <summary>天车状态机（Worker）推进周期（毫秒）。</summary>
+    public int ExecuteIntervalMs { get; set; } = 500;
 }
 
 /// <summary>日志参数。</summary>
