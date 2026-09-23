@@ -29,9 +29,10 @@
                     Content="新增天车" />
             </Grid>
 
-            <!-- 全字段展示；列多，DataGrid 自带横向与纵向滚动条 -->
+            <!--  全字段展示；列多，DataGrid 自带横向与纵向滚动条  -->
             <DataGrid
                 Grid.Row="1"
+                AlternatingRowBackground="#F8FAFC"
                 AutoGenerateColumns="False"
                 Background="Transparent"
                 CanUserAddRows="False"
@@ -40,40 +41,34 @@
                 HorizontalGridLinesBrush="{StaticResource CardBorderBrush}"
                 IsReadOnly="True"
                 ItemsSource="{Binding Cranes}"
-                RowBackground="Transparent"
-                AlternatingRowBackground="#F8FAFC">
+                RowBackground="Transparent">
                 <DataGrid.Columns>
-                    <DataGridTextColumn Header="天车号" Binding="{Binding Config.Id}" />
-                    <DataGridTextColumn Header="序号" Binding="{Binding Config.No}" />
-                    <DataGridTextColumn Header="名称" Binding="{Binding Config.Name}" />
-                    <DataGridTextColumn Header="协议" Binding="{Binding Config.Protocol}" />
-                    <DataGridTextColumn Header="IP" Binding="{Binding Config.IpAddress}" />
-                    <DataGridTextColumn Header="端口" Binding="{Binding Config.Port}" />
-                    <DataGridTextColumn Header="StartX" Binding="{Binding Config.StartX}" />
-                    <DataGridTextColumn Header="EndX" Binding="{Binding Config.EndX}" />
-                    <DataGridTextColumn Header="宽度" Binding="{Binding Config.Width}" />
-                    <DataGridTextColumn Header="安全位X" Binding="{Binding Config.SafeX}" />
-                    <DataGridTextColumn Header="安全位Z" Binding="{Binding Config.SafeZ}" />
-                    <DataGridTextColumn Header="X偏移" Binding="{Binding Config.OffsetX}" />
-                    <DataGridTextColumn Header="Y偏移" Binding="{Binding Config.OffsetY}" />
-                    <DataGridTextColumn Header="Z偏移" Binding="{Binding Config.OffsetZ}" />
-                    <DataGridTextColumn Header="X速度" Binding="{Binding Config.SpeedX}" />
-                    <DataGridTextColumn Header="X加速度" Binding="{Binding Config.AccelX}" />
-                    <DataGridTextColumn Header="X减速度" Binding="{Binding Config.DecelX}" />
-                    <DataGridTextColumn Header="Y速度" Binding="{Binding Config.SpeedY}" />
-                    <DataGridTextColumn Header="Y加速度" Binding="{Binding Config.AccelY}" />
-                    <DataGridTextColumn Header="Y减速度" Binding="{Binding Config.DecelY}" />
-                    <DataGridTextColumn Header="Z速度" Binding="{Binding Config.SpeedZ}" />
-                    <DataGridTextColumn Header="Z加速度" Binding="{Binding Config.AccelZ}" />
-                    <DataGridTextColumn Header="Z减速度" Binding="{Binding Config.DecelZ}" />
-                    <DataGridTextColumn Header="启用" Binding="{Binding Config.IsEnabled}" />
-                    <DataGridTextColumn Header="通信" Binding="{Binding ConnectionText}" />
-                    <DataGridTextColumn Header="X" Binding="{Binding X}" />
-                    <DataGridTextColumn Header="Y" Binding="{Binding Y}" />
-                    <DataGridTextColumn Header="Z" Binding="{Binding Z}" />
-                    <DataGridTextColumn Header="状态" Binding="{Binding StateText}" />
-                    <DataGridTextColumn Header="当前任务" Binding="{Binding TaskText}" />
-                    <DataGridTextColumn Header="报警" Binding="{Binding AlarmText}" />
+                    <DataGridTextColumn Binding="{Binding Config.Id}" Header="天车号" />
+                    <DataGridTextColumn Binding="{Binding Config.No}" Header="序号" />
+                    <DataGridTextColumn Binding="{Binding Config.Name}" Header="名称" />
+                    <DataGridTextColumn Binding="{Binding Config.Protocol}" Header="协议" />
+                    <DataGridTextColumn Binding="{Binding Config.IpAddress}" Header="IP" />
+                    <DataGridTextColumn Binding="{Binding Config.Port}" Header="端口" />
+                    <DataGridTextColumn Binding="{Binding Config.StartX}" Header="StartX" />
+                    <DataGridTextColumn Binding="{Binding Config.EndX}" Header="EndX" />
+                    <DataGridTextColumn Binding="{Binding Config.Width}" Header="宽度" />
+                    <DataGridTextColumn Binding="{Binding Config.SafeX}" Header="安全位X" />
+                    <DataGridTextColumn Binding="{Binding Config.SafeZ}" Header="安全位Z" />
+                    <DataGridTextColumn Binding="{Binding Config.OffsetX}" Header="X偏移" />
+                    <DataGridTextColumn Binding="{Binding Config.OffsetY}" Header="Y偏移" />
+                    <DataGridTextColumn Binding="{Binding Config.OffsetZ}" Header="Z偏移" />
+                    <DataGridTextColumn Binding="{Binding Config.SpeedX}" Header="X速度" />
+                    <DataGridTextColumn Binding="{Binding Config.AccelX}" Header="X加速度" />
+                    <DataGridTextColumn Binding="{Binding Config.DecelX}" Header="X减速度" />
+                    <DataGridTextColumn Binding="{Binding Config.SpeedY}" Header="Y速度" />
+                    <DataGridTextColumn Binding="{Binding Config.AccelY}" Header="Y加速度" />
+                    <DataGridTextColumn Binding="{Binding Config.DecelY}" Header="Y减速度" />
+                    <DataGridTextColumn Binding="{Binding Config.SpeedZ}" Header="Z速度" />
+                    <DataGridTextColumn Binding="{Binding Config.AccelZ}" Header="Z加速度" />
+                    <DataGridTextColumn Binding="{Binding Config.DecelZ}" Header="Z减速度" />
+                    <DataGridTextColumn Binding="{Binding Config.IsEnabled}" Header="启用" />
+
+
                     <DataGridTemplateColumn Header="操作">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>

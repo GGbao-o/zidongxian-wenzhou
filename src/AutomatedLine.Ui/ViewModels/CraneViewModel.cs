@@ -1,7 +1,6 @@
 using System.Collections.ObjectModel;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
-using AutomatedLine.Application.Runtime;
 using AutomatedLine.Ui.Helpers;
 using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -10,18 +9,11 @@ using CommunityToolkit.Mvvm.Input;
 namespace AutomatedLine.Ui.ViewModels;
 
 /// <summary>
-/// 天车管理页面 ViewModel。
-/// **以数据库为准**：列出 CraneConfig 全部字段（含未启用项），叠加运行态（坐标/状态/任务/报警）。
-/// 支持新增/编辑/删除，改动后重载注册表并重新读取数据库。
+/// 天车管理页面 ViewModel：**严格数据库 CRUD**。
+/// 只读写 CraneConfig 的参数（坐标、范围、速度等、是否启用），不展示运行态，也不后台读信号。
 /// </summary>
 public partial class CraneViewModel : ObservableObject
 {
-    /// <summary>天车注册表（运行态）。</summary>
-    private readonly CraneRegistry _craneRegistry;
-
-    /// <summary>设备注册表，用于把任务的源/目标设备号解析成名称。</summary>
-    private readonly DeviceRegistry _deviceRegistry;
-
     /// <summary>配置存储（数据库 CRUD）。</summary>
     private readonly IConfigurationStore _configurationStore;
 
@@ -34,34 +26,24 @@ public partial class CraneViewModel : ObservableObject
     /// <summary>数据库配置缓存：天车号 → 配置。</summary>
     private Dictionary<int, CraneConfigDto> _configs = new();
 
-    /// <summary>天车行集合（数据库全字段 + 运行态）。</summary>
+    /// <summary>天车配置行集合。</summary>
     public ObservableCollection<CraneConfigRowViewModel> Cranes { get; } = new();
 
     /// <summary>
-    /// 构造函数。订阅节拍器刷新运行态，并异步加载数据库配置。
+    /// 构造函数。异步加载数据库配置。
     /// </summary>
-    /// <param name="craneRegistry">天车注册表</param>
-    /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="configurationStore">配置存储</param>
     /// <param name="configurationLoader">配置装载器</param>
     /// <param name="dialogService">弹窗服务</param>
-    /// <param name="ticker">运行态节拍器</param>
     public CraneViewModel(
-        CraneRegistry craneRegistry,
-        DeviceRegistry deviceRegistry,
         IConfigurationStore configurationStore,
         IConfigurationLoader configurationLoader,
-        IDialogService dialogService,
-        IRuntimeTicker ticker)
+        IDialogService dialogService)
     {
-        _craneRegistry = craneRegistry;
-        _deviceRegistry = deviceRegistry;
         _configurationStore = configurationStore;
         _configurationLoader = configurationLoader;
         _dialogService = dialogService;
 
-        // 运行态每秒刷新；数据库配置在启动与改动后加载
-        ticker.Tick += (_, _) => RefreshRuntime();
         _ = LoadConfigsAsync();
     }
 
@@ -89,19 +71,8 @@ public partial class CraneViewModel : ObservableObject
             dtos,
             row => row.Id,
             dto => dto.Id,
-            dto => new CraneConfigRowViewModel(dto, _craneRegistry.Get(dto.Id), _deviceRegistry.Get),
+            dto => new CraneConfigRowViewModel(dto),
             (row, dto) => row.ApplyConfig(dto));
-
-        RefreshRuntime();
-    }
-
-    /// <summary>刷新所有行的运行态字段。</summary>
-    private void RefreshRuntime()
-    {
-        foreach (var row in Cranes)
-        {
-            row.ApplyRuntime(_craneRegistry.Get(row.Id));
-        }
     }
 
     /// <summary>新增天车配置。</summary>
@@ -159,9 +130,7 @@ public partial class CraneViewModel : ObservableObject
         await ReloadAsync();
     }
 
-    /// <summary>
-    /// 重载运行态并重新读库。重载失败只记录，不让配置问题把程序打崩。
-    /// </summary>
+    /// <summary>重载运行态并重新读库；重载失败只记录，不抛出。</summary>
     private async Task ReloadAsync()
     {
         try
