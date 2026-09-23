@@ -120,7 +120,7 @@ public sealed class ManualOperationService : IManualOperationService
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />设置三轴速度
     public Task<ManualOperationResult> SetSpeedAsync(int craneId, CraneSpeedDto speed, CancellationToken cancellationToken = default)
         => RunAsync(craneId, crane => crane.SetAbsoluteSpeedAsync(
             speed.SpeedX, speed.AccelX, speed.DecelX,
@@ -128,9 +128,9 @@ public sealed class ManualOperationService : IManualOperationService
             speed.SpeedZ, speed.AccelZ, speed.DecelZ,
             cancellationToken), "设置三轴绝对速度", cancellationToken);
 
-    /// <inheritdoc />
+    /// <inheritdoc /> 绝对移动
     public Task<ManualOperationResult> MoveAbsoluteAsync(int craneId, int x, int y, int z, CancellationToken cancellationToken = default)
-        => RunStatusAsync(craneId, async crane =>
+        => RunMoveAsync(craneId, async crane =>
         {
             var s = await crane.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
 
@@ -142,13 +142,13 @@ public sealed class ManualOperationService : IManualOperationService
             var dz = z - s.ZEncoder;
             var zDirection = dz > Tolerance ? 1 : dz < -Tolerance ? 2 : 0;
 
-            await crane.MoveAsync(writeX, writeY, writeZ, x, y, z, pollEncoder: true, zDirection, Tolerance, cancellationToken)
+            return await crane.MoveAsync(writeX, writeY, writeZ, x, y, z, pollEncoder: true, zDirection, Tolerance, cancellationToken)
                 .ConfigureAwait(false);
         }, "绝对移动", cancellationToken);
 
-    /// <inheritdoc />
+    /// <inheritdoc />  相对移动
     public Task<ManualOperationResult> MoveRelativeAsync(int craneId, int dx, int dy, int dz, CancellationToken cancellationToken = default)
-        => RunStatusAsync(craneId, async crane =>
+        => RunMoveAsync(craneId, async crane =>
         {
             if (dx == 0 && dy == 0 && dz == 0)
             {
@@ -164,7 +164,7 @@ public sealed class ManualOperationService : IManualOperationService
 
             var zDirection = dz > 0 ? 1 : dz < 0 ? 2 : 0;
 
-            await crane.MoveAsync(targetX, targetY, targetZ, targetX, targetY, targetZ, pollEncoder: false, zDirection, Tolerance, cancellationToken)
+            return await crane.MoveAsync(targetX, targetY, targetZ, targetX, targetY, targetZ, pollEncoder: false, zDirection, Tolerance, cancellationToken)
                 .ConfigureAwait(false);
         }, "相对移动", cancellationToken);
 
@@ -235,14 +235,42 @@ public sealed class ManualOperationService : IManualOperationService
         }
     }
 
-    /// <summary>需要先读状态再执行的命令。</summary>
+    /// <summary>
+    /// 执行移动命令：把"压到下压限位"与"到达目标"都视为**成功**返回。
+    /// 下压是正常工艺到位，驱动已在返回 true 前完成下压急停与清报警。
+    /// </summary>
     /// <param name="craneId">天车号</param>
-    /// <param name="action">动作</param>
-    /// <param name="label">动作名</param>
+    /// <param name="action">动作，返回 true 表示因下压限位结束</param>
+    /// <param name="label">动作名（日志/提示）</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>结果</returns>
-    private Task<ManualOperationResult> RunStatusAsync(int craneId, Func<CraneService, Task> action, string label, CancellationToken cancellationToken)
-        => RunAsync(craneId, action, label, cancellationToken);
+    private async Task<ManualOperationResult> RunMoveAsync(int craneId, Func<CraneService, Task<bool>> action, string label, CancellationToken cancellationToken)
+    {
+        var crane = Resolve(craneId);
+        if (crane is null)
+        {
+            return ManualOperationResult.Fail($"天车[{craneId}] 未装载驱动，无法操作");
+        }
+
+        try
+        {
+            //是否是下压信号量了返回
+            var pressureStopped = await action(crane).ConfigureAwait(false);
+            if (pressureStopped)
+            {
+                _logger.Info(LogCategory.Operation, $"手动操作 天车[{craneId}] {label} 到达下压限位，视为到位");
+                return ManualOperationResult.Ok($"{label} 到达下压限位");
+            }
+
+            _logger.Info(LogCategory.Operation, $"手动操作 天车[{craneId}] {label} 到位");
+            return ManualOperationResult.Ok($"{label} 到位");
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.Operation, $"手动操作 天车[{craneId}] {label} 失败：{ex.Message}");
+            return ManualOperationResult.Fail($"{label} 失败：{ex.Message}");
+        }
+    }
 
     /// <summary>解析天车真实服务。</summary>
     /// <param name="craneId">天车号</param>

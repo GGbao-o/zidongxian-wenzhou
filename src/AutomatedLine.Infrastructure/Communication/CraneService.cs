@@ -270,7 +270,8 @@ public sealed class CraneService : ICraneDriver
     /// <param name="pollEncoder">true=轮询绝对编码器、false=轮询显示值</param>
     /// <param name="tolerance">到位容差（mm）</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task MoveAsync(int writeX, int writeY, int writeZ,
+    /// <returns>true=Z 下降时压到 X2 下压限位而停下（正常结束）；false=正常到位</returns>
+    public async Task<bool> MoveAsync(int writeX, int writeY, int writeZ,
         int targetX, int targetY, int targetZ,
         bool pollEncoder, int zDirection,
         int tolerance = DefaultTolerance, CancellationToken cancellationToken = default)
@@ -296,14 +297,14 @@ public sealed class CraneService : ICraneDriver
             {
                 // Z 下降：先 XY（并行）后 Z
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
-                await PollAxesAsync(targetX, targetY, -1, pollEncoder, tolerance, cancellationToken).ConfigureAwait(false);
+                await PollAxesAsync(targetX, targetY, -1, pollEncoder, tolerance, false, cancellationToken).ConfigureAwait(false);
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
             }
             else if (zDirection == 2)
             {
                 // Z 上升：先 Z 后 XY（并行）
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
-                await PollAxesAsync(-1, -1, targetZ, pollEncoder, tolerance, cancellationToken).ConfigureAwait(false);
+                await PollAxesAsync(-1, -1, targetZ, pollEncoder, tolerance, false, cancellationToken).ConfigureAwait(false);
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
             }
             else
@@ -312,7 +313,9 @@ public sealed class CraneService : ICraneDriver
                 await PulseManyAsync(new[] { xy[0], xy[1], z[0] }, 500, cancellationToken).ConfigureAwait(false);
             }
 
-            await PollAxesAsync(targetX, targetY, targetZ, pollEncoder, tolerance, cancellationToken).ConfigureAwait(false);
+            // Z 下降（zDirection=1）期间额外监视 X2 下压限位：压到即下压急停并视为正常结束（与到位同义）；
+            // 其余方向不做下压保护，避免误报。
+            return await PollAxesAsync(targetX, targetY, targetZ, pollEncoder, tolerance, zDirection == 1, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -549,19 +552,28 @@ public sealed class CraneService : ICraneDriver
     }
 
     /// <summary>轮询指定轴到位（-1 表示跳过该轴）。</summary>
-    /// <param name="xValue">X 目标（写入值，仅用于日志）</param>
-    /// <param name="yValue">Y 目标</param>
-    /// <param name="zValue">Z 目标</param>
+    /// <param name="targetX">X 到位目标</param>
+    /// <param name="targetY">Y 到位目标</param>
+    /// <param name="targetZ">Z 到位目标</param>
     /// <param name="pollEncoder">true=读编码器、false=读显示值</param>
     /// <param name="tolerance">容差</param>
+    /// <param name="watchPressure">true=每次轮询同时检查 X2 下压限位（Z 下降时用）</param>
     /// <param name="cancellationToken">取消令牌</param>
-    private async Task PollAxesAsync(int targetX, int targetY, int targetZ, bool pollEncoder, int tolerance, CancellationToken cancellationToken)
+    /// <returns>true=压到 X2 下压限位而结束（正常结束，与到位同义）；false=正常到位</returns>
+    private async Task<bool> PollAxesAsync(int targetX, int targetY, int targetZ, bool pollEncoder, int tolerance, bool watchPressure, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(_moveTimeoutMs);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+
+            // 逐 200ms 检查下压限位：Z 下降压到 X2 即下压急停并正常结束（下压是正常工艺到位，不是故障）。
+            if (watchPressure && await IsPressureLimitOnAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await PressureStopAsync().ConfigureAwait(false);
+                return true;
+            }
 
             var status = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
             var x = pollEncoder ? status.XEncoder : status.XPosition;
@@ -576,11 +588,54 @@ public sealed class CraneService : ICraneDriver
             if (xOk && yOk && zOk)
             {
                 _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位 X={x} Y={y} Z={z}（容差±{tolerance}）");
-                return;
+                return false;
             }
         }
 
         throw new TimeoutException($"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{tolerance}）");
+    }
+
+    /// <summary>
+    /// 读 X2 下压限位。读失败返回 false（按"未触发"处理）并记日志——
+    /// 这里与页面显示不同：运动保护里"读不到就当成已下压"会导致正常运动被误急停，
+    /// 因此读失败时选择保守放行，由随后的状态读失败（通信中断）兜底。
+    /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>true=X2 已压下</returns>
+    private async Task<bool> IsPressureLimitOnAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _client.ReadCoilAsync(CraneAddress.X2_MagnetDownLimit, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.Communication, $"天车[{_name}] 下压保护读 X2 失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 下压到位处理：D4523 下压急停 → 使手动前置缓存失效 → 清除报警 D4514。
+    /// 下压是正常工艺到位（不是报警/故障），但仍按下压急停 + 清报警流程收尾。
+    /// 用不可取消令牌，保证该动作即使在被取消/超时时也能完整下发。
+    /// </summary>
+    private async Task PressureStopAsync()
+    {
+        var ct = CancellationToken.None;
+
+        // 下压急停是专用寄存器 D4523（与通用急停 D4518 区分）
+        await PulseAsync(CraneAddress.PressureEStop, true, 200, ct).ConfigureAwait(false);
+
+        // 下压急停后手动使能失效，必须重写 D4001/D4500，否则后续命令不生效
+        _manualModeSet = false;
+        await EnterManualAsync(ct).ConfigureAwait(false);
+
+        await _client.WriteRegisterAsync(CraneAddress.ManualClearAlarm, 2, ct).ConfigureAwait(false);
+        await Task.Delay(200, ct).ConfigureAwait(false);
+        await _client.WriteRegisterAsync(CraneAddress.ManualClearAlarm, 0, ct).ConfigureAwait(false);
+
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 到达下压限位 X2：已下压急停（D4523）并清除报警（D4514），视为正常结束");
     }
 
     /// <summary>写寄存器，失败仅记录不抛出（用于 finally 复位）。</summary>
