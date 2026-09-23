@@ -1,280 +1,331 @@
 using System.Collections.ObjectModel;
+using System.Windows.Media;
 using AutomatedLine.Application.Abstractions;
-using AutomatedLine.Application.Runtime;
-using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Ui.Helpers;
-using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 namespace AutomatedLine.Ui.ViewModels;
 
 /// <summary>
-/// 手动操作页面 ViewModel。
-/// 选择天车后可做三轴绝对/相对运动、设置三轴速度/加速度/减速度、清报警，并查看当前坐标、报警与
-/// 充磁/放磁/下压/有板等信号。动作最终写天车 PLC（现场点位到位后由驱动映射）。
-/// 按现场约定：手动操作不与自动线做互斥/排队。
+/// 手动操作页连接状态。
+/// </summary>
+public enum CraneConnectionState
+{
+    /// <summary>未选择/未知。</summary>
+    Unknown,
+
+    /// <summary>已连接且无报警。</summary>
+    Connected,
+
+    /// <summary>已连接但有报警。</summary>
+    Alarm,
+
+    /// <summary>连接失败。</summary>
+    Failed
+}
+
+/// <summary>
+/// 手动操作页面 ViewModel（仅天车）。
+/// 天车列表来自数据库；选择后点“刷新”读取状态，按钮下发手动命令。
+/// 连接状态：绿=已连接、黄=天车报警、红=❌连接失败。
 /// </summary>
 public partial class ManualOperationViewModel : ObservableObject
 {
-    /// <summary>天车注册表。</summary>
-    private readonly CraneRegistry _craneRegistry;
+    /// <summary>配置存储（取天车列表）。</summary>
+    private readonly IConfigurationStore _configurationStore;
 
     /// <summary>手动操作服务。</summary>
     private readonly IManualOperationService _manualOperationService;
 
-    /// <summary>可选天车列表。</summary>
-    public ObservableCollection<CraneRowViewModel> Cranes { get; } = new();
+    /// <summary>天车列表。</summary>
+    public ObservableCollection<CraneConfigRowViewModel> Cranes { get; } = new();
 
     /// <summary>当前选中的天车。</summary>
     [ObservableProperty]
-    private CraneRowViewModel? _selectedCrane;
+    private CraneConfigRowViewModel? _selectedCrane;
 
-    /// <summary>绝对运动目标 X。</summary>
+    /// <summary>连接状态文本。</summary>
     [ObservableProperty]
-    private double _absoluteX;
+    private string _connectionText = "请选择天车";
 
-    /// <summary>绝对运动目标 Y。</summary>
+    /// <summary>连接状态颜色。</summary>
     [ObservableProperty]
-    private double _absoluteY;
+    private Brush _connectionBrush = Brushes.Gray;
 
-    /// <summary>绝对运动目标 Z。</summary>
+    /// <summary>操作/刷新结果提示。</summary>
     [ObservableProperty]
-    private double _absoluteZ;
+    private string _message = "选择天车后点击“刷新”读取状态。";
 
-    // ===== 三轴运动参数：每轴速度/加速度/减速度 =====
+    // ── 状态显示：显示值/编码器 ──
+    /// <summary>X 显示值坐标。</summary>
+    [ObservableProperty] private int _xDisplay;
+    /// <summary>Y 显示值坐标。</summary>
+    [ObservableProperty] private int _yDisplay;
+    /// <summary>Z 显示值坐标。</summary>
+    [ObservableProperty] private int _zDisplay;
+    /// <summary>X 绝对编码器坐标。</summary>
+    [ObservableProperty] private int _xEncoder;
+    /// <summary>Y 绝对编码器坐标。</summary>
+    [ObservableProperty] private int _yEncoder;
+    /// <summary>Z 绝对编码器坐标。</summary>
+    [ObservableProperty] private int _zEncoder;
 
-    /// <summary>X 轴速度。</summary>
-    [ObservableProperty]
-    private double _speedX;
+    // ── 回原点/报警 ──
+    /// <summary>X 已回原点。</summary>
+    [ObservableProperty] private bool _xHome;
+    /// <summary>Y 已回原点。</summary>
+    [ObservableProperty] private bool _yHome;
+    /// <summary>Z 已回原点。</summary>
+    [ObservableProperty] private bool _zHome;
+    /// <summary>伺服报警。</summary>
+    [ObservableProperty] private int _servoAlarm;
+    /// <summary>PLC 伺服指令报警。</summary>
+    [ObservableProperty] private int _plcServoAlarm;
+    /// <summary>PLC 报警。</summary>
+    [ObservableProperty] private int _plcAlarm;
 
-    /// <summary>X 轴加速度。</summary>
-    [ObservableProperty]
-    private double _accelX;
+    // ── X 区信号 ──
+    /// <summary>X0 接液盘门开到位。</summary>
+    [ObservableProperty] private bool _x0DrainOpen;
+    /// <summary>X1 接液盘门关到位。</summary>
+    [ObservableProperty] private bool _x1DrainClose;
+    /// <summary>X2 磁铁下压限位。</summary>
+    [ObservableProperty] private bool _x2Pressure;
+    /// <summary>X3 X 轴物理原点。</summary>
+    [ObservableProperty] private bool _x3HomeX;
+    /// <summary>X4 Y 轴物理原点。</summary>
+    [ObservableProperty] private bool _x4HomeY;
+    /// <summary>X5 Z 轴物理原点。</summary>
+    [ObservableProperty] private bool _x5HomeZ;
+    /// <summary>X6 充磁反馈。</summary>
+    [ObservableProperty] private bool _x6Magnetize;
+    /// <summary>X7 退磁反馈。</summary>
+    [ObservableProperty] private bool _x7Demagnetize;
+    /// <summary>X11 检测有版。</summary>
+    [ObservableProperty] private bool _x11HasPlate;
 
-    /// <summary>X 轴减速度。</summary>
-    [ObservableProperty]
-    private double _decelX;
+    // ── 绝对移动输入 ──
+    /// <summary>用户输入 X 绝对值。</summary>
+    [ObservableProperty] private int _absX;
+    /// <summary>用户输入 Y 绝对值。</summary>
+    [ObservableProperty] private int _absY;
+    /// <summary>用户输入 Z 绝对值。</summary>
+    [ObservableProperty] private int _absZ;
 
-    /// <summary>Y 轴速度。</summary>
-    [ObservableProperty]
-    private double _speedY;
+    // ── 相对移动输入 ──
+    /// <summary>X 相对值。</summary>
+    [ObservableProperty] private int _relX;
+    /// <summary>Y 相对值。</summary>
+    [ObservableProperty] private int _relY;
+    /// <summary>Z 相对值。</summary>
+    [ObservableProperty] private int _relZ;
 
-    /// <summary>Y 轴加速度。</summary>
-    [ObservableProperty]
-    private double _accelY;
-
-    /// <summary>Y 轴减速度。</summary>
-    [ObservableProperty]
-    private double _decelY;
-
-    /// <summary>Z 轴速度。</summary>
-    [ObservableProperty]
-    private double _speedZ;
-
-    /// <summary>Z 轴加速度。</summary>
-    [ObservableProperty]
-    private double _accelZ;
-
-    /// <summary>Z 轴减速度。</summary>
-    [ObservableProperty]
-    private double _decelZ;
-
-    /// <summary>相对运动步长（mm）。</summary>
-    [ObservableProperty]
-    private double _step;
-
-    /// <summary>操作结果/提示信息。</summary>
-    [ObservableProperty]
-    private string _message = "请先选择天车。";
+    // ── 速度设置输入（绝对速度） ──
+    /// <summary>X 速度。</summary>
+    [ObservableProperty] private int _speedX = 100;
+    /// <summary>X 加速度。</summary>
+    [ObservableProperty] private int _accelX = 100;
+    /// <summary>X 减速度。</summary>
+    [ObservableProperty] private int _decelX = 100;
+    /// <summary>Y 速度。</summary>
+    [ObservableProperty] private int _speedY = 100;
+    /// <summary>Y 加速度。</summary>
+    [ObservableProperty] private int _accelY = 100;
+    /// <summary>Y 减速度。</summary>
+    [ObservableProperty] private int _decelY = 100;
+    /// <summary>Z 速度。</summary>
+    [ObservableProperty] private int _speedZ = 100;
+    /// <summary>Z 加速度。</summary>
+    [ObservableProperty] private int _accelZ = 100;
+    /// <summary>Z 减速度。</summary>
+    [ObservableProperty] private int _decelZ = 100;
 
     /// <summary>
     /// 构造函数。
     /// </summary>
-    /// <param name="craneRegistry">天车注册表</param>
+    /// <param name="configurationStore">配置存储</param>
     /// <param name="manualOperationService">手动操作服务</param>
-    /// <param name="configService">配置服务（取默认参数初值）</param>
-    /// <param name="ticker">运行态节拍器</param>
-    public ManualOperationViewModel(
-        CraneRegistry craneRegistry,
-        IManualOperationService manualOperationService,
-        IConfigService configService,
-        IRuntimeTicker ticker)
+    public ManualOperationViewModel(IConfigurationStore configurationStore, IManualOperationService manualOperationService)
     {
-        _craneRegistry = craneRegistry;
+        _configurationStore = configurationStore;
         _manualOperationService = manualOperationService;
-
-        var manual = configService.GetAppOptions().Manual;
-        SpeedX = SpeedY = SpeedZ = manual.DefaultSpeed;
-        AccelX = AccelY = AccelZ = manual.DefaultAccel;
-        DecelX = DecelY = DecelZ = manual.DefaultDecel;
-        Step = manual.DefaultStep;
-
-        ticker.Tick += (_, _) => Refresh();
-        Refresh();
+        _ = LoadCranesAsync();
     }
 
-    /// <summary>绝对运动命令。</summary>
-    [RelayCommand]
-    private async Task MoveAbsoluteAsync()
+    /// <summary>加载天车列表（数据库）。</summary>
+    private async Task LoadCranesAsync()
     {
-        if (!EnsureSelected(out var crane))
+        try
         {
-            return;
+            var configs = await _configurationStore.GetCraneConfigsAsync();
+            Cranes.Clear();
+            foreach (var dto in configs.OrderBy(c => c.No))
+            {
+                Cranes.Add(new CraneConfigRowViewModel(dto));
+            }
         }
-
-        var ok = await _manualOperationService.MoveAbsoluteAsync(
-            crane.Id, AbsoluteX, AbsoluteY, AbsoluteZ, BuildParameters());
-        Message = ok ? $"已下发绝对运动 → ({AbsoluteX:0.###}, {AbsoluteY:0.###}, {AbsoluteZ:0.###})" : "下发失败";
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ManualOperationViewModel] 加载天车列表失败：{ex.Message}");
+        }
     }
 
-    /// <summary>
-    /// 相对运动命令。参数为轴向+方向，如 "X+"/"X-"/"Y+"/"Z-"。
-    /// </summary>
-    /// <param name="param">轴向与方向</param>
+    /// <summary>刷新选中天车状态。</summary>
     [RelayCommand]
-    private async Task MoveRelativeAsync(string? param)
-    {
-        if (!EnsureSelected(out var crane) || string.IsNullOrWhiteSpace(param) || param.Length < 2)
-        {
-            return;
-        }
-
-        var axis = param[0] switch
-        {
-            'X' or 'x' => CraneAxis.X,
-            'Y' or 'y' => CraneAxis.Y,
-            'Z' or 'z' => CraneAxis.Z,
-            _ => (CraneAxis?)null
-        };
-        if (axis is null)
-        {
-            return;
-        }
-
-        var delta = param[1] == '-' ? -Step : Step;
-        var ok = await _manualOperationService.MoveRelativeAsync(crane.Id, axis.Value, delta, BuildParameters());
-        Message = ok ? $"已下发相对运动 {param}{Math.Abs(delta):0.###}" : "下发失败";
-    }
-
-    /// <summary>仅下发三轴参数（不运动）。</summary>
-    [RelayCommand]
-    private async Task SetParametersAsync()
-    {
-        if (!EnsureSelected(out var crane))
-        {
-            return;
-        }
-
-        var ok = await _manualOperationService.SetParametersAsync(crane.Id, BuildParameters());
-        Message = ok ? "已下发三轴速度/加速度/减速度" : "下发失败";
-    }
-
-    /// <summary>清除报警命令。</summary>
-    [RelayCommand]
-    private async Task ClearAlarmAsync()
-    {
-        if (!EnsureSelected(out var crane))
-        {
-            return;
-        }
-
-        var ok = await _manualOperationService.ClearAlarmAsync(crane.Id);
-        Message = ok ? "已下发清除报警" : "下发失败";
-    }
-
-    /// <summary>充磁命令。</summary>
-    [RelayCommand]
-    private async Task MagnetizeAsync()
-    {
-        if (!EnsureSelected(out var crane))
-        {
-            return;
-        }
-
-        await _manualOperationService.MagnetizeAsync(crane.Id);
-        Message = "已下发充磁";
-    }
-
-    /// <summary>放磁命令。</summary>
-    [RelayCommand]
-    private async Task DemagnetizeAsync()
-    {
-        if (!EnsureSelected(out var crane))
-        {
-            return;
-        }
-
-        await _manualOperationService.DemagnetizeAsync(crane.Id);
-        Message = "已下发放磁";
-    }
-
-    /// <summary>下压命令。</summary>
-    [RelayCommand]
-    private async Task PressDownAsync()
-    {
-        if (!EnsureSelected(out var crane))
-        {
-            return;
-        }
-
-        await _manualOperationService.PressDownAsync(crane.Id);
-        Message = "已下发下压";
-    }
-
-    /// <summary>把界面上的三轴参数组装成参数对象。</summary>
-    private TripleAxisMotionParameters BuildParameters()
-        => new(
-            new AxisMotionParameters(SpeedX, AccelX, DecelX),
-            new AxisMotionParameters(SpeedY, AccelY, DecelY),
-            new AxisMotionParameters(SpeedZ, AccelZ, DecelZ));
-
-    /// <summary>
-    /// 校验已选中天车。
-    /// </summary>
-    /// <param name="crane">选中的天车</param>
-    /// <returns>已选中返回 true</returns>
-    private bool EnsureSelected(out CraneRowViewModel crane)
+    private async Task RefreshAsync()
     {
         if (SelectedCrane is null)
         {
-            Message = "请先选择天车。";
-            crane = null!;
-            return false;
+            SetState(CraneConnectionState.Unknown, "请选择天车");
+            return;
         }
 
-        crane = SelectedCrane;
-        return true;
+        var status = await _manualOperationService.ReadStatusAsync(SelectedCrane.Id);
+        if (status is null)
+        {
+            SetState(CraneConnectionState.Failed, "❌连接失败");
+            Message = "读取状态失败，请检查 IP / 网络 / PLC。";
+            return;
+        }
+
+        XDisplay = status.XDisplay;
+        YDisplay = status.YDisplay;
+        ZDisplay = status.ZDisplay;
+        XEncoder = status.XEncoder;
+        YEncoder = status.YEncoder;
+        ZEncoder = status.ZEncoder;
+        XHome = status.XHomeCompleted;
+        YHome = status.YHomeCompleted;
+        ZHome = status.ZHomeCompleted;
+        ServoAlarm = status.ServoAlarm;
+        PlcServoAlarm = status.PlcServoAlarm;
+        PlcAlarm = status.PlcAlarm;
+        X0DrainOpen = status.DrainOpen;
+        X1DrainClose = status.DrainClose;
+        X2Pressure = status.PressureLimit;
+        X3HomeX = status.PhysicalHomeX;
+        X4HomeY = status.PhysicalHomeY;
+        X5HomeZ = status.PhysicalHomeZ;
+        X6Magnetize = status.MagnetizeFeedback;
+        X7Demagnetize = status.DemagnetizeFeedback;
+        X11HasPlate = status.HasPlate;
+
+        SetState(status.HasAlarm ? CraneConnectionState.Alarm : CraneConnectionState.Connected,
+            status.HasAlarm ? "天车报警" : "已连接");
+        Message = "状态已刷新。";
     }
 
-    /// <summary>
-    /// 差量刷新天车列表。
-    /// </summary>
-    private void Refresh()
+    /// <summary>设置三轴绝对速度。</summary>
+    [RelayCommand]
+    private async Task SetSpeedAsync()
     {
-        ObservableCollectionSync.SyncById(
-            Cranes,
-            _craneRegistry.Snapshot().OrderBy(c => c.No).ToList(),
-            row => row.Id,
-            crane => crane.Id,
-            crane => new CraneRowViewModel(crane),
-            (row, crane) => row.Refresh(crane));
+        var result = await WithCrane(id => _manualOperationService.SetSpeedAsync(id,
+            new CraneSpeedDto(SpeedX, AccelX, DecelX, SpeedY, AccelY, DecelY, SpeedZ, AccelZ, DecelZ)));
+        await FinishAsync(result);
     }
 
-    /// <summary>
-    /// 切换天车时，用当前坐标初始化绝对运动输入框。
-    /// </summary>
-    /// <param name="value">新选中天车</param>
-    partial void OnSelectedCraneChanged(CraneRowViewModel? value)
+    /// <summary>绝对移动。</summary>
+    [RelayCommand]
+    private async Task MoveAbsoluteAsync()
     {
-        if (value is null)
+        var result = await WithCrane(id => _manualOperationService.MoveAbsoluteAsync(id, AbsX, AbsY, AbsZ));
+        await FinishAsync(result);
+    }
+
+    /// <summary>相对移动。</summary>
+    [RelayCommand]
+    private async Task MoveRelativeAsync()
+    {
+        var result = await WithCrane(id => _manualOperationService.MoveRelativeAsync(id, RelX, RelY, RelZ));
+        await FinishAsync(result);
+    }
+
+    /// <summary>清除报警。</summary>
+    [RelayCommand]
+    private async Task ClearAlarmAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.ClearAlarmAsync(id)));
+
+    /// <summary>伺服通电。</summary>
+    [RelayCommand]
+    private async Task ServoOnAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.ServoOnAsync(id)));
+
+    /// <summary>伺服断电。</summary>
+    [RelayCommand]
+    private async Task ServoOffAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.ServoOffAsync(id)));
+
+    /// <summary>减速停止。</summary>
+    [RelayCommand]
+    private async Task SlowStopAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.SlowStopAsync(id)));
+
+    /// <summary>急停。</summary>
+    [RelayCommand]
+    private async Task EmergencyStopAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.EmergencyStopAsync(id)));
+
+    /// <summary>充磁。</summary>
+    [RelayCommand]
+    private async Task MagnetOnAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.MagnetOnAsync(id)));
+
+    /// <summary>放磁。</summary>
+    [RelayCommand]
+    private async Task MagnetOffAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.MagnetOffAsync(id)));
+
+    /// <summary>打开接液盘。</summary>
+    [RelayCommand]
+    private async Task DrainOpenAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.DrainOpenAsync(id)));
+
+    /// <summary>关闭接液盘。</summary>
+    [RelayCommand]
+    private async Task DrainCloseAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.DrainCloseAsync(id)));
+
+    /// <summary>单轴回原点（参数：X/Y/Z）。</summary>
+    /// <param name="axis">轴</param>
+    [RelayCommand]
+    private async Task HomeAxisAsync(string? axis)
+    {
+        if (string.IsNullOrWhiteSpace(axis))
         {
             return;
         }
 
-        AbsoluteX = value.X;
-        AbsoluteY = value.Y;
-        AbsoluteZ = value.Z;
-        Message = $"已选择 {value.Name}";
+        await FinishAsync(await WithCrane(id => _manualOperationService.HomeAsync(id, axis[0])));
+    }
+
+    /// <summary>执行需要天车的操作；未选天车直接返回失败。</summary>
+    /// <param name="action">动作</param>
+    /// <returns>结果</returns>
+    private async Task<ManualOperationResult> WithCrane(Func<int, Task<ManualOperationResult>> action)
+    {
+        if (SelectedCrane is null)
+        {
+            return ManualOperationResult.Fail("请先选择天车");
+        }
+
+        return await action(SelectedCrane.Id);
+    }
+
+    /// <summary>统一处理命令结果：显示消息，并在成功后刷新状态。</summary>
+    /// <param name="result">结果</param>
+    private async Task FinishAsync(ManualOperationResult result)
+    {
+        Message = result.Message;
+        if (result.Success)
+        {
+            await RefreshAsync();
+        }
+    }
+
+    /// <summary>设置连接状态显示。</summary>
+    /// <param name="state">状态</param>
+    /// <param name="text">文本</param>
+    private void SetState(CraneConnectionState state, string text)
+    {
+        ConnectionText = text;
+        ConnectionBrush = state switch
+        {
+            CraneConnectionState.Connected => new SolidColorBrush(Color.FromRgb(0x16, 0xA3, 0x4A)),
+            CraneConnectionState.Alarm => new SolidColorBrush(Color.FromRgb(0xD9, 0x77, 0x06)),
+            CraneConnectionState.Failed => new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26)),
+            _ => Brushes.Gray
+        };
     }
 }

@@ -12,180 +12,150 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <TextBlock
+        <!-- 顶栏：选择天车 + 刷新 + 连接状态徽章 -->
+        <StackPanel
             Grid.Row="0"
             Margin="0,0,0,12"
-            FontSize="16"
-            FontWeight="SemiBold"
-            Foreground="{StaticResource TextPrimaryBrush}"
-            Text="手动操作（直接下发天车 PLC；不与自动线互斥）" />
+            Orientation="Horizontal">
+            <TextBlock
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Foreground="{StaticResource TextPrimaryBrush}"
+                Text="选择天车" />
+            <ComboBox
+                Width="220"
+                DisplayMemberPath="Config.Name"
+                ItemsSource="{Binding Cranes}"
+                SelectedItem="{Binding SelectedCrane, Mode=TwoWay}" />
+            <ui:Button
+                Margin="8,0,0,0"
+                Command="{Binding RefreshCommand}"
+                Content="刷新" />
+            <Border
+                Margin="12,0,0,0"
+                Padding="12,4"
+                VerticalAlignment="Center"
+                Background="{Binding ConnectionBrush}"
+                CornerRadius="6">
+                <TextBlock
+                    FontWeight="SemiBold"
+                    Foreground="White"
+                    Text="{Binding ConnectionText}" />
+            </Border>
+        </StackPanel>
 
-        <!-- 内容较多，页面支持横竖滚动 -->
+        <!-- 内容：多卡片，横竖可滚动 -->
         <ScrollViewer
             Grid.Row="1"
             HorizontalScrollBarVisibility="Auto"
             VerticalScrollBarVisibility="Auto">
             <StackPanel Orientation="Horizontal">
-                <!-- 选择天车与当前状态 -->
-                <Border
-                    Width="360"
-                    Margin="0,0,12,0"
-                    Style="{StaticResource CardBorder}">
+
+                <!-- 状态显示 -->
+                <Border Width="330" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource CardTitle}" Text="选择天车" />
-                        <ComboBox
-                            Margin="0,8,0,0"
-                            DisplayMemberPath="Name"
-                            ItemsSource="{Binding Cranes}"
-                            SelectedItem="{Binding SelectedCrane, Mode=TwoWay}" />
+                        <TextBlock Style="{StaticResource CardTitle}" Text="状态" />
+                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="显示值坐标" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XDisplay, StringFormat=X：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YDisplay, StringFormat=Y：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZDisplay, StringFormat=Z：{0}}" />
 
-                        <TextBlock Margin="0,16,0,0" Style="{StaticResource CardTitle}" Text="当前坐标 / 状态" />
-                        <TextBlock Margin="0,6,0,0" FontFamily="Consolas" Text="{Binding SelectedCrane.X, StringFormat=X：{0:0.###}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding SelectedCrane.Y, StringFormat=Y：{0:0.###}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding SelectedCrane.Z, StringFormat=Z：{0:0.###}}" />
-                        <TextBlock Margin="0,6,0,0" Text="{Binding SelectedCrane.StateText, StringFormat=状态：{0}}" />
-                        <TextBlock Text="{Binding SelectedCrane.ConnectionText, StringFormat=通信：{0}}" />
-                        <TextBlock Text="{Binding SelectedCrane.AlarmText, StringFormat=报警：{0}}" />
+                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="绝对编码器坐标" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XEncoder, StringFormat=X：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YEncoder, StringFormat=Y：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZEncoder, StringFormat=Z：{0}}" />
 
-                        <TextBlock Margin="0,16,0,0" Style="{StaticResource CardTitle}" Text="信号" />
-                        <TextBlock
-                            Margin="0,6,0,0"
-                            FontFamily="Consolas"
-                            FontSize="12"
-                            Text="{Binding SelectedCrane.SignalText}"
-                            TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="回原点" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XHome, StringFormat=X 已回原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YHome, StringFormat=Y 已回原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZHome, StringFormat=Z 已回原点：{0}}" />
 
-                        <TextBlock
-                            Margin="0,12,0,0"
-                            Foreground="{StaticResource BrandBlueBrush}"
-                            Text="{Binding Message}"
-                            TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="报警" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ServoAlarm, StringFormat=伺服报警：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding PlcServoAlarm, StringFormat=PLC伺服指令报警：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding PlcAlarm, StringFormat=PLC报警：{0}}" />
+
+                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="X 区信号" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X0DrainOpen, StringFormat=X0 接液盘门开：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X1DrainClose, StringFormat=X1 接液盘门关：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X2Pressure, StringFormat=X2 下压限位：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X3HomeX, StringFormat=X3 X物理原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X4HomeY, StringFormat=X4 Y物理原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X5HomeZ, StringFormat=X5 Z物理原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X6Magnetize, StringFormat=X6 充磁反馈：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X7Demagnetize, StringFormat=X7 退磁反馈：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding X11HasPlate, StringFormat=X11 检测有版：{0}}" />
                     </StackPanel>
                 </Border>
 
-                <!-- 绝对运动 -->
-                <Border
-                    Width="300"
-                    Margin="0,0,12,0"
-                    Style="{StaticResource CardBorder}">
+                <!-- 设置速度（绝对速度） -->
+                <Border Width="240" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource CardTitle}" Text="绝对运动（输入目标坐标）" />
-                        <TextBlock Margin="0,10,0,0" Text="目标 X" />
-                        <ui:TextBox Text="{Binding AbsoluteX, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="0,8,0,0" Text="目标 Y" />
-                        <ui:TextBox Text="{Binding AbsoluteY, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Margin="0,8,0,0" Text="目标 Z" />
-                        <ui:TextBox Text="{Binding AbsoluteZ, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Style="{StaticResource CardTitle}" Text="设置速度（绝对）" />
+                        <TextBlock Margin="0,8,0,0" Text="X 速度 / 加速 / 减速" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding SpeedX}" />
+                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding AccelX}" />
+                            <ui:TextBox Width="70" Text="{Binding DecelX}" />
+                        </StackPanel>
+                        <TextBlock Margin="0,8,0,0" Text="Y 速度 / 加速 / 减速" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding SpeedY}" />
+                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding AccelY}" />
+                            <ui:TextBox Width="70" Text="{Binding DecelY}" />
+                        </StackPanel>
+                        <TextBlock Margin="0,8,0,0" Text="Z 速度 / 加速 / 减速" />
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding SpeedZ}" />
+                            <ui:TextBox Width="70" Margin="0,0,4,0" Text="{Binding AccelZ}" />
+                            <ui:TextBox Width="70" Text="{Binding DecelZ}" />
+                        </StackPanel>
                         <ui:Button
-                            Margin="0,14,0,0"
+                            Margin="0,12,0,0"
+                            Appearance="Primary"
+                            Command="{Binding SetSpeedCommand}"
+                            Content="设置速度" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 绝对移动 -->
+                <Border Width="220" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="绝对移动" />
+                        <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionText}" Text="输入目标绝对值（以编码器为基准）" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" Text="X 绝对值" />
+                        <ui:TextBox Text="{Binding AbsX}" />
+                        <TextBlock Margin="0,6,0,0" Text="Y 绝对值" />
+                        <ui:TextBox Text="{Binding AbsY}" />
+                        <TextBlock Margin="0,6,0,0" Text="Z 绝对值" />
+                        <ui:TextBox Text="{Binding AbsZ}" />
+                        <ui:Button
+                            Margin="0,12,0,0"
                             Appearance="Primary"
                             Command="{Binding MoveAbsoluteCommand}"
-                            Content="绝对运动" />
-                        <TextBlock
-                            Margin="0,8,0,0"
-                            Style="{StaticResource CaptionText}"
-                            Text="运动使用的三轴速度/加速度/减速度见右侧『三轴运动参数』。"
-                            TextWrapping="Wrap" />
+                            Content="绝对移动" />
                     </StackPanel>
                 </Border>
 
-                <!-- 相对运动 -->
-                <Border
-                    Width="300"
-                    Margin="0,0,12,0"
-                    Style="{StaticResource CardBorder}">
+                <!-- 相对移动 -->
+                <Border Width="220" Margin="0,0,12,0" Style="{StaticResource CardBorder}">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource CardTitle}" Text="相对运动（按步长点动）" />
-                        <TextBlock Margin="0,10,0,0" Text="步长(mm)" />
-                        <ui:TextBox Text="{Binding Step, UpdateSourceTrigger=PropertyChanged}" />
-
-                        <TextBlock Margin="0,12,0,0" Text="X 轴" />
-                        <StackPanel Orientation="Horizontal">
-                            <ui:Button
-                                Margin="0,0,8,0"
-                                Command="{Binding MoveRelativeCommand}"
-                                CommandParameter="X+"
-                                Content="X+" />
-                            <ui:Button
-                                Command="{Binding MoveRelativeCommand}"
-                                CommandParameter="X-"
-                                Content="X-" />
-                        </StackPanel>
-
-                        <TextBlock Margin="0,12,0,0" Text="Y 轴" />
-                        <StackPanel Orientation="Horizontal">
-                            <ui:Button
-                                Margin="0,0,8,0"
-                                Command="{Binding MoveRelativeCommand}"
-                                CommandParameter="Y+"
-                                Content="Y+" />
-                            <ui:Button
-                                Command="{Binding MoveRelativeCommand}"
-                                CommandParameter="Y-"
-                                Content="Y-" />
-                        </StackPanel>
-
-                        <TextBlock Margin="0,12,0,0" Text="Z 轴" />
-                        <StackPanel Orientation="Horizontal">
-                            <ui:Button
-                                Margin="0,0,8,0"
-                                Command="{Binding MoveRelativeCommand}"
-                                CommandParameter="Z+"
-                                Content="Z+" />
-                            <ui:Button
-                                Command="{Binding MoveRelativeCommand}"
-                                CommandParameter="Z-"
-                                Content="Z-" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
-
-                <!-- 三轴运动参数：每轴速度/加速度/减速度 -->
-                <Border
-                    Width="340"
-                    Margin="0,0,12,0"
-                    Style="{StaticResource CardBorder}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource CardTitle}" Text="三轴运动参数" />
-                        <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="32" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Grid.Row="0" Grid.Column="1" FontSize="12" Text="速度" />
-                            <TextBlock Grid.Row="0" Grid.Column="2" FontSize="12" Text="加速度" />
-                            <TextBlock Grid.Row="0" Grid.Column="3" FontSize="12" Text="减速度" />
-
-                            <TextBlock Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Text="X" />
-                            <ui:TextBox Grid.Row="1" Grid.Column="1" Margin="2" Text="{Binding SpeedX, UpdateSourceTrigger=PropertyChanged}" />
-                            <ui:TextBox Grid.Row="1" Grid.Column="2" Margin="2" Text="{Binding AccelX, UpdateSourceTrigger=PropertyChanged}" />
-                            <ui:TextBox Grid.Row="1" Grid.Column="3" Margin="2" Text="{Binding DecelX, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Text="Y" />
-                            <ui:TextBox Grid.Row="2" Grid.Column="1" Margin="2" Text="{Binding SpeedY, UpdateSourceTrigger=PropertyChanged}" />
-                            <ui:TextBox Grid.Row="2" Grid.Column="2" Margin="2" Text="{Binding AccelY, UpdateSourceTrigger=PropertyChanged}" />
-                            <ui:TextBox Grid.Row="2" Grid.Column="3" Margin="2" Text="{Binding DecelY, UpdateSourceTrigger=PropertyChanged}" />
-
-                            <TextBlock Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Text="Z" />
-                            <ui:TextBox Grid.Row="3" Grid.Column="1" Margin="2" Text="{Binding SpeedZ, UpdateSourceTrigger=PropertyChanged}" />
-                            <ui:TextBox Grid.Row="3" Grid.Column="2" Margin="2" Text="{Binding AccelZ, UpdateSourceTrigger=PropertyChanged}" />
-                            <ui:TextBox Grid.Row="3" Grid.Column="3" Margin="2" Text="{Binding DecelZ, UpdateSourceTrigger=PropertyChanged}" />
-                        </Grid>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="相对移动" />
+                        <TextBlock Margin="0,8,0,0" Style="{StaticResource CaptionText}" Text="以显示值为基准（0=该轴不动）" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" Text="X 相对值" />
+                        <ui:TextBox Text="{Binding RelX}" />
+                        <TextBlock Margin="0,6,0,0" Text="Y 相对值" />
+                        <ui:TextBox Text="{Binding RelY}" />
+                        <TextBlock Margin="0,6,0,0" Text="Z 相对值" />
+                        <ui:TextBox Text="{Binding RelZ}" />
                         <ui:Button
                             Margin="0,12,0,0"
-                            Command="{Binding SetParametersCommand}"
-                            Content="设置参数" />
+                            Appearance="Primary"
+                            Command="{Binding MoveRelativeCommand}"
+                            Content="相对移动" />
                     </StackPanel>
                 </Border>
 
@@ -193,30 +163,34 @@
                 <Border Width="260" Style="{StaticResource CardBorder}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CardTitle}" Text="动作" />
-                        <ui:Button
-                            Margin="0,10,0,0"
-                            Command="{Binding ClearAlarmCommand}"
-                            Content="清除报警" />
-                        <ui:Button
-                            Margin="0,8,0,0"
-                            Command="{Binding MagnetizeCommand}"
-                            Content="充磁" />
-                        <ui:Button
-                            Margin="0,8,0,0"
-                            Command="{Binding DemagnetizeCommand}"
-                            Content="放磁" />
-                        <ui:Button
-                            Margin="0,8,0,0"
-                            Command="{Binding PressDownCommand}"
-                            Content="下压" />
-                        <TextBlock
-                            Margin="0,16,0,0"
-                            Style="{StaticResource CaptionText}"
-                            Text="说明：手动动作直接写 PLC 点位，用于人工调试与设定设备坐标；自动线运行时请勿操作。"
-                            TextWrapping="Wrap" />
+                        <UniformGrid Margin="0,8,0,0" Columns="2">
+                            <ui:Button Margin="0,0,6,6" Command="{Binding ClearAlarmCommand}" Content="清除报警" />
+                            <ui:Button Margin="0,0,0,6" Command="{Binding EmergencyStopCommand}" Content="急停" />
+                            <ui:Button Margin="0,0,6,6" Command="{Binding SlowStopCommand}" Content="减速停止" />
+                            <ui:Button Margin="0,0,0,6" Command="{Binding ServoOnCommand}" Content="伺服通电" />
+                            <ui:Button Margin="0,0,6,6" Command="{Binding ServoOffCommand}" Content="伺服断电" />
+                            <ui:Button Margin="0,0,0,6" Command="{Binding MagnetOnCommand}" Content="充磁" />
+                            <ui:Button Margin="0,0,6,6" Command="{Binding MagnetOffCommand}" Content="放磁" />
+                            <ui:Button Margin="0,0,0,6" Command="{Binding DrainOpenCommand}" Content="接液盘打开" />
+                            <ui:Button Margin="0,0,6,0" Command="{Binding DrainCloseCommand}" Content="接液盘关闭" />
+                        </UniformGrid>
+
+                        <TextBlock Margin="0,12,0,0" Style="{StaticResource CardTitle}" Text="回原点" />
+                        <StackPanel Margin="0,8,0,0" Orientation="Horizontal">
+                            <ui:Button Margin="0,0,6,0" Command="{Binding HomeAxisCommand}" CommandParameter="X" Content="X 回原点" />
+                            <ui:Button Margin="0,0,6,0" Command="{Binding HomeAxisCommand}" CommandParameter="Y" Content="Y 回原点" />
+                            <ui:Button Command="{Binding HomeAxisCommand}" CommandParameter="Z" Content="Z 回原点" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>
         </ScrollViewer>
+
+        <TextBlock
+            Grid.Row="2"
+            Margin="0,12,0,0"
+            Foreground="{StaticResource BrandBlueBrush}"
+            Text="{Binding Message}"
+            TextWrapping="Wrap" />
     </Grid>
 </UserControl>
