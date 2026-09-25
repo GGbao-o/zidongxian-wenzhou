@@ -128,7 +128,7 @@ public sealed class ManualOperationService : IManualOperationService
             speed.SpeedZ, speed.AccelZ, speed.DecelZ,
             cancellationToken), "设置三轴绝对速度", cancellationToken);
 
-    /// <inheritdoc /> 绝对移动
+    /// <inheritdoc /> 绝对移动  参数  天车id  绝对值 xyz
     public Task<ManualOperationResult> MoveAbsoluteAsync(int craneId, int x, int y, int z, CancellationToken cancellationToken = default)
         => RunMoveAsync(craneId, async crane =>
         {

@@ -262,6 +262,7 @@ public partial class ManualOperationViewModel : ObservableObject
     private async Task MoveAbsoluteAsync()
     {
         var result = await WithCrane(id => _manualOperationService.MoveAbsoluteAsync(id, AbsX, AbsY, AbsZ));
+        //刷新选中天车状态
         await FinishAsync(result);
     }
 
