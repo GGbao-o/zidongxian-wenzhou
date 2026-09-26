@@ -108,4 +108,33 @@ public interface ICraneDriver : IPlcDriver
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>结果</returns>
     Task<CraneCommandResult> ClearAlarmAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 读取天车状态快照（含显示值/绝对编码器、回原点、报警、三轴速度、X 区信号）。
+    /// 读取失败返回 null，不抛异常；供手动页与自动引擎共用。
+    /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>状态快照；读取失败返回 null</returns>
+    Task<CraneStatusDto?> ReadStatusAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 绝对移动：输入用户绝对坐标（以绝对编码器为基准）。
+    /// 内部读编码器/显示值换算写入值 D3102~D3107，轮询绝对编码器到位。
+    /// </summary>
+    /// <param name="x">用户输入 X 绝对值</param>
+    /// <param name="y">用户输入 Y 绝对值</param>
+    /// <param name="z">用户输入 Z 绝对值</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>结果</returns>
+    Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 相对移动：以显示值为基准，目标 = 显示值 + 相对值（为 0 的轴不动），轮询显示值到位。
+    /// </summary>
+    /// <param name="dx">X 相对值（0=不动）</param>
+    /// <param name="dy">Y 相对值（0=不动）</param>
+    /// <param name="dz">Z 相对值（0=不动）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>结果</returns>
+    Task<CraneCommandResult> MoveRelativeAsync(int dx, int dy, int dz, CancellationToken cancellationToken = default);
 }

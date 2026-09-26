@@ -161,10 +161,10 @@ public sealed class CraneService : ICraneDriver
         _manualModeSet = false;
     }
 
-    /// <summary>读取状态快照（D5000~D5029）。</summary>
+    /// <summary>读取原始状态快照（D5000~D5029 + 速度区）。内部使用，失败抛异常。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>状态快照</returns>
-    public async Task<CraneStatus> ReadStatusAsync(CancellationToken cancellationToken = default)
+    private async Task<CraneStatus> ReadRawStatusAsync(CancellationToken cancellationToken = default)
     {
         var r = await _client.ReadRegistersAsync(CraneAddress.StatusStart, CraneAddress.StatusCount, cancellationToken).ConfigureAwait(false);
         // 速度区 D2501~D2521 共 21 个：X=+0~2, Y=+9~11, Z=+18~20
@@ -204,9 +204,139 @@ public sealed class CraneService : ICraneDriver
         => _client.ReadCoilAsync(coilAddress, cancellationToken);
 
     /// <inheritdoc />
+    public async Task<CraneStatusDto?> ReadStatusAsync(CancellationToken cancellationToken = default)
+    {
+        // 第一段：批量读状态与速度区。拿不到就没有坐标可显示，返回 null（不抛）。
+        CraneStatus s;
+        try
+        {
+            s = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.Communication, $"天车[{_name}] 读取状态失败（D5000~D5029 + 速度区）：{ex.Message}");
+            return null;
+        }
+
+        // 第二段：X 区线圈逐个读。单点失败只把该点标记为 null（未知），不拖垮整块状态。
+        return new CraneStatusDto
+        {
+            XDisplay = s.XPosition,
+            YDisplay = s.YPosition,
+            ZDisplay = s.ZPosition,
+            XEncoder = s.XEncoder,
+            YEncoder = s.YEncoder,
+            ZEncoder = s.ZEncoder,
+            XHomeCompleted = s.XHomeCompleted,
+            YHomeCompleted = s.YHomeCompleted,
+            ZHomeCompleted = s.ZHomeCompleted,
+            ServoAlarm = s.ServoAlarm,
+            PlcServoAlarm = s.PlcServoAlarm,
+            PlcAlarm = s.PlcAlarm,
+            XSpeed = s.XSpeed,
+            XAccel = s.XAccel,
+            XDecel = s.XDecel,
+            YSpeed = s.YSpeed,
+            YAccel = s.YAccel,
+            YDecel = s.YDecel,
+            ZSpeed = s.ZSpeed,
+            ZAccel = s.ZAccel,
+            ZDecel = s.ZDecel,
+            HasPlate = await ReadCoilOrNullAsync(CraneAddress.X11_HasPlate, "X11 检测有版", cancellationToken).ConfigureAwait(false),
+            MagnetizeFeedback = await ReadCoilOrNullAsync(CraneAddress.X6_MagnetizeOk, "X6 充磁反馈", cancellationToken).ConfigureAwait(false),
+            DemagnetizeFeedback = await ReadCoilOrNullAsync(CraneAddress.X7_DemagnetizeOk, "X7 退磁反馈", cancellationToken).ConfigureAwait(false),
+            PressureLimit = await ReadCoilOrNullAsync(CraneAddress.X2_MagnetDownLimit, "X2 磁铁下压限位", cancellationToken).ConfigureAwait(false),
+            DrainOpen = await ReadCoilOrNullAsync(CraneAddress.X0_DrainOpen, "X0 接液盘门开到位", cancellationToken).ConfigureAwait(false),
+            DrainClose = await ReadCoilOrNullAsync(CraneAddress.X1_DrainClose, "X1 接液盘门关到位", cancellationToken).ConfigureAwait(false),
+            PhysicalHomeX = await ReadCoilOrNullAsync(CraneAddress.X3_HomeX, "X3 X 轴物理原点", cancellationToken).ConfigureAwait(false),
+            PhysicalHomeY = await ReadCoilOrNullAsync(CraneAddress.X4_HomeY, "X4 Y 轴物理原点", cancellationToken).ConfigureAwait(false),
+            PhysicalHomeZ = await ReadCoilOrNullAsync(CraneAddress.X5_HomeZ, "X5 Z 轴物理原点", cancellationToken).ConfigureAwait(false)
+        };
+    }
+
+    /// <summary>
+    /// 读单个 X 线圈，失败返回 null（未知）并记一条含点名的日志，**绝不按 0 处理**——
+    /// 否则通信故障会被误读成"无板 / 未下压"。
+    /// </summary>
+    /// <param name="address">线圈地址</param>
+    /// <param name="name">点位名（日志用）</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>true/false 为实际电平；null 表示读取失败</returns>
+    private async Task<bool?> ReadCoilOrNullAsync(int address, string name, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _client.ReadCoilAsync(address, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.Communication, $"天车[{_name}] 读取 {name}（线圈 {address}）失败：{ex.Message}");
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var s = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
+
+            // 写入 D3102~D3107 = 用户绝对值 − 当前编码器值 + 当前显示值；到位轮询绝对编码器
+            var writeX = x - (s.XEncoder - s.XPosition);
+            var writeY = y - (s.YEncoder - s.YPosition);
+            var writeZ = z - (s.ZEncoder - s.ZPosition);
+
+            var dz = z - s.ZEncoder;
+            var zDirection = dz > 0 ? 1 : dz < 0 ? 2 : 0;
+
+            return await MoveAsync(writeX, writeY, writeZ, x, y, z, pollEncoder: true, zDirection, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return FailCommunication(ex, "绝对移动");
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<CraneCommandResult> MoveRelativeAsync(int dx, int dy, int dz, CancellationToken cancellationToken = default)
+    {
+        if (dx == 0 && dy == 0 && dz == 0)
+        {
+            return CraneCommandResult.Fail(CraneCommandCode.Rejected, "相对值不能全为 0");
+        }
+
+        try
+        {
+            var s = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
+
+            // 以显示值为基准：目标 = 显示值 + 相对值（0 的轴不动）
+            var targetX = dx != 0 ? s.XPosition + dx : -1;
+            var targetY = dy != 0 ? s.YPosition + dy : -1;
+            var targetZ = dz != 0 ? s.ZPosition + dz : -1;
+
+            var zDirection = dz > 0 ? 1 : dz < 0 ? 2 : 0;
+
+            return await MoveAsync(targetX, targetY, targetZ, targetX, targetY, targetZ, pollEncoder: false, zDirection, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return FailCommunication(ex, "相对移动");
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyDictionary<string, object?>> ReadAllSignalsAsync(CancellationToken cancellationToken = default)
     {
-        var status = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+        var status = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
 
         // 有板信号取 X11 线圈（现场确认 D5029 不是有板信号）。
         // 采集周期内比原先多一次线圈读；读失败按通信瞬时故障处理，由采集器标记断开并告警。
@@ -664,7 +794,7 @@ public sealed class CraneService : ICraneDriver
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(200, cancellationToken).ConfigureAwait(false);
 
-            var status = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+            var status = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
             var x = pollEncoder ? status.XEncoder : status.XPosition;
             var y = pollEncoder ? status.YEncoder : status.YPosition;
             var z = pollEncoder ? status.ZEncoder : status.ZPosition;

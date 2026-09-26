@@ -146,6 +146,55 @@ public sealed class SimulatedCraneDriver : ICraneDriver
     }
 
     /// <inheritdoc />
+    public Task<CraneStatusDto?> ReadStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var x = Convert.ToInt32(_values["X"]);
+        var y = Convert.ToInt32(_values["Y"]);
+        var z = Convert.ToInt32(_values["Z"]);
+        var dto = new CraneStatusDto
+        {
+            XDisplay = x,
+            YDisplay = y,
+            ZDisplay = z,
+            XEncoder = x,
+            YEncoder = y,
+            ZEncoder = z,
+            XHomeCompleted = true,
+            YHomeCompleted = true,
+            ZHomeCompleted = true,
+            HasPlate = (bool)(_values["HasPlate"] ?? false),
+            MagnetizeFeedback = (bool)(_values["Magnetized"] ?? false),
+            DemagnetizeFeedback = !(bool)(_values["Magnetized"] ?? false)
+        };
+        return Task.FromResult<CraneStatusDto?>(dto);
+    }
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken cancellationToken = default)
+    {
+        _values["TargetX"] = (double)x;
+        _values["TargetY"] = (double)y;
+        _values["TargetZ"] = (double)z;
+        ApplyPendingMove();
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{CraneId}] 模拟绝对到位"));
+    }
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> MoveRelativeAsync(int dx, int dy, int dz, CancellationToken cancellationToken = default)
+    {
+        if (dx == 0 && dy == 0 && dz == 0)
+        {
+            return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Rejected, "相对值不能全为 0"));
+        }
+
+        _values["X"] = Convert.ToDouble(_values["X"]) + dx;
+        _values["Y"] = Convert.ToDouble(_values["Y"]) + dy;
+        _values["Z"] = Convert.ToDouble(_values["Z"]) + dz;
+        _values["InPosition"] = true;
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{CraneId}] 模拟相对到位"));
+    }
+
+    /// <inheritdoc />
     public Task<CraneCommandResult> JogAsync(char axis, int distance, bool positive, CancellationToken cancellationToken = default)
         => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟点动下发"));
 
