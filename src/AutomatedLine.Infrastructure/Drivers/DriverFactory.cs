@@ -22,13 +22,15 @@ public static class DriverFactory
     }
 
     /// <summary>
-    /// 创建天车驱动（真实汇川 Modbus TCP）。IP 来自数据库，端口/协议写死。
+    /// 创建天车驱动（真实汇川 Modbus TCP）。IP 来自数据库，端口/协议写死；
+    /// 运动超时与到位/下压容差来自 appsettings（App:Crane）。
     /// </summary>
     /// <param name="config">天车配置</param>
     /// <param name="logger">日志</param>
+    /// <param name="configService">程序配置</param>
     /// <returns>天车驱动</returns>
-    public static ICraneDriver CreateCraneDriver(CraneConfig config, IAppLogger logger)
+    public static ICraneDriver CreateCraneDriver(CraneConfig config, IAppLogger logger, IConfigService configService)
     {
-        return new CraneService(config.Id, config.Name, config.IpAddress, logger, config.MoveTimeoutMs);
+        return new CraneService(config.Id, config.Name, config.IpAddress, logger, configService);
     }
 }

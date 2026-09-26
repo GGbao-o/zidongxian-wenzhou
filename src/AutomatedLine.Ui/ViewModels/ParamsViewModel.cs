@@ -105,8 +105,13 @@ public partial class ParamsViewModel : ObservableObject
         scheduling.Items.Add(IntItem("设备预约超时(ms)", () => _options.Scheduling.ReservationTimeoutMs, v => _options.Scheduling.ReservationTimeoutMs = v));
         Categories.Add(scheduling);
 
+        var crane = new ParamCategoryViewModel("天车", "运动超时与到位/下压容差");
+        crane.Items.Add(IntItem("运动超时(ms)", () => _options.Crane.MoveTimeoutMs, v => _options.Crane.MoveTimeoutMs = v));
+        crane.Items.Add(IntItem("到位容差(mm)", () => _options.Crane.PositionToleranceMm, v => _options.Crane.PositionToleranceMm = v));
+        crane.Items.Add(IntItem("下压容差(mm)", () => _options.Crane.PressureToleranceMm, v => _options.Crane.PressureToleranceMm = v));
+        Categories.Add(crane);
+
         var stateMachine = new ParamCategoryViewModel("状态机", "各环节超时");
-        stateMachine.Items.Add(IntItem("运动到位超时(ms)", () => _options.StateMachine.MoveTimeoutMs, v => _options.StateMachine.MoveTimeoutMs = v));
         stateMachine.Items.Add(IntItem("取料确认超时(ms)", () => _options.StateMachine.PickTimeoutMs, v => _options.StateMachine.PickTimeoutMs = v));
         stateMachine.Items.Add(IntItem("放料确认超时(ms)", () => _options.StateMachine.PlaceTimeoutMs, v => _options.StateMachine.PlaceTimeoutMs = v));
         stateMachine.Items.Add(IntItem("握手超时(ms)", () => _options.StateMachine.HandshakeTimeoutMs, v => _options.StateMachine.HandshakeTimeoutMs = v));

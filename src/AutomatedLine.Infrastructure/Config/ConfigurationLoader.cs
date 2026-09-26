@@ -34,6 +34,9 @@ public class ConfigurationLoader : IConfigurationLoader
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
+    /// <summary>程序配置（天车运动超时与容差注入驱动）。</summary>
+    private readonly IConfigService _configService;
+
     /// <summary>
     /// 构造函数。
     /// </summary>
@@ -42,18 +45,21 @@ public class ConfigurationLoader : IConfigurationLoader
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="driverRegistry">驱动注册表</param>
     /// <param name="logger">日志</param>
+    /// <param name="configService">程序配置</param>
     public ConfigurationLoader(
         IServiceScopeFactory scopeFactory,
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
         DriverRegistry driverRegistry,
-        IAppLogger logger)
+        IAppLogger logger,
+        IConfigService configService)
     {
         _scopeFactory = scopeFactory;
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
         _driverRegistry = driverRegistry;
         _logger = logger;
+        _configService = configService;
     }
 
     /// <inheritdoc />
@@ -102,7 +108,7 @@ public class ConfigurationLoader : IConfigurationLoader
             _craneRegistry.Register(crane);
 
             // 同样不主动连接：天车 PLC 离线时不影响配置装载，首次操作时再连。
-            var driver = DriverFactory.CreateCraneDriver(config, _logger);
+            var driver = DriverFactory.CreateCraneDriver(config, _logger, _configService);
             _driverRegistry.RegisterCrane(driver);
             driverCount++;
         }
@@ -135,7 +141,6 @@ public class ConfigurationLoader : IConfigurationLoader
             _ => throw new NotSupportedException($"未知设备类型：{config.DeviceType}")
         };
 
-        device.SafePosition = config.SafePosition;
         device.MinDiameter = config.MinDiameter;
         device.MaxDiameter = config.MaxDiameter;
         device.MinLength = config.MinLength;

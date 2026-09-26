@@ -133,4 +133,78 @@ public sealed class SimulatedCraneDriver : ICraneDriver
         _values["Z"] = Convert.ToDouble(_values["TargetZ"]);
         _values["InPosition"] = true;
     }
+
+    // ── 命令方法（模拟：一律成功，供接口完整性与离线跑通流程）──
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> MoveAsync(int writeX, int writeY, int writeZ,
+        int targetX, int targetY, int targetZ,
+        bool pollEncoder, int zDirection, CancellationToken cancellationToken = default)
+    {
+        _values["InPosition"] = true;
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{CraneId}] 模拟到位"));
+    }
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> JogAsync(char axis, int distance, bool positive, CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟点动下发"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> HomeAsync(char axis, CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟回原点"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> SetAbsoluteSpeedAsync(int speedX, int accelX, int decelX,
+        int speedY, int accelY, int decelY, int speedZ, int accelZ, int decelZ,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟设置速度"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default)
+    {
+        _values["Magnetized"] = true;
+        _values["HasPlate"] = true;
+        _values["HasMaterial"] = true;
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟充磁"));
+    }
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> MagnetOffAsync(CancellationToken cancellationToken = default)
+    {
+        _values["Magnetized"] = false;
+        _values["HasPlate"] = false;
+        _values["HasMaterial"] = false;
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟退磁"));
+    }
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> DrainOpenAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟开接液盘"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> DrainCloseAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟关接液盘"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> ServoOnAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟伺服通电"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> ServoOffAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟伺服断电"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> SlowStopAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟减速停止"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> EmergencyStopAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟急停"));
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> ClearAlarmAsync(CancellationToken cancellationToken = default)
+    {
+        _values["Alarm"] = false;
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, $"天车[{CraneId}] 模拟清除报警"));
+    }
 }

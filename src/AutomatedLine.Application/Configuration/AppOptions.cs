@@ -13,6 +13,9 @@ public sealed class AppOptions
     /// <summary>调度类参数。</summary>
     public SchedulingOptions Scheduling { get; set; } = new();
 
+    /// <summary>天车运动类参数（超时与容差）。</summary>
+    public CraneOptions Crane { get; set; } = new();
+
     /// <summary>状态机类参数。</summary>
     public StateMachineOptions StateMachine { get; set; } = new();
 
@@ -46,12 +49,25 @@ public sealed class SchedulingOptions
     public int ReservationTimeoutMs { get; set; } = 60000;
 }
 
+/// <summary>
+/// 天车运动参数。
+/// 运动超时与到位/下压容差都由配置文件提供（不再放数据库），手动页与自动引擎共用同一套。
+/// </summary>
+public sealed class CraneOptions
+{
+    /// <summary>运动到位超时（毫秒）。超过即判 Timeout。默认 60s。</summary>
+    public int MoveTimeoutMs { get; set; } = 60000;
+
+    /// <summary>正常 XYZ 到位容差（mm）。默认 5。</summary>
+    public int PositionToleranceMm { get; set; } = 5;
+
+    /// <summary>下压容差（mm）：仅当 X2 下压触发时，用它判断 Z 是否真的到位。默认 15。</summary>
+    public int PressureToleranceMm { get; set; } = 15;
+}
+
 /// <summary>状态机参数。用超时兜住"PLC 不回信号"的异常场景。</summary>
 public sealed class StateMachineOptions
 {
-    /// <summary>运动到位超时（毫秒）。</summary>
-    public int MoveTimeoutMs { get; set; } = 30000;
-
     /// <summary>取料确认超时（毫秒）。</summary>
     public int PickTimeoutMs { get; set; } = 15000;
 

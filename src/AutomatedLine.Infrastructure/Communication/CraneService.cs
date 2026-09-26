@@ -1,4 +1,5 @@
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Configuration;
 using AutomatedLine.Domain.Diagnostics;
 
 namespace AutomatedLine.Infrastructure.Communication;
@@ -85,11 +86,14 @@ public sealed class CraneService : ICraneDriver
     /// <summary>Modbus 站号（写死）。</summary>
     private const byte UnitId = 1;
 
-    /// <summary>到位容差默认值（mm）。</summary>
-    private const int DefaultTolerance = 5;
-
     /// <summary>运动超时兜底值（毫秒）：配置非法时使用 60s。</summary>
     private const int FallbackMoveTimeoutMs = 60_000;
+
+    /// <summary>到位容差兜底值（mm）。</summary>
+    private const int FallbackPositionToleranceMm = 5;
+
+    /// <summary>下压容差兜底值（mm）。</summary>
+    private const int FallbackPressureToleranceMm = 15;
 
     /// <summary>底层 Modbus 客户端。</summary>
     private readonly ModbusTcpClient _client;
@@ -103,8 +107,14 @@ public sealed class CraneService : ICraneDriver
     /// <summary>是否已确认处于手动模式（缓存，避免重复写 D4001/D4500）。</summary>
     private bool _manualModeSet;
 
-    /// <summary>运动到位超时（毫秒，来自天车配置）。</summary>
+    /// <summary>运动到位超时（毫秒，来自 appsettings 的 App:Crane）。</summary>
     private readonly int _moveTimeoutMs;
+
+    /// <summary>正常 XYZ 到位容差（mm，来自 appsettings）。</summary>
+    private readonly int _positionTolerance;
+
+    /// <summary>下压容差（mm）：仅当 X2 下压触发时用于判断 Z 是否到位。</summary>
+    private readonly int _pressureTolerance;
 
     /// <summary>
     /// 构造函数。
@@ -113,15 +123,21 @@ public sealed class CraneService : ICraneDriver
     /// <param name="name">天车名称（日志用）</param>
     /// <param name="ip">PLC IP（来自数据库）</param>
     /// <param name="logger">日志</param>
-    /// <param name="moveTimeoutMs">运动到位超时（毫秒），来自数据库配置；非法时用 60s</param>
-    public CraneService(int craneId, string name, string ip, IAppLogger logger, int moveTimeoutMs = FallbackMoveTimeoutMs)
+    /// <param name="configService">程序配置：运动超时与到位/下压容差（来自 appsettings 的 App:Crane）</param>
+    public CraneService(int craneId, string name, string ip, IAppLogger logger, IConfigService configService)
     {
         CraneId = craneId;
         _name = name;
         _logger = logger;
-        _moveTimeoutMs = moveTimeoutMs > 0 ? moveTimeoutMs : FallbackMoveTimeoutMs;
+
+        var crane = configService.GetAppOptions().Crane;
+        _moveTimeoutMs = crane.MoveTimeoutMs > 0 ? crane.MoveTimeoutMs : FallbackMoveTimeoutMs;
+        _positionTolerance = crane.PositionToleranceMm > 0 ? crane.PositionToleranceMm : FallbackPositionToleranceMm;
+        _pressureTolerance = crane.PressureToleranceMm > 0 ? crane.PressureToleranceMm : FallbackPressureToleranceMm;
+
         _client = new ModbusTcpClient(ip, PlcPort, UnitId);
-        _logger.Info(LogCategory.System, $"天车[{name}] 创建服务，IP={ip}:{PlcPort}（端口/协议固定），运动超时={_moveTimeoutMs}ms");
+        _logger.Info(LogCategory.System,
+            $"天车[{name}] 创建服务，IP={ip}:{PlcPort}（端口/协议固定），运动超时={_moveTimeoutMs}ms，到位容差={_positionTolerance}mm，下压容差={_pressureTolerance}mm");
     }
 
     /// <inheritdoc />
@@ -243,52 +259,53 @@ public sealed class CraneService : ICraneDriver
     /// <param name="accelZ">Z 加速度</param>
     /// <param name="decelZ">Z 减速度</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task SetAbsoluteSpeedAsync(int speedX, int accelX, int decelX,
+    public Task<CraneCommandResult> SetAbsoluteSpeedAsync(int speedX, int accelX, int decelX,
         int speedY, int accelY, int decelY, int speedZ, int accelZ, int decelZ,
         CancellationToken cancellationToken = default)
-    {
-        await _client.WriteRegisterAsync(CraneAddress.XAbsSpeed, (ushort)speedX, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.XAbsAccel, (ushort)accelX, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.XAbsDecel, (ushort)decelX, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.YAbsSpeed, (ushort)speedY, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.YAbsAccel, (ushort)accelY, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.YAbsDecel, (ushort)decelY, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ZAbsSpeed, (ushort)speedZ, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ZAbsAccel, (ushort)accelZ, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ZAbsDecel, (ushort)decelZ, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 设置三轴绝对速度");
-    }
+        => ExecuteAsync("设置三轴绝对速度", async () =>
+        {
+            await _client.WriteRegisterAsync(CraneAddress.XAbsSpeed, (ushort)speedX, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.XAbsAccel, (ushort)accelX, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.XAbsDecel, (ushort)decelX, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.YAbsSpeed, (ushort)speedY, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.YAbsAccel, (ushort)accelY, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.YAbsDecel, (ushort)decelY, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.ZAbsSpeed, (ushort)speedZ, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.ZAbsAccel, (ushort)accelZ, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.ZAbsDecel, (ushort)decelZ, cancellationToken).ConfigureAwait(false);
+        });
 
     /// <summary>
-    /// 执行绝对运动：写目标 D3102~D3107 → 按 Z 方向脉冲触发 → 轮询到位。
-    /// 传值 -1 表示该轴不参与。
+    /// 执行绝对/相对运动：写目标 D3102~D3107 → 按 Z 方向脉冲触发 → 轮询到位。
+    /// 传值 -1 表示该轴不参与。Z 下降时叠加 X2 下压保护。
     /// </summary>
-    /// <param name="xValue">写入 X 目标的值（调用方按业务换算）</param>
-    /// <param name="yValue">写入 Y 目标的值</param>
-    /// <param name="zValue">写入 Z 目标的值</param>
-    /// <param name="zDirection">Z 方向（用于触发顺序）：1=下降 2=上升 0=不动</param>
+    /// <param name="writeX">写入 X 目标的值（调用方按业务换算）</param>
+    /// <param name="writeY">写入 Y 目标的值</param>
+    /// <param name="writeZ">写入 Z 目标的值</param>
+    /// <param name="targetX">X 到位目标</param>
+    /// <param name="targetY">Y 到位目标</param>
+    /// <param name="targetZ">Z 到位目标</param>
     /// <param name="pollEncoder">true=轮询绝对编码器、false=轮询显示值</param>
-    /// <param name="tolerance">到位容差（mm）</param>
+    /// <param name="zDirection">Z 方向（用于触发顺序）：1=下降 2=上升 0=不动</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>true=Z 下降时压到 X2 下压限位而停下（正常结束）；false=正常到位</returns>
-    public async Task<bool> MoveAsync(int writeX, int writeY, int writeZ,
+    /// <returns>InPosition / PressureReached 为成功；Timeout / PressureOutOfRange 等为失败</returns>
+    public async Task<CraneCommandResult> MoveAsync(int writeX, int writeY, int writeZ,
         int targetX, int targetY, int targetZ,
-        bool pollEncoder, int zDirection,
-        int tolerance = DefaultTolerance, CancellationToken cancellationToken = default)
+        bool pollEncoder, int zDirection, CancellationToken cancellationToken = default)
     {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-
-        // 写目标（调用方按业务换算：相对运动写显示目标；绝对运动写 用户绝对值−编码器值+显示值）
-        if (writeX != -1) await _client.WriteInt32Async(CraneAddress.XAbsTarget, writeX, cancellationToken).ConfigureAwait(false);
-        if (writeY != -1) await _client.WriteInt32Async(CraneAddress.YAbsTarget, writeY, cancellationToken).ConfigureAwait(false);
-        if (writeZ != -1) await _client.WriteInt32Async(CraneAddress.ZAbsTarget, writeZ, cancellationToken).ConfigureAwait(false);
-
-        _logger.Info(LogCategory.Operation,
-            $"天车[{_name}] 绝对运动 写入 X={writeX} Y={writeY} Z={writeZ}；到位目标 X={targetX} Y={targetY} Z={targetZ}（轮询={(pollEncoder ? "编码器" : "显示值")}）");
-
         try
         {
-            // 触发统一为“写 2 → 500ms → 写 0”，复位后再轮询到位；
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+
+            // 写目标（调用方按业务换算：相对运动写显示目标；绝对运动写 用户绝对值−编码器值+显示值）
+            if (writeX != -1) await _client.WriteInt32Async(CraneAddress.XAbsTarget, writeX, cancellationToken).ConfigureAwait(false);
+            if (writeY != -1) await _client.WriteInt32Async(CraneAddress.YAbsTarget, writeY, cancellationToken).ConfigureAwait(false);
+            if (writeZ != -1) await _client.WriteInt32Async(CraneAddress.ZAbsTarget, writeZ, cancellationToken).ConfigureAwait(false);
+
+            _logger.Info(LogCategory.Operation,
+                $"天车[{_name}] 运动 写入 X={writeX} Y={writeY} Z={writeZ}；到位目标 X={targetX} Y={targetY} Z={targetZ}（轮询={(pollEncoder ? "编码器" : "显示值")}）");
+
+            // 触发统一为"写 2 → 500ms → 写 0"，复位后再轮询到位；
             // 同一阶段的轴并行脉冲（一起写 2、一起写 0），不是写 2 后一直轮询再写 0。
             var xy = new[] { (CraneAddress.ManualXAbsMove, writeX != -1), (CraneAddress.ManualYAbsMove, writeY != -1) };
             var z = new[] { (CraneAddress.ManualZAbsMove, writeZ != -1) };
@@ -297,14 +314,16 @@ public sealed class CraneService : ICraneDriver
             {
                 // Z 下降：先 XY（并行）后 Z
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
-                await PollAxesAsync(targetX, targetY, -1, pollEncoder, tolerance, false, cancellationToken).ConfigureAwait(false);
+                var xyResult = await PollAxesAsync(targetX, targetY, -1, pollEncoder, false, cancellationToken).ConfigureAwait(false);
+                if (!xyResult.IsSuccess) return xyResult;
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
             }
             else if (zDirection == 2)
             {
                 // Z 上升：先 Z 后 XY（并行）
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
-                await PollAxesAsync(-1, -1, targetZ, pollEncoder, tolerance, false, cancellationToken).ConfigureAwait(false);
+                var zResult = await PollAxesAsync(-1, -1, targetZ, pollEncoder, false, cancellationToken).ConfigureAwait(false);
+                if (!zResult.IsSuccess) return zResult;
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
             }
             else
@@ -313,9 +332,17 @@ public sealed class CraneService : ICraneDriver
                 await PulseManyAsync(new[] { xy[0], xy[1], z[0] }, 500, cancellationToken).ConfigureAwait(false);
             }
 
-            // Z 下降（zDirection=1）期间额外监视 X2 下压限位：压到即下压急停并视为正常结束（与到位同义）；
-            // 其余方向不做下压保护，避免误报。
-            return await PollAxesAsync(targetX, targetY, targetZ, pollEncoder, tolerance, zDirection == 1, cancellationToken).ConfigureAwait(false);
+            // Z 下降（zDirection=1）期间额外监视 X2 下压限位：压到即收尾并按下压容差判定成功/失败；其余方向不做下压保护。
+            return await PollAxesAsync(targetX, targetY, targetZ, pollEncoder, zDirection == 1, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // 运动自身超时以结果码返回（PollAxesAsync），能抛到这里的是连接/通信类异常
+            return FailCommunication(ex, "运动");
         }
         finally
         {
@@ -334,128 +361,198 @@ public sealed class CraneService : ICraneDriver
     /// <param name="distance">距离（正数）</param>
     /// <param name="positive">方向：true 正向</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task JogAsync(char axis, int distance, bool positive, CancellationToken cancellationToken = default)
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> JogAsync(char axis, int distance, bool positive, CancellationToken cancellationToken = default)
     {
         if (distance <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(distance), "距离必须大于 0");
+            return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Rejected, "距离必须大于 0"));
         }
 
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ManualDistance, (ushort)distance, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ManualDirection, (ushort)(positive ? 1 : 2), cancellationToken).ConfigureAwait(false);
-
-        var trigger = char.ToUpperInvariant(axis) switch
+        var upper = char.ToUpperInvariant(axis);
+        if (upper is not ('X' or 'Y' or 'Z'))
         {
-            'X' => CraneAddress.ManualMoveX,
-            'Y' => CraneAddress.ManualMoveY,
-            'Z' => CraneAddress.ManualMoveZ,
-            _ => throw new ArgumentException($"未知轴 {axis}", nameof(axis))
-        };
-        await _client.WriteRegisterAsync(trigger, 2, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] {char.ToUpperInvariant(axis)}{(positive ? "+" : "-")} 点动 {distance}mm");
+            return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Rejected, $"未知轴 {axis}"));
+        }
+
+        return ExecuteAsync($"{upper} 点动", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.ManualDistance, (ushort)distance, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.ManualDirection, (ushort)(positive ? 1 : 2), cancellationToken).ConfigureAwait(false);
+
+            var trigger = upper switch
+            {
+                'X' => CraneAddress.ManualMoveX,
+                'Y' => CraneAddress.ManualMoveY,
+                _ => CraneAddress.ManualMoveZ
+            };
+            await _client.WriteRegisterAsync(trigger, 2, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] {upper}{(positive ? "+" : "-")} 点动 {distance}mm");
+        });
     }
 
     /// <summary>单轴回原点（D4508/07/06=2 → 200ms → 0）。</summary>
     /// <param name="axis">轴：'X'/'Y'/'Z'</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task HomeAsync(char axis, CancellationToken cancellationToken = default)
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> HomeAsync(char axis, CancellationToken cancellationToken = default)
     {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        var reg = char.ToUpperInvariant(axis) switch
+        var upper = char.ToUpperInvariant(axis);
+        if (upper is not ('X' or 'Y' or 'Z'))
         {
-            'X' => CraneAddress.ManualHomeX,
-            'Y' => CraneAddress.ManualHomeY,
-            'Z' => CraneAddress.ManualHomeZ,
-            _ => throw new ArgumentException($"未知轴 {axis}", nameof(axis))
-        };
-        await _client.WriteRegisterAsync(reg, 2, cancellationToken).ConfigureAwait(false);
-        await Task.Delay(200, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(reg, 0, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] {char.ToUpperInvariant(axis)} 轴回原点");
+            return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Rejected, $"未知轴 {axis}"));
+        }
+
+        return ExecuteAsync($"{upper} 轴回原点", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            var reg = upper switch
+            {
+                'X' => CraneAddress.ManualHomeX,
+                'Y' => CraneAddress.ManualHomeY,
+                _ => CraneAddress.ManualHomeZ
+            };
+            await _client.WriteRegisterAsync(reg, 2, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(reg, 0, cancellationToken).ConfigureAwait(false);
+        });
     }
 
     /// <summary>充磁：D4510=2 → 轮询 X6=1 → 复位。最多 3 次、单次 3s。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task MagnetOnAsync(CancellationToken cancellationToken = default)
-    {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, false, "充磁", cancellationToken).ConfigureAwait(false);
-    }
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("充磁", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, false, "充磁", cancellationToken).ConfigureAwait(false);
+        }, feedbackTimeout: true);
 
     /// <summary>退磁：D4511=2 → 轮询 X7=1（且 X6=0）→ 复位。最多 3 次。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task MagnetOffAsync(CancellationToken cancellationToken = default)
-    {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await PulseMagnetAsync(CraneAddress.ManualMagnetOff, CraneAddress.X7_DemagnetizeOk, true, "退磁", cancellationToken).ConfigureAwait(false);
-    }
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> MagnetOffAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("退磁", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await PulseMagnetAsync(CraneAddress.ManualMagnetOff, CraneAddress.X7_DemagnetizeOk, true, "退磁", cancellationToken).ConfigureAwait(false);
+        }, feedbackTimeout: true);
 
     /// <summary>清除报警：D4514=2 → 200ms → 0。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task ClearAlarmAsync(CancellationToken cancellationToken = default)
-    {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ManualClearAlarm, 2, cancellationToken).ConfigureAwait(false);
-        await Task.Delay(200, cancellationToken).ConfigureAwait(false);
-        await _client.WriteRegisterAsync(CraneAddress.ManualClearAlarm, 0, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 清除报警");
-    }
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> ClearAlarmAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("清除报警", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.ManualClearAlarm, 2, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            await _client.WriteRegisterAsync(CraneAddress.ManualClearAlarm, 0, cancellationToken).ConfigureAwait(false);
+        });
 
     /// <summary>伺服通电：D4516=2 → 0。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task ServoOnAsync(CancellationToken cancellationToken = default)
-    {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await PulseAsync(CraneAddress.ManualServoPowerOn, true, 200, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 伺服通电");
-    }
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> ServoOnAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("伺服通电", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await PulseAsync(CraneAddress.ManualServoPowerOn, true, 200, cancellationToken).ConfigureAwait(false);
+        });
 
     /// <summary>伺服断电：D4515=2 → 0。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task ServoOffAsync(CancellationToken cancellationToken = default)
-    {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await PulseAsync(CraneAddress.ManualServoPowerOff, true, 200, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 伺服断电");
-    }
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> ServoOffAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("伺服断电", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await PulseAsync(CraneAddress.ManualServoPowerOff, true, 200, cancellationToken).ConfigureAwait(false);
+        });
 
     /// <summary>减速停止：D4517=2 → 0。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task SlowStopAsync(CancellationToken cancellationToken = default)
-    {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await PulseAsync(CraneAddress.ManualSlowStop, true, 200, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 减速停止");
-    }
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> SlowStopAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("减速停止", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await PulseAsync(CraneAddress.ManualSlowStop, true, 200, cancellationToken).ConfigureAwait(false);
+        });
 
     /// <summary>急停：D4518=2 → 200ms → 0（不切手动，紧急直写）。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task EmergencyStopAsync(CancellationToken cancellationToken = default)
-    {
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> EmergencyStopAsync(CancellationToken cancellationToken = default)
         // 急停与其余脉冲命令一样必须保证 200ms 脉冲宽度，否则 PLC 可能采不到这个脉冲。
         // 它与其它命令的唯一区别是"不切手动"——不走 D4001/D4500 前置，以便紧急情况下直接下发。
-        await PulseAsync(CraneAddress.ManualEStop, true, 200, cancellationToken).ConfigureAwait(false);
-        _logger.Warn(LogCategory.Operation, $"天车[{_name}] 急停 D4518=2→200ms→0");
-    }
+        => ExecuteAsync("急停", () => PulseAsync(CraneAddress.ManualEStop, true, 200, cancellationToken));
 
     /// <summary>开接液盘：D4512=2 → 0。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task DrainOpenAsync(CancellationToken cancellationToken = default)
-    {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await PulseAsync(CraneAddress.ManualDrainOpen, true, 200, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 开接液盘");
-    }
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> DrainOpenAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("开接液盘", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await PulseAsync(CraneAddress.ManualDrainOpen, true, 200, cancellationToken).ConfigureAwait(false);
+        });
 
     /// <summary>关接液盘：D4513=2 → 0。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task DrainCloseAsync(CancellationToken cancellationToken = default)
+    /// <returns>结果</returns>
+    public Task<CraneCommandResult> DrainCloseAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("关接液盘", async () =>
+        {
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            await PulseAsync(CraneAddress.ManualDrainClose, true, 200, cancellationToken).ConfigureAwait(false);
+        });
+
+    /// <summary>
+    /// 通用命令包装：执行命令体，成功返回 <see cref="CraneCommandCode.Completed"/>。
+    /// 预期异常在此转成结果码、不抛给上层；取消异常（OperationCanceledException）继续抛出——取消是控制流，不是业务结果。
+    /// </summary>
+    /// <param name="label">动作名（日志/提示）</param>
+    /// <param name="body">命令体</param>
+    /// <param name="feedbackTimeout">true=超时视为反馈超时（充放磁）；false=超时按通信处理</param>
+    /// <returns>结果</returns>
+    private async Task<CraneCommandResult> ExecuteAsync(string label, Func<Task> body, bool feedbackTimeout = false)
     {
-        await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-        await PulseAsync(CraneAddress.ManualDrainClose, true, 200, cancellationToken).ConfigureAwait(false);
-        _logger.Info(LogCategory.Operation, $"天车[{_name}] 关接液盘");
+        try
+        {
+            await body().ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}");
+            return CraneCommandResult.Ok(CraneCommandCode.Completed, $"{label} 完成");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (TimeoutException ex)
+        {
+            // 充放磁的 TimeoutException 来自反馈轮询；其余命令的 TimeoutException 来自连接超时，按通信处理
+            var code = feedbackTimeout
+                ? CraneCommandCode.FeedbackTimeout
+                : _client.IsConnected ? CraneCommandCode.Communication : CraneCommandCode.NotConnected;
+            return CraneCommandResult.Fail(code, $"天车[{_name}] {label}失败：{ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return CraneCommandResult.Fail(
+                _client.IsConnected ? CraneCommandCode.Communication : CraneCommandCode.NotConnected,
+                $"天车[{_name}] {label}失败：{ex.Message}");
+        }
     }
+
+    /// <summary>把通信类异常转成失败结果（已连接→Communication、未连接→NotConnected）。</summary>
+    /// <param name="ex">异常</param>
+    /// <param name="label">动作名</param>
+    /// <returns>失败结果</returns>
+    private CraneCommandResult FailCommunication(Exception ex, string label)
+        => CraneCommandResult.Fail(
+            _client.IsConnected ? CraneCommandCode.Communication : CraneCommandCode.NotConnected,
+            $"天车[{_name}] {label}失败：{ex.Message}");
 
     /// <summary>写触发位 2 → 200ms → 0（脉冲）。</summary>
     /// <param name="register">寄存器地址</param>
@@ -551,29 +648,21 @@ public sealed class CraneService : ICraneDriver
         throw new TimeoutException($"天车[{_name}] {label}反馈未确认，已尝试 {maxAttempts} 次");
     }
 
-    /// <summary>轮询指定轴到位（-1 表示跳过该轴）。</summary>
+    /// <summary>轮询指定轴到位（-1 表示跳过该轴）。不抛超时异常，超时以结果码返回。</summary>
     /// <param name="targetX">X 到位目标</param>
     /// <param name="targetY">Y 到位目标</param>
     /// <param name="targetZ">Z 到位目标</param>
     /// <param name="pollEncoder">true=读编码器、false=读显示值</param>
-    /// <param name="tolerance">容差</param>
     /// <param name="watchPressure">true=每次轮询同时检查 X2 下压限位（Z 下降时用）</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>true=压到 X2 下压限位而结束（正常结束，与到位同义）；false=正常到位</returns>
-    private async Task<bool> PollAxesAsync(int targetX, int targetY, int targetZ, bool pollEncoder, int tolerance, bool watchPressure, CancellationToken cancellationToken)
+    /// <returns>InPosition / PressureReached 成功；Timeout / PressureOutOfRange 失败</returns>
+    private async Task<CraneCommandResult> PollAxesAsync(int targetX, int targetY, int targetZ, bool pollEncoder, bool watchPressure, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(_moveTimeoutMs);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(200, cancellationToken).ConfigureAwait(false);
-
-            // 逐 200ms 检查下压限位：Z 下降压到 X2 即下压急停并正常结束（下压是正常工艺到位，不是故障）。
-            if (watchPressure && await IsPressureLimitOnAsync(cancellationToken).ConfigureAwait(false))
-            {
-                await PressureStopAsync().ConfigureAwait(false);
-                return true;
-            }
 
             var status = await ReadStatusAsync(cancellationToken).ConfigureAwait(false);
             var x = pollEncoder ? status.XEncoder : status.XPosition;
@@ -582,17 +671,30 @@ public sealed class CraneService : ICraneDriver
 
             _logger.Sample(LogCategory.Communication, $"{_name}-pos", $"天车[{_name}] 坐标 X={x} Y={y} Z={z}");
 
-            var xOk = targetX == -1 || Math.Abs(x - targetX) <= tolerance;
-            var yOk = targetY == -1 || Math.Abs(y - targetY) <= tolerance;
-            var zOk = targetZ == -1 || Math.Abs(z - targetZ) <= tolerance;
+            // Z 下降叠加下压保护：压到 X2 即收尾（急停 + 清报警），再按 Z 与目标差是否在下压容差内判定成功/失败。
+            if (watchPressure && await IsPressureLimitOnAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await PressureStopAsync().ConfigureAwait(false);
+                var delta = Math.Abs(z - targetZ);
+                return delta <= _pressureTolerance
+                    ? CraneCommandResult.Ok(CraneCommandCode.PressureReached,
+                        $"天车[{_name}] 下压到位 Z={z} 目标={targetZ} 差={delta}mm（≤{_pressureTolerance}）")
+                    : CraneCommandResult.Fail(CraneCommandCode.PressureOutOfRange,
+                        $"天车[{_name}] 下压触发但未到目标 Z={z} 目标={targetZ} 差={delta}mm（>{_pressureTolerance}）");
+            }
+
+            var xOk = targetX == -1 || Math.Abs(x - targetX) <= _positionTolerance;
+            var yOk = targetY == -1 || Math.Abs(y - targetY) <= _positionTolerance;
+            var zOk = targetZ == -1 || Math.Abs(z - targetZ) <= _positionTolerance;
             if (xOk && yOk && zOk)
             {
-                _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位 X={x} Y={y} Z={z}（容差±{tolerance}）");
-                return false;
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位 X={x} Y={y} Z={z}（容差±{_positionTolerance}）");
+                return CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{_name}] 到位 X={x} Y={y} Z={z}");
             }
         }
 
-        throw new TimeoutException($"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{tolerance}）");
+        return CraneCommandResult.Fail(CraneCommandCode.Timeout,
+            $"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{_positionTolerance}）");
     }
 
     /// <summary>
