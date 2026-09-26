@@ -163,7 +163,6 @@ public partial class DeviceViewModel : ObservableObject
             new("IP", dto.IpAddress, _ => { }),
             new("端口", dto.Port.ToString(), _ => { }),
             new("物理位置X", dto.PositionX.ToString("0.###"), _ => { }),
-            new("安全位", dto.SafePosition.ToString("0.###"), _ => { }),
             new("最小直径", dto.MinDiameter.ToString("0.###"), _ => { }),
             new("最大直径", dto.MaxDiameter.ToString("0.###"), _ => { }),
             new("最小长度", dto.MinLength.ToString("0.###"), _ => { }),
@@ -185,12 +184,11 @@ public partial class DeviceViewModel : ObservableObject
         dto.IpAddress = v[4].Value;
         dto.Port = ParseInt(v[5].Value, dto.Port);
         dto.PositionX = ParseDouble(v[6].Value, dto.PositionX);
-        dto.SafePosition = ParseDouble(v[7].Value, dto.SafePosition);
-        dto.MinDiameter = ParseDouble(v[8].Value, dto.MinDiameter);
-        dto.MaxDiameter = ParseDouble(v[9].Value, dto.MaxDiameter);
-        dto.MinLength = ParseDouble(v[10].Value, dto.MinLength);
-        dto.MaxLength = ParseDouble(v[11].Value, dto.MaxLength);
-        dto.IsEnabled = ParseBool(v[12].Value, dto.IsEnabled);
+        dto.MinDiameter = ParseDouble(v[7].Value, dto.MinDiameter);
+        dto.MaxDiameter = ParseDouble(v[8].Value, dto.MaxDiameter);
+        dto.MinLength = ParseDouble(v[9].Value, dto.MinLength);
+        dto.MaxLength = ParseDouble(v[10].Value, dto.MaxLength);
+        dto.IsEnabled = ParseBool(v[11].Value, dto.IsEnabled);
         return true;
     }
 

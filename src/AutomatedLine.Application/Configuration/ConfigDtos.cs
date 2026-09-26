@@ -78,9 +78,6 @@ public sealed class CraneConfigDto
     /// <summary>Z 轴减速度。</summary>
     public double DecelZ { get; set; }
 
-    /// <summary>运动到位超时（毫秒）。默认 60000。</summary>
-    public int MoveTimeoutMs { get; set; } = 60_000;
-
     /// <summary>是否启用。</summary>
     public bool IsEnabled { get; set; } = true;
 }
@@ -110,9 +107,6 @@ public sealed class DeviceConfigDto
 
     /// <summary>物理 X 位置。</summary>
     public double PositionX { get; set; }
-
-    /// <summary>设备侧安全位。</summary>
-    public double SafePosition { get; set; }
 
     /// <summary>可加工最小直径。</summary>
     public double MinDiameter { get; set; }

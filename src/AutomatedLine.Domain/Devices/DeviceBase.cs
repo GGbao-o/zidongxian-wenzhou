@@ -22,9 +22,6 @@ public abstract class DeviceBase
     /// <summary>设备物理 X 位置。用于计算搬运任务的路权区间。</summary>
     public double PositionX { get; set; }
 
-    /// <summary>设备侧安全位。</summary>
-    public double SafePosition { get; set; }
-
     /// <summary>可加工最小直径。</summary>
     public double MinDiameter { get; set; }
 

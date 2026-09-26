@@ -151,7 +151,6 @@ public class ConfigurationStore : IConfigurationStore
         DecelX = e.DecelX,
         DecelY = e.DecelY,
         DecelZ = e.DecelZ,
-        MoveTimeoutMs = e.MoveTimeoutMs,
         IsEnabled = e.IsEnabled
     };
 
@@ -180,7 +179,6 @@ public class ConfigurationStore : IConfigurationStore
         e.DecelX = dto.DecelX;
         e.DecelY = dto.DecelY;
         e.DecelZ = dto.DecelZ;
-        e.MoveTimeoutMs = dto.MoveTimeoutMs;
         e.IsEnabled = dto.IsEnabled;
     }
 
@@ -194,7 +192,6 @@ public class ConfigurationStore : IConfigurationStore
         IpAddress = e.IpAddress,
         Port = e.Port,
         PositionX = e.PositionX,
-        SafePosition = e.SafePosition,
         MinDiameter = e.MinDiameter,
         MaxDiameter = e.MaxDiameter,
         MinLength = e.MinLength,
@@ -211,7 +208,6 @@ public class ConfigurationStore : IConfigurationStore
         e.IpAddress = dto.IpAddress;
         e.Port = dto.Port;
         e.PositionX = dto.PositionX;
-        e.SafePosition = dto.SafePosition;
         e.MinDiameter = dto.MinDiameter;
         e.MaxDiameter = dto.MaxDiameter;
         e.MinLength = dto.MinLength;

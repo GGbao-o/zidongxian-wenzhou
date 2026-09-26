@@ -178,7 +178,6 @@ public partial class CraneViewModel : ObservableObject
             new("Z速度", dto.SpeedZ.ToString("0.###"), _ => { }),
             new("Z加速度", dto.AccelZ.ToString("0.###"), _ => { }),
             new("Z减速度", dto.DecelZ.ToString("0.###"), _ => { }),
-            new("运动超时(ms)", dto.MoveTimeoutMs.ToString(), _ => { }),
             new("启用(true/false)", dto.IsEnabled ? "true" : "false", _ => { })
         };
 
@@ -212,8 +211,7 @@ public partial class CraneViewModel : ObservableObject
         dto.SpeedZ = ParseDouble(v[20].Value, dto.SpeedZ);
         dto.AccelZ = ParseDouble(v[21].Value, dto.AccelZ);
         dto.DecelZ = ParseDouble(v[22].Value, dto.DecelZ);
-        dto.MoveTimeoutMs = ParseInt(v[23].Value, dto.MoveTimeoutMs);
-        dto.IsEnabled = ParseBool(v[24].Value, dto.IsEnabled);
+        dto.IsEnabled = ParseBool(v[23].Value, dto.IsEnabled);
         return true;
     }
 
