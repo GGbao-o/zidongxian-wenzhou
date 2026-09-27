@@ -275,11 +275,12 @@ public sealed class CraneService : ICraneDriver
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />绝对移动   xyz  输入的目标绝对值编码器的值
     public async Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken cancellationToken = default)
     {
         try
         {
+            //读天车寄存器地址 原始状态
             var s = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
 
             // 写入 D3102~D3107 = 用户绝对值 − 当前编码器值 + 当前显示值；到位轮询绝对编码器
@@ -288,10 +289,12 @@ public sealed class CraneService : ICraneDriver
             var writeZ = z - (s.ZEncoder - s.ZPosition);
 
             var dz = z - s.ZEncoder;
+            //判断z轴方向
             var zDirection = dz > 0 ? 1 : dz < 0 ? 2 : 0;
 
             return await MoveAsync(writeX, writeY, writeZ, x, y, z, pollEncoder: true, zDirection, cancellationToken).ConfigureAwait(false);
         }
+        //OperationCanceledException：表示"调用方主动取消了"，这不是一个失败结果，而是一个控制信号。它必须向上传播，让调用方（或 Task 调度层）知道这个任务是"被取消"而不是"执行失败"。
         catch (OperationCanceledException)
         {
             throw;
@@ -302,7 +305,7 @@ public sealed class CraneService : ICraneDriver
         }
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />相对移动
     public async Task<CraneCommandResult> MoveRelativeAsync(int dx, int dy, int dz, CancellationToken cancellationToken = default)
     {
         if (dx == 0 && dy == 0 && dz == 0)
@@ -323,7 +326,8 @@ public sealed class CraneService : ICraneDriver
 
             return await MoveAsync(targetX, targetY, targetZ, targetX, targetY, targetZ, pollEncoder: false, zDirection, cancellationToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        //OperationCanceledException：表示"调用方主动取消了"，这不是一个失败结果，而是一个控制信号。它必须向上传播，让调用方（或 Task 调度层）知道这个任务是"被取消"而不是"执行失败"。
+        catch (OperationCanceledException)  
         {
             throw;
         }
@@ -437,12 +441,13 @@ public sealed class CraneService : ICraneDriver
 
             // 触发统一为"写 2 → 500ms → 写 0"，复位后再轮询到位；
             // 同一阶段的轴并行脉冲（一起写 2、一起写 0），不是写 2 后一直轮询再写 0。
+            //注意 如果writex=-1 后面PulseManyAsync 不会写对应轴 2->延迟->0
             var xy = new[] { (CraneAddress.ManualXAbsMove, writeX != -1), (CraneAddress.ManualYAbsMove, writeY != -1) };
             var z = new[] { (CraneAddress.ManualZAbsMove, writeZ != -1) };
 
             if (zDirection == 1)
             {
-                // Z 下降：先 XY（并行）后 Z
+                // Z 下降：先 XY（并行）后 Z    对应的轴 寄存器地址写2 延迟 写0
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
                 var xyResult = await PollAxesAsync(targetX, targetY, -1, pollEncoder, false, cancellationToken).ConfigureAwait(false);
                 if (!xyResult.IsSuccess) return xyResult;
@@ -721,14 +726,14 @@ public sealed class CraneService : ICraneDriver
         {
             return;
         }
-
+        //寄存器地址写2
         foreach (var register in active)
         {
             await _client.WriteRegisterAsync(register, 2, cancellationToken).ConfigureAwait(false);
         }
-
+        //固定延时
         await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
-
+        //寄存器地址写0
         foreach (var register in active)
         {
             await _client.WriteRegisterAsync(register, 0, cancellationToken).ConfigureAwait(false);
@@ -816,13 +821,14 @@ public sealed class CraneService : ICraneDriver
             var xOk = targetX == -1 || Math.Abs(x - targetX) <= _positionTolerance;
             var yOk = targetY == -1 || Math.Abs(y - targetY) <= _positionTolerance;
             var zOk = targetZ == -1 || Math.Abs(z - targetZ) <= _positionTolerance;
+            //成功到位
             if (xOk && yOk && zOk)
             {
                 _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位 X={x} Y={y} Z={z}（容差±{_positionTolerance}）");
                 return CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{_name}] 到位 X={x} Y={y} Z={z}");
             }
         }
-
+        //到位失败  超时
         return CraneCommandResult.Fail(CraneCommandCode.Timeout,
             $"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{_positionTolerance}）");
     }
