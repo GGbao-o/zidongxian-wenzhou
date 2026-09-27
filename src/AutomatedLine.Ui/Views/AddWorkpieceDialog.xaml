@@ -37,6 +37,11 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <TextBlock
@@ -104,13 +109,75 @@
                 <TextBlock
                     Grid.Row="5"
                     Grid.Column="0"
-                    Margin="0,0,12,0"
+                    Margin="0,0,12,12"
                     VerticalAlignment="Center"
                     Text="右堵厚" />
                 <ui:TextBox
                     Grid.Row="5"
                     Grid.Column="1"
+                    Margin="0,0,0,12"
                     Text="{Binding RightPlugThickness, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock
+                    Grid.Row="6"
+                    Grid.Column="0"
+                    Margin="0,0,12,12"
+                    VerticalAlignment="Center"
+                    Text="堵孔" />
+                <ui:TextBox
+                    Grid.Row="6"
+                    Grid.Column="1"
+                    Margin="0,0,0,12"
+                    PlaceholderText="只能 70（小孔）或 100（大孔）"
+                    Text="{Binding PlugHole, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock
+                    Grid.Row="7"
+                    Grid.Column="0"
+                    Margin="0,0,12,12"
+                    VerticalAlignment="Center"
+                    Text="打印内容" />
+                <ui:TextBox
+                    Grid.Row="7"
+                    Grid.Column="1"
+                    Margin="0,0,0,12"
+                    Text="{Binding PrintContent, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock
+                    Grid.Row="8"
+                    Grid.Column="0"
+                    Margin="0,0,12,12"
+                    VerticalAlignment="Center"
+                    Text="内孔锥度" />
+                <ui:TextBox
+                    Grid.Row="8"
+                    Grid.Column="1"
+                    Margin="0,0,0,12"
+                    Text="{Binding InnerHoleTaper, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock
+                    Grid.Row="9"
+                    Grid.Column="0"
+                    Margin="0,0,12,12"
+                    VerticalAlignment="Center"
+                    Text="圆角大小" />
+                <ui:TextBox
+                    Grid.Row="9"
+                    Grid.Column="1"
+                    Margin="0,0,0,12"
+                    Text="{Binding FilletSize, UpdateSourceTrigger=PropertyChanged}" />
+
+                <TextBlock
+                    Grid.Row="10"
+                    Grid.Column="0"
+                    Margin="0,0,12,0"
+                    VerticalAlignment="Center"
+                    Text="是否做动平衡" />
+                <ui:TextBox
+                    Grid.Row="10"
+                    Grid.Column="1"
+                    PlaceholderText="0=不需要，1=需要"
+                    Text="{Binding NeedBalancing, UpdateSourceTrigger=PropertyChanged}" />
             </Grid>
 
             <StackPanel
