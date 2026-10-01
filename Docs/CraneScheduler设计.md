@@ -89,19 +89,20 @@ DispatchOnceAsync:
 ```
 crane.Runtime.CurrentTask = TransportTask{...}
 crane.Runtime.State       = Reserved
-crane.Runtime.Step        = PreCheck
+crane.Runtime.Step        = AcquireResources
 task.TaskState            = Assigned
 ```
 
 **真正获取路权/设备预约在状态机开始执行时**（`CraneWorker` / `CraneStateMachine`）：
 
 ```
-状态机开始执行：
+状态机开始执行（Step = AcquireResources）：
     1) if !RightOfWay.TryAcquire(task.Id, 任务区间):     // 原子加锁，谁先拿谁执行
            → 回滚：释放天车锁、TaskState = Waiting，return（下一轮重新派发）
     2) if !Reservation.TryReserve(task.Id, source, target):
            RightOfWay.Release(task.Id)                    // 回滚已取得的路权
            → 回滚：释放天车锁、TaskState = Waiting，return
+    3) 两步都成功 → 置 Crane.State = Running、task.TaskState = Running（界面显示"执行中"），Step = PreCheck
     → 持有【路权 + 设备预约】后推进各步骤；任务结束（回安全位后）释放路权与预约
 ```
 
