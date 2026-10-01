@@ -175,14 +175,14 @@ public partial class ManualOperationViewModel : ObservableObject
         _ = LoadCranesAsync();
     }
 
-    /// <summary>加载天车列表（数据库）。</summary>
+    /// <summary>加载天车列表（数据库，仅启用天车）。</summary>
     private async Task LoadCranesAsync()
     {
         try
         {
             var configs = await _configurationStore.GetCraneConfigsAsync();
             Cranes.Clear();
-            foreach (var dto in configs.OrderBy(c => c.No))
+            foreach (var dto in configs.Where(c => c.IsEnabled).OrderBy(c => c.No))
             {
                 Cranes.Add(new CraneConfigRowViewModel(dto));
             }

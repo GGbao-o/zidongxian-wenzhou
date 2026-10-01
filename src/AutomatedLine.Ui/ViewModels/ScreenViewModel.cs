@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Ui.Helpers;
 using AutomatedLine.Ui.Services;
@@ -22,6 +23,9 @@ public partial class ScreenViewModel : ObservableObject
 
     /// <summary>驱动注册表（天车状态按需读取）。</summary>
     private readonly DriverRegistry _driverRegistry;
+
+    /// <summary>设备预约管理器（设备卡片黄=F 被任务预约）。</summary>
+    private readonly ResourceReservationManager _reservationManager;
 
     /// <summary>候选任务池（TransportTaskGenerator 产物）。</summary>
     private readonly CandidateTaskPool _candidateTaskPool;
@@ -49,6 +53,7 @@ public partial class ScreenViewModel : ObservableObject
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="driverRegistry">驱动注册表（天车状态按需读取）</param>
+    /// <param name="reservationManager">设备预约管理器</param>
     /// <param name="candidateTaskPool">候选任务池</param>
     /// <param name="taskManager">工件任务总表</param>
     /// <param name="ticker">运行态节拍器</param>
@@ -56,6 +61,7 @@ public partial class ScreenViewModel : ObservableObject
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
         DriverRegistry driverRegistry,
+        ResourceReservationManager reservationManager,
         CandidateTaskPool candidateTaskPool,
         IRuntimeTaskManager taskManager,
         IRuntimeTicker ticker)
@@ -63,6 +69,7 @@ public partial class ScreenViewModel : ObservableObject
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
         _driverRegistry = driverRegistry;
+        _reservationManager = reservationManager;
         _candidateTaskPool = candidateTaskPool;
         _taskManager = taskManager;
         ticker.Tick += (_, _) => _ = RefreshAsync();
@@ -79,7 +86,7 @@ public partial class ScreenViewModel : ObservableObject
             _deviceRegistry.Snapshot().OrderBy(d => d.Id).ToList(),
             row => row.Id,
             device => device.Id,
-            device => new DeviceRowViewModel(device),
+            device => new DeviceRowViewModel(device, _reservationManager.IsReserved),
             (row, device) => row.Refresh(device));
 
         // 天车不再后台采集：刷新时按需读一次状态

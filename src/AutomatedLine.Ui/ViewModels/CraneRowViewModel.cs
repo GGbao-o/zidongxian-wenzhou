@@ -51,7 +51,19 @@ public partial class CraneRowViewModel : ObservableObject
     [ObservableProperty]
     private string _taskText = "无";
 
-    /// <summary>是否报警（用于大屏高亮）。</summary>
+    /// <summary>当前工件详情文本（版号/序号/长度/直径）。</summary>
+    [ObservableProperty]
+    private string _workpieceInfoText = "无工件";
+
+    /// <summary>持有路权区间文本。</summary>
+    [ObservableProperty]
+    private string _rightOfWayText = "无";
+
+    /// <summary>卡片边框状态（红/黄/绿，优先级见 <see cref="CardStatus"/>）。</summary>
+    [ObservableProperty]
+    private CardStatus _cardStatus = CardStatus.Normal;
+
+    /// <summary>是否报警（仅展示，不参与边框颜色）。</summary>
     [ObservableProperty]
     private bool _hasAlarm;
 
@@ -101,6 +113,20 @@ public partial class CraneRowViewModel : ObservableObject
         Z = status?.ZDisplay ?? 0;
         HasAlarm = status?.HasAlarm == true;
         AlarmText = HasAlarm ? "报警" : "正常";
+
+        // 天车边框颜色优先级：读失败/报警(红) > 有任务(黄) > 空闲正常(绿)
+        CardStatus = status is null || status.HasAlarm
+            ? CardStatus.Faulted
+            : crane.Runtime.CurrentTask is not null
+                ? CardStatus.Reserved
+                : CardStatus.Normal;
+
+        var info = crane.CurrentWorkpiece?.Info;
+        WorkpieceInfoText = info is null
+            ? "无工件"
+            : $"版号：{info.PlateNo}  序号：{info.SerialNo}\n长度：{info.Length:0.###}  直径：{info.Diameter:0.###}";
+
+        RightOfWayText = crane.Runtime.LockedInterval?.ToString() ?? "无";
 
         SignalSummary = status is null
             ? "无数据"

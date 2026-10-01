@@ -38,11 +38,19 @@ public partial class DeviceRowViewModel : ObservableObject
     [ObservableProperty]
     private string _machiningText = "空闲";
 
-    /// <summary>当前工件文本。</summary>
+    /// <summary>当前工件文本（版号/序号）。</summary>
     [ObservableProperty]
     private string _workpieceText = "无";
 
-    /// <summary>是否报警（用于大屏高亮）。</summary>
+    /// <summary>当前工件详情文本（版号/序号/长度/直径）。</summary>
+    [ObservableProperty]
+    private string _workpieceInfoText = "无工件";
+
+    /// <summary>卡片边框状态（红/黄/绿，优先级见 <see cref="CardStatus"/>）。</summary>
+    [ObservableProperty]
+    private CardStatus _cardStatus = CardStatus.Normal;
+
+    /// <summary>是否报警（仅展示，不参与边框颜色）。</summary>
     [ObservableProperty]
     private bool _hasAlarm;
 
@@ -62,13 +70,18 @@ public partial class DeviceRowViewModel : ObservableObject
     [ObservableProperty]
     private string _tooltipText = string.Empty;
 
+    /// <summary>设备预约查询委托（true=已被任务预约）。</summary>
+    private readonly Func<int, bool>? _isReserved;
+
     /// <summary>
     /// 构造函数。
     /// </summary>
     /// <param name="device">设备对象</param>
-    public DeviceRowViewModel(DeviceBase device)
+    /// <param name="isReserved">设备预约查询委托，可为空</param>
+    public DeviceRowViewModel(DeviceBase device, Func<int, bool>? isReserved = null)
     {
         Id = device.Id;
+        _isReserved = isReserved;
         Refresh(device);
     }
 
@@ -82,7 +95,12 @@ public partial class DeviceRowViewModel : ObservableObject
         TypeText = DisplayText.DeviceTypeText(device.Type);
         PositionX = device.PositionX;
         StateText = DisplayText.ResourceStateText(device.ResourceState);
-        WorkpieceText = device.CurrentWorkpiece?.Info.ToString() ?? "无";
+
+        var info = device.CurrentWorkpiece?.Info;
+        WorkpieceText = info?.ToString() ?? "无";
+        WorkpieceInfoText = info is null
+            ? "无工件"
+            : $"版号：{info.PlateNo}  序号：{info.SerialNo}\n长度：{info.Length:0.###}  直径：{info.Diameter:0.###}";
 
         // 加工状态：当前按"内存是否有工件 + 资源忙"判断；P3 接入调度后由状态机精确维护
         var machining = device.ResourceState == ResourceState.Busy || device.CurrentWorkpiece is not null;
@@ -92,6 +110,15 @@ public partial class DeviceRowViewModel : ObservableObject
         ConnectionText = device.IsConnected ? "已连接" : "未连接";
         HasAlarm = signals?.GetBool("Alarm") == true;
         AlarmText = HasAlarm ? "报警" : "正常";
+
+        // 边框颜色优先级：断开(红) > 已预约(黄) > 正常(绿)
+        var reserved = _isReserved?.Invoke(device.Id) ?? false;
+        CardStatus = !device.IsConnected
+            ? CardStatus.Faulted
+            : reserved
+                ? CardStatus.Reserved
+                : CardStatus.Normal;
+
         SignalSummary = signals is null
             ? "无数据"
             : $"有料={Bool(signals.GetBool("HasMaterial"))} 请求上料={Bool(signals.GetBool("RequestLoad"))} 请求下料={Bool(signals.GetBool("RequestUnload"))} 完成={Bool(signals.GetBool("ProcessDone"))}";

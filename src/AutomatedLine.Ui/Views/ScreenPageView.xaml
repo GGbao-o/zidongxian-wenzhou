@@ -72,17 +72,21 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <!-- 悬浮显示加工状态与工件信息；报警时边框变红 -->
+                            <!-- 悬浮显示加工状态/工件/信号；边框色：绿=已连接、黄=已预约、红=断开 -->
                             <Border
                                 Width="300"
                                 Margin="0,0,12,12"
                                 ToolTip="{Binding TooltipText}">
                                 <Border.Style>
                                     <Style BasedOn="{StaticResource CardBorder}" TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="{StaticResource StatusIdleBrush}" />
+                                        <Setter Property="BorderThickness" Value="2" />
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasAlarm}" Value="True">
+                                            <DataTrigger Binding="{Binding CardStatus}" Value="Reserved">
+                                                <Setter Property="BorderBrush" Value="{StaticResource StatusWaitingBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding CardStatus}" Value="Faulted">
                                                 <Setter Property="BorderBrush" Value="{StaticResource StatusFaultBrush}" />
-                                                <Setter Property="BorderThickness" Value="2" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -99,6 +103,13 @@
                                         FontWeight="SemiBold"
                                         Foreground="{StaticResource StatusRunningBrush}"
                                         Text="{Binding MachiningText}" />
+                                    <!-- 当前工件：版号/序号/长度/直径 -->
+                                    <TextBlock
+                                        Margin="0,6,0,0"
+                                        FontFamily="Consolas"
+                                        FontSize="12"
+                                        Text="{Binding WorkpieceInfoText}"
+                                        TextWrapping="Wrap" />
                                     <!-- 多行 PLC 点位信号：点名=值 -->
                                     <TextBlock
                                         Margin="0,8,0,0"
@@ -127,17 +138,21 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <!-- 悬浮显示当前任务、工件与 source→target；报警时边框变红 -->
+                            <!-- 悬浮显示任务/工件/路权；边框色：绿=空闲正常、黄=有任务、红=读失败/报警 -->
                             <Border
                                 Width="300"
                                 Margin="0,0,12,12"
                                 ToolTip="{Binding TooltipText}">
                                 <Border.Style>
                                     <Style BasedOn="{StaticResource CardBorder}" TargetType="Border">
+                                        <Setter Property="BorderBrush" Value="{StaticResource StatusIdleBrush}" />
+                                        <Setter Property="BorderThickness" Value="2" />
                                         <Style.Triggers>
-                                            <DataTrigger Binding="{Binding HasAlarm}" Value="True">
+                                            <DataTrigger Binding="{Binding CardStatus}" Value="Reserved">
+                                                <Setter Property="BorderBrush" Value="{StaticResource StatusWaitingBrush}" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding CardStatus}" Value="Faulted">
                                                 <Setter Property="BorderBrush" Value="{StaticResource StatusFaultBrush}" />
-                                                <Setter Property="BorderThickness" Value="2" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -155,6 +170,14 @@
                                     <TextBlock FontFamily="Consolas" Text="{Binding Y, StringFormat=Y：{0:0.###}}" />
                                     <TextBlock FontFamily="Consolas" Text="{Binding Z, StringFormat=Z：{0:0.###}}" />
                                     <TextBlock Margin="0,6,0,0" Style="{StaticResource CaptionText}" Text="{Binding TaskText, StringFormat=当前任务：{0}}" />
+                                    <TextBlock Margin="0,2,0,0" Style="{StaticResource CaptionText}" Text="{Binding RightOfWayText, StringFormat=路权：{0}}" />
+                                    <!-- 当前工件：版号/序号/长度/直径 -->
+                                    <TextBlock
+                                        Margin="0,6,0,0"
+                                        FontFamily="Consolas"
+                                        FontSize="12"
+                                        Text="{Binding WorkpieceInfoText}"
+                                        TextWrapping="Wrap" />
                                     <TextBlock
                                         Margin="0,4,0,0"
                                         FontWeight="SemiBold"
