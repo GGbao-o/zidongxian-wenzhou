@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\AutomatedLine.Domain\AutomatedLine.Domain.csproj" />
     <ProjectReference Include="..\AutomatedLine.Application\AutomatedLine.Application.csproj" />
+    <ProjectReference Include="..\AutomatedLine.Focas\AutomatedLine.Focas.csproj" />
   </ItemGroup>
 
   <ItemGroup>

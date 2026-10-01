@@ -86,7 +86,15 @@ public class ConfigurationLoader : IConfigurationLoader
 
             // 创建并注册设备驱动（设备号与天车号是两个命名空间，分开注册）。
             // 不在此处主动连接：驱动在首次读/写时惰性连接，避免现场设备离线拖慢甚至阻断配置装载。
-            var driver = DriverFactory.CreateDeviceDriver(config);
+            var driver = DriverFactory.CreateDeviceDriver(config, _logger);
+            if (driver is null)
+            {
+                // 暂无真实驱动的设备类型（如货叉/动平衡/验点）：只保留设备对象，不注册驱动
+                _logger.Warn(LogCategory.System,
+                    $"设备[{config.Id}]（{config.Name}，类型 {config.DeviceType}）暂无真实驱动，跳过驱动注册");
+                continue;
+            }
+
             _driverRegistry.RegisterDevice(driver);
             driverCount++;
         }

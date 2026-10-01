@@ -19,7 +19,7 @@ public sealed class CraneConfigDto
     public string Name { get; set; } = string.Empty;
 
     /// <summary>协议类型。</summary>
-    public string Protocol { get; set; } = "Simulated";
+    public string Protocol { get; set; } = string.Empty;
 
     /// <summary>PLC IP。</summary>
     public string IpAddress { get; set; } = string.Empty;
@@ -97,7 +97,7 @@ public sealed class DeviceConfigDto
     public DeviceType DeviceType { get; set; } = DeviceType.Unknown;
 
     /// <summary>协议类型。</summary>
-    public string Protocol { get; set; } = "Simulated";
+    public string Protocol { get; set; } = string.Empty;
 
     /// <summary>PLC IP。</summary>
     public string IpAddress { get; set; } = string.Empty;

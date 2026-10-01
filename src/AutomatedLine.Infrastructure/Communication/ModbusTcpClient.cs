@@ -3,9 +3,11 @@ using System.Net.Sockets;
 namespace AutomatedLine.Infrastructure.Communication;
 
 /// <summary>
-/// 自研最小 Modbus TCP 客户端（汇川 PLC 用，端口默认 502）。
-/// 支持 FC03 读保持寄存器、FC01 读线圈、FC06 写单寄存器、FC16 写多寄存器（DINT 低字在前）。
+/// 自研最小 Modbus TCP 客户端（汇川 PLC / 地面设备用）。
+/// 支持 FC01 读线圈、FC02 读离散输入、FC03 读保持寄存器、FC04 读输入寄存器、
+/// FC05 写单线圈、FC06 写单寄存器、FC16 写多寄存器（DINT 低字在前）。
 /// 不依赖第三方库；内部用 SemaphoreSlim 串行化请求，保证同一连接上不会交错收发。
+/// 地址一律 0 基（PDU 地址）；文档里的 1 基编号（如 0001 / 10001）需先减 1 / 去掉 1x 前缀。
 /// </summary>
 public sealed class ModbusTcpClient : IDisposable
 {
@@ -147,6 +149,34 @@ public sealed class ModbusTcpClient : IDisposable
     }
 
     /// <summary>
+    /// 读输入寄存器（FC04）。用于打号机等"输入寄存器"型设备（只读）。
+    /// </summary>
+    /// <param name="startAddress">起始地址（0 基）</param>
+    /// <param name="count">寄存器数量</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>寄存器值数组</returns>
+    public async Task<ushort[]> ReadInputRegistersAsync(int startAddress, int count, CancellationToken cancellationToken = default)
+    {
+        var pdu = new byte[5];
+        pdu[0] = 0x04;
+        pdu[1] = (byte)(startAddress >> 8);
+        pdu[2] = (byte)(startAddress & 0xFF);
+        pdu[3] = (byte)(count >> 8);
+        pdu[4] = (byte)(count & 0xFF);
+
+        var resp = await ExchangeAsync(pdu, cancellationToken).ConfigureAwait(false);
+        EnsureFunction(resp, 0x04);
+
+        var result = new ushort[count];
+        for (var i = 0; i < count; i++)
+        {
+            result[i] = (ushort)((resp[2 + i * 2] << 8) | resp[3 + i * 2]);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// 读单个线圈（FC01）。
     /// </summary>
     /// <param name="address">线圈地址（0 基，如 X6 → 63494）</param>
@@ -167,6 +197,35 @@ public sealed class ModbusTcpClient : IDisposable
     }
 
     /// <summary>
+    /// 读多个离散输入（FC02）。用于料架"有板"信号等只读输入线圈。
+    /// </summary>
+    /// <param name="startAddress">起始地址（0 基）</param>
+    /// <param name="count">位数</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>每一位的布尔值数组（与地址顺序一致）</returns>
+    public async Task<bool[]> ReadDiscreteInputsAsync(int startAddress, int count, CancellationToken cancellationToken = default)
+    {
+        var pdu = new byte[5];
+        pdu[0] = 0x02;
+        pdu[1] = (byte)(startAddress >> 8);
+        pdu[2] = (byte)(startAddress & 0xFF);
+        pdu[3] = (byte)(count >> 8);
+        pdu[4] = (byte)(count & 0xFF);
+
+        var resp = await ExchangeAsync(pdu, cancellationToken).ConfigureAwait(false);
+        EnsureFunction(resp, 0x02);
+
+        var result = new bool[count];
+        for (var i = 0; i < count; i++)
+        {
+            // 每 1 字节 8 位，字节内低位在前（bit0 对应该字节最低位）
+            result[i] = (resp[2 + (i / 8)] & (1 << (i % 8))) != 0;
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// 写单个寄存器（FC06）。
     /// </summary>
     /// <param name="address">地址</param>
@@ -183,6 +242,25 @@ public sealed class ModbusTcpClient : IDisposable
 
         var resp = await ExchangeAsync(pdu, cancellationToken).ConfigureAwait(false);
         EnsureFunction(resp, 0x06);
+    }
+
+    /// <summary>
+    /// 写单个线圈（FC05）。
+    /// </summary>
+    /// <param name="address">线圈地址（0 基）</param>
+    /// <param name="value">true=ON(0xFF00)，false=OFF(0x0000)</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    public async Task WriteCoilAsync(int address, bool value, CancellationToken cancellationToken = default)
+    {
+        var pdu = new byte[5];
+        pdu[0] = 0x05;
+        pdu[1] = (byte)(address >> 8);
+        pdu[2] = (byte)(address & 0xFF);
+        pdu[3] = value ? (byte)0xFF : (byte)0x00;
+        pdu[4] = 0x00;
+
+        var resp = await ExchangeAsync(pdu, cancellationToken).ConfigureAwait(false);
+        EnsureFunction(resp, 0x05);
     }
 
     /// <summary>
