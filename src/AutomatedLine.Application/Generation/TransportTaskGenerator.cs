@@ -127,6 +127,7 @@ public sealed class TransportTaskGenerator : IHostedService
             {
                 if (_lineControl.IsRunning)
                 {
+                    //生成候选任务
                     GenerateOnce();
                 }
                 else
@@ -172,7 +173,7 @@ public sealed class TransportTaskGenerator : IHostedService
             // 只处理"排队中"的工件；未启动/暂停/已派发/执行中/完成/丢弃 全部跳过
             if (runtime.TaskState != WorkpieceState.Waiting)
             {
-                continue;
+                continue; //直接跳过这个循环
             }
 
             var source = ResolveSource(task, queueHead, devices);

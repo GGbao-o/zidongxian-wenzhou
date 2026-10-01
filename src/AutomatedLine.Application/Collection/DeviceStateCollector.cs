@@ -113,7 +113,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     }
 
     /// <summary>
-    /// 单个采集循环：按周期采集设备或天车。
+    /// 单个采集循环：按周期采集设备
     /// </summary>
     /// <param name="intervalMs">周期（毫秒）</param>
     /// <param name="cancellationToken">取消令牌</param>

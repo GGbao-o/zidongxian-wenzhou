@@ -168,6 +168,8 @@ public partial class App : System.Windows.Application
         // 注册为单例并通过工厂复用同一实例，保证两者拿到的是同一个对象。
         services.AddSingleton<DeviceStateCollector>();
         services.AddSingleton<IDeviceStateCollector>(sp => sp.GetRequiredService<DeviceStateCollector>());
+        //IHostedService 也复用同一个实例 —— 宿主启动时会调用它的 StartAsync，停止时调用 StopAsync
+        //AddHostedService 把对象注册成了 IHostedService，而 ASP.NET Core / .NET 通用主机的启动流程里内置了一步——遍历所有 IHostedService 并调用它们的 StartAsync。
         services.AddHostedService(sp => sp.GetRequiredService<DeviceStateCollector>());
 
         // 弹窗服务：ViewModel 通过接口请求对话框，不直接依赖 View
