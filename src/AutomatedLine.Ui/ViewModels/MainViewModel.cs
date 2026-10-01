@@ -251,10 +251,28 @@ public partial class MainViewModel : ObservableObject
     private void RefreshTasks()
     {
         var devices = _deviceRegistry.Snapshot();
-        Tasks.Clear();
-        foreach (var task in _taskManager.Snapshot())
+        var snapshot = _taskManager.Snapshot();
+
+        // 入线顺序 = 上料架待取板队列里的**排位**（1、2、3…连续）。
+        // 只有"已启动、排队中、在队列"的任务占位；未启动/暂停不占位，后面的自动补位。
+        // 顺序依据入队时分配的入队序号（QueueOrder）：启动入队尾、暂停出队、再启动重新入队尾。
+        var queuePositions = new Dictionary<Guid, int>();
+        var rank = 0;
+        foreach (var t in snapshot
+                     .Where(t => t.Runtime.TaskState == WorkpieceState.Waiting
+                                 && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
+                     .OrderBy(t => t.Runtime.QueueOrder))
         {
-            var row = new WorkpieceTaskViewModel(task);
+            queuePositions[t.Id] = ++rank;
+        }
+
+        Tasks.Clear();
+        foreach (var task in snapshot)
+        {
+            var row = new WorkpieceTaskViewModel(task)
+            {
+                QueueOrderText = queuePositions.TryGetValue(task.Id, out var pos) ? pos.ToString() : "-"
+            };
             FillNextProcess(row, task, devices);
             Tasks.Add(row);
         }

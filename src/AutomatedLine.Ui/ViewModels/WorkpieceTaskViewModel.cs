@@ -132,7 +132,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         FilletSize = info.FilletSize;
         NeedBalancingText = info.NeedBalancing == 1 ? "需要" : "不需要";
         ProcessText = ProcessToText(runtime.CurrentProcess);
-        QueueOrderText = runtime.QueueOrder > 0 ? runtime.QueueOrder.ToString() : "-";
+        // QueueOrderText（入线顺序=上料架队列排位）由主 ViewModel 按当前队列统一计算后写入，见 MainViewModel.RefreshTasks
         LocationText = runtime.CurrentLocation.ToString();
         StateText = StateToText(runtime.TaskState);
 
