@@ -2,6 +2,8 @@ using System.Collections.ObjectModel;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Domain.Devices;
+using AutomatedLine.Domain.Workpieces;
 using AutomatedLine.Ui.Helpers;
 using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -81,13 +83,20 @@ public partial class ScreenViewModel : ObservableObject
     /// </summary>
     private async Task RefreshAsync()
     {
+        // 上料架的"当前工件"= 上料架队列队头（未启动/暂停不入队，无队头即无工件）
+        var queueHead = _taskManager.Snapshot()
+            .Where(t => t.Runtime.TaskState == WorkpieceState.Waiting
+                        && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
+            .OrderBy(t => t.Runtime.QueueOrder)
+            .FirstOrDefault();
+
         ObservableCollectionSync.SyncById(
             Devices,
             _deviceRegistry.Snapshot().OrderBy(d => d.Id).ToList(),
             row => row.Id,
             device => device.Id,
-            device => new DeviceRowViewModel(device, _reservationManager.IsReserved),
-            (row, device) => row.Refresh(device));
+            device => new DeviceRowViewModel(device, _reservationManager.IsReserved, DisplayWorkpiece(device, queueHead)),
+            (row, device) => row.Refresh(device, DisplayWorkpiece(device, queueHead)));
 
         // 天车不再后台采集：刷新时按需读一次状态
         var craneList = _craneRegistry.Snapshot().OrderBy(c => c.No).ToList();
@@ -125,4 +134,11 @@ public partial class ScreenViewModel : ObservableObject
             t.Runtime.TaskState is Domain.Workpieces.WorkpieceState.Assigned
                 or Domain.Workpieces.WorkpieceState.Running);
     }
+
+    /// <summary>上料架显示队头工件；其余设备返回 null（用设备自身内存工件）。</summary>
+    /// <param name="device">设备</param>
+    /// <param name="queueHead">上料架队列队头</param>
+    /// <returns>要显示的工件任务；null 表示用设备内存</returns>
+    private static WorkpieceTask? DisplayWorkpiece(DeviceBase device, WorkpieceTask? queueHead)
+        => device.Type == DeviceType.LoadRack ? queueHead : null;
 }

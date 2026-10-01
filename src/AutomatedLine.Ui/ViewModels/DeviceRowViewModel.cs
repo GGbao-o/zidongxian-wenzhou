@@ -78,25 +78,29 @@ public partial class DeviceRowViewModel : ObservableObject
     /// </summary>
     /// <param name="device">设备对象</param>
     /// <param name="isReserved">设备预约查询委托，可为空</param>
-    public DeviceRowViewModel(DeviceBase device, Func<int, bool>? isReserved = null)
+    /// <param name="displayWorkpiece">外部指定的当前工件（如上料架显示队头），可为空</param>
+    public DeviceRowViewModel(DeviceBase device, Func<int, bool>? isReserved = null,
+        global::AutomatedLine.Domain.Workpieces.WorkpieceTask? displayWorkpiece = null)
     {
         Id = device.Id;
         _isReserved = isReserved;
-        Refresh(device);
+        Refresh(device, displayWorkpiece);
     }
 
     /// <summary>
     /// 依据设备最新状态刷新展示字段。
     /// </summary>
     /// <param name="device">设备对象</param>
-    public void Refresh(DeviceBase device)
+    /// <param name="displayWorkpiece">外部指定的当前工件（如上料架显示队头）；为空则用设备内存的当前工件</param>
+    public void Refresh(DeviceBase device, global::AutomatedLine.Domain.Workpieces.WorkpieceTask? displayWorkpiece = null)
     {
         Name = device.Name;
         TypeText = DisplayText.DeviceTypeText(device.Type);
         PositionX = device.PositionX;
         StateText = DisplayText.ResourceStateText(device.ResourceState);
 
-        var info = device.CurrentWorkpiece?.Info;
+        // 上料架的"当前工件"用队头（外部传入）；其余设备用内存的当前工件
+        var info = (displayWorkpiece ?? device.CurrentWorkpiece)?.Info;
         WorkpieceText = info?.ToString() ?? "无";
         WorkpieceInfoText = info is null
             ? "无工件"
