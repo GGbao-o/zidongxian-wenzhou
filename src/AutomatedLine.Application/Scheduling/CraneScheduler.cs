@@ -139,91 +139,129 @@ public sealed class CraneScheduler : IHostedService
         }
     }
 
-    /// <summary>执行一轮派发（按需读空闲天车状态，不依赖后台采集）。</summary>
+    /// <summary>
+    /// 执行一轮派发（分配矩阵）。
+    /// <para>
+    /// **只判断、不加锁**：对每个候选列出可执行天车（范围覆盖 / 连接 / 无报警 / 空闲），
+    /// 按"离源最近"排序后逐台尝试；用 <c>CanAcquire</c>（路权区间空闲）与 <c>IsReserved</c>（源/目标未被预约）
+    /// 做**只读判断**，通过即派发；真正的路权/预约获取由**状态机执行任务时**完成（见 <c>TransportStep.AcquireResources</c>）。
+    /// </para>
+    /// <para>
+    /// 竞态：判断通过后到状态机真正加锁之间有窗口，可能被别的车抢先；届时状态机 `TryAcquire` 失败会
+    /// **回滚**（释放天车锁、任务回 Waiting），下一轮重新派发。
+    /// </para>
+    /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
     private async Task DispatchOnceAsync(CancellationToken cancellationToken)
     {
         var cranes = _craneRegistry.Snapshot();
 
-        // 只对"启用且空闲"的天车按需读一次状态（连接/报警/位置），供本轮选车使用。
+        // 只对"启用且空闲"的天车按需读一次状态（连接/报警/位置），供本轮选车使用。天车不做后台采集。
         var statuses = await ReadIdleCraneStatusesAsync(cranes, cancellationToken).ConfigureAwait(false);
 
-        var candidates = _candidatePool.Snapshot().OrderByDescending(c => c.Priority).ToList();
+        // 候选排序：优先级降序 → 距离最近（最近可执行天车到源的距离；无可执行天车的排最后）。不做负载均衡。
+        var candidates = _candidatePool.Snapshot()
+            .OrderByDescending(c => c.Priority)
+            .ThenBy(c => NearestCraneDistance(c, cranes, statuses))
+            .ToList();
+
+        // 本轮已派出的天车：一车一任务（硬约束）
+        var usedCranes = new HashSet<int>();
 
         foreach (var candidate in candidates)
         {
             var task = candidate.Workpiece;
 
-            // 只派发仍在等待的任务（可能已被其它周期派发）
+            // 只派发仍在"排队中"的任务（可能已被本轮/其它周期派发，或已暂停/完成）
             if (task.Runtime.TaskState != WorkpieceState.Waiting)
             {
                 continue;
             }
 
-            var crane = SelectCrane(cranes, statuses, candidate.Source.PositionX, candidate.Target.PositionX);
-            if (crane is null)
+            // 本候选的**可执行天车**：启用、空闲、本轮未用、范围覆盖源与目标、状态可读且无报警
+            var eligible = cranes
+                .Where(c => c.IsEnabled
+                            && c.IsIdle
+                            && !usedCranes.Contains(c.Id)
+                            && c.Covers(candidate.Source.PositionX)
+                            && c.Covers(candidate.Target.PositionX)
+                            && statuses.TryGetValue(c.Id, out var s) && s is not null && !s.HasAlarm)
+                .OrderBy(c => Math.Abs(statuses[c.Id]!.XDisplay - candidate.Source.PositionX))   // 离源最近
+                .ToList();
+
+            // 逐台车尝试（**换车**）：某台车判断不通过就试下一台，绝不死等
+            foreach (var crane in eligible)
             {
-                continue;
+                var interval = candidate.GetRightOfWayInterval(crane.Width);   // 每车宽度不同 → 区间不同
+
+                // 【只判断·路权】区间是否空闲（不加锁）
+                if (!_rightOfWayManager.CanAcquire(interval))
+                {
+                    continue;   // 区间被别的任务占用 → 试下一台车
+                }
+
+                // 【只判断·预约】源/目标是否已被别的任务预约（不加锁）
+                if (_reservationManager.IsReserved(candidate.Source.Id)
+                    || _reservationManager.IsReserved(candidate.Target.Id))
+                {
+                    continue;   // 设备被别的任务预约 → 试下一台车
+                }
+
+                // 判断通过 → 派发：只登记任务归属，**不占用任何锁**
+                var transportTask = new TransportTask
+                {
+                    WorkpieceRuntimeId = task.Id,
+                    SourceDeviceId = candidate.Source.Id,
+                    TargetDeviceId = candidate.Target.Id,
+                    SourceX = candidate.Source.PositionX,
+                    TargetX = candidate.Target.PositionX,
+                    TargetProcess = candidate.TargetProcess,
+                    Priority = candidate.Priority,
+                    State = TransportTaskState.Assigned,
+                    AssignedCraneId = crane.Id
+                };
+
+                crane.Runtime.CurrentTask = transportTask;
+                crane.Runtime.State = CraneState.Reserved;
+                crane.Runtime.Step = TransportStep.AcquireResources;   // 第一步：状态机执行时获取路权+预约
+                task.Runtime.TaskState = WorkpieceState.Assigned;
+                usedCranes.Add(crane.Id);
+
+                _logger.Info(LogCategory.Scheduling,
+                    $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，待状态机执行时取路权/预约）");
+                break;   // 该候选已派人，处理下一个候选
             }
-
-            var interval = candidate.GetRightOfWayInterval(crane.Width);
-
-            // 1) 原子获取路权（判断即加锁；拿不到就本周期跳过）
-            if (!_rightOfWayManager.TryAcquire(task.Id, interval))
-            {
-                continue;
-            }
-
-            // 2) 预约源/目标设备；失败则释放路权并跳过
-            if (!_reservationManager.TryReserve(task.Id, candidate.Source.Id, candidate.Target.Id))
-            {
-                _rightOfWayManager.Release(task.Id);
-                continue;
-            }
-
-            // 3) 占用天车执行锁并生成正式任务
-            var transportTask = new TransportTask
-            {
-                WorkpieceRuntimeId = task.Id,
-                SourceDeviceId = candidate.Source.Id,
-                TargetDeviceId = candidate.Target.Id,
-                SourceX = candidate.Source.PositionX,
-                TargetX = candidate.Target.PositionX,
-                TargetProcess = candidate.TargetProcess,
-                Priority = candidate.Priority,
-                State = TransportTaskState.Assigned,
-                AssignedCraneId = crane.Id
-            };
-
-            crane.Runtime.CurrentTask = transportTask;
-            crane.Runtime.State = CraneState.Reserved;
-            crane.Runtime.Step = TransportStep.PreCheck;
-            crane.Runtime.LockedInterval = interval;
-            task.Runtime.TaskState = WorkpieceState.Assigned;
-
-            _logger.Info(LogCategory.Scheduling,
-                $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}，区间 {interval}");
         }
     }
 
     /// <summary>
-    /// 选择最合适的天车：空闲、启用、覆盖源/目标 X、连接正常无报警；优先距离源最近。
-    /// 判断基于本轮按需读到的状态（不依赖后台采集快照）。
+    /// 计算某候选用"最近的可执行天车到源"的距离，用于候选排序的 tie-break。
+    /// 无可执行天车时返回 <see cref="double.MaxValue"/>（排在最后）。
     /// </summary>
+    /// <param name="candidate">候选任务</param>
     /// <param name="cranes">天车快照</param>
-    /// <param name="statuses">天车号 → 本轮按需读到的状态</param>
-    /// <param name="sourceX">源 X</param>
-    /// <param name="targetX">目标 X</param>
-    /// <returns>天车；无可用返回 null</returns>
-    private static Crane? SelectCrane(IReadOnlyList<Crane> cranes, IReadOnlyDictionary<int, CraneStatusDto?> statuses, double sourceX, double targetX)
+    /// <param name="statuses">天车号 → 本轮状态</param>
+    /// <returns>最近距离</returns>
+    private static double NearestCraneDistance(CandidateTask candidate, IReadOnlyList<Crane> cranes, IReadOnlyDictionary<int, CraneStatusDto?> statuses)
     {
-        return cranes
-            .Where(c => c.IsEnabled
-                        && c.IsIdle
-                        && c.Covers(sourceX)
-                        && c.Covers(targetX)
-                        && statuses.TryGetValue(c.Id, out var s) && s is not null && !s.HasAlarm)
-            .OrderBy(c => Math.Abs(statuses[c.Id]!.XDisplay - sourceX))
-            .FirstOrDefault();
+        var best = double.MaxValue;
+        foreach (var crane in cranes)
+        {
+            if (!crane.IsEnabled || !crane.IsIdle
+                || !crane.Covers(candidate.Source.PositionX) || !crane.Covers(candidate.Target.PositionX)
+                || !statuses.TryGetValue(crane.Id, out var s) || s is null || s.HasAlarm)
+            {
+                continue;
+            }
+
+            var distance = Math.Abs(s.XDisplay - candidate.Source.PositionX);
+            if (distance < best)
+            {
+                best = distance;
+            }
+        }
+
+        return best;
     }
 
     /// <summary>

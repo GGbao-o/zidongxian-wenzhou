@@ -85,6 +85,10 @@ public sealed class CraneStateMachine
         {
             switch (crane.Runtime.Step)
             {
+                case TransportStep.AcquireResources:
+                    // 第一步：真正获取路权 + 设备预约（调度器派发时只判断，不加锁）
+                    StepAcquireResources(crane, task);
+                    break;
                 case TransportStep.PreCheck:
                     await StepPreCheckAsync(crane, cancellationToken).ConfigureAwait(false);
                     break;
@@ -136,6 +140,67 @@ public sealed class CraneStateMachine
         {
             // 状态机内的任何异常都走统一中止流程（自动清理 + 暂停线路）
             _abortCoordinator.Abort(crane, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 获取路权 + 设备预约（**真正加锁**；调度器派发时只做只读判断）。
+    /// <para>
+    /// 顺序：先 <c>TryAcquire</c> 路权，再 <c>TryReserve</c> 源/目标设备；任一步失败 → 回滚并让出天车。
+    /// 拿不到是**正常竞争结果**（判断通过后被别的车抢先），不是异常——回滚后任务回 <see cref="WorkpieceState.Waiting"/>，
+    /// 下一轮由调度器重新派发，绝不在此抛异常走丢弃流程。
+    /// </para>
+    /// </summary>
+    /// <param name="crane">天车</param>
+    /// <param name="task">搬运任务</param>
+    private void StepAcquireResources(Crane crane, TransportTask task)
+    {
+        // 区间由"当前源/目标坐标 + 本车宽度"现算，保证与配置一致
+        var interval = task.GetRightOfWayInterval(crane.Width);
+
+        // 1) 原子获取路权（谁先拿到谁执行）
+        if (!_rightOfWayManager.TryAcquire(task.TaskId, interval))
+        {
+            Rollback(crane, task, "路权被占用");
+            return;
+        }
+
+        // 2) 原子预约源/目标设备；失败则回滚已取得的路权
+        if (!_reservationManager.TryReserve(task.TaskId, task.SourceDeviceId, task.TargetDeviceId))
+        {
+            _rightOfWayManager.Release(task.TaskId);
+            Rollback(crane, task, "设备预约失败");
+            return;
+        }
+
+        // 3) 路权 + 预约都拿到：记录区间，进入预检查
+        crane.Runtime.LockedInterval = interval;
+        crane.Runtime.Step = TransportStep.PreCheck;
+        _logger.Info(LogCategory.StateMachine,
+            $"{crane.Name} 获取路权 {interval}、预约设备 {task.SourceDeviceId}/{task.TargetDeviceId} 成功");
+    }
+
+    /// <summary>
+    /// 回滚：资源获取失败时释放天车锁、任务回 <see cref="WorkpieceState.Waiting"/>（下轮重派）。
+    /// 刻意**不弃板、不清内存**——此时还没开始搬运，工件仍在原处。
+    /// </summary>
+    /// <param name="crane">天车</param>
+    /// <param name="task">搬运任务</param>
+    /// <param name="reason">回滚原因（日志用）</param>
+    private void Rollback(Crane crane, TransportTask task, string reason)
+    {
+        _logger.Warn(LogCategory.StateMachine,
+            $"{crane.Name} 任务 {Short(task.TaskId)} 获取资源失败（{reason}），回滚待下轮重派");
+
+        crane.Runtime.LockedInterval = null;
+        crane.Runtime.CurrentTask = null;
+        crane.Runtime.State = CraneState.Idle;
+        crane.Runtime.Step = TransportStep.Idle;
+
+        var workpieceTask = _taskManager.Get(task.WorkpieceRuntimeId);
+        if (workpieceTask is not null)
+        {
+            workpieceTask.Runtime.TaskState = WorkpieceState.Waiting;
         }
     }
 

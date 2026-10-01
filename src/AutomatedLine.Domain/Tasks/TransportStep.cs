@@ -2,7 +2,8 @@ namespace AutomatedLine.Domain.Tasks;
 
 /// <summary>
 /// 天车搬运状态机的步骤。
-/// 严格对应架构文档 §8.5：路权在派发时已由调度器取得，因此这里**没有**获取路权步骤。
+/// 严格对应架构文档 §8.5：调度器派发时**只判断**路权/预约可用，**真正获取在状态机执行任务时**，
+/// 因此第一个实际步骤是 <see cref="AcquireResources"/>（原子 TryAcquire 路权 + TryReserve 预约，拿不到回滚）。
 /// 步骤是"机械动作分步"的游标，Worker 每周期只推进一步或几步，绝不阻塞。
 /// </summary>
 public enum TransportStep
@@ -10,7 +11,13 @@ public enum TransportStep
     /// <summary>空闲，无任务。</summary>
     Idle = 0,
 
-    /// <summary>预检查：连接、报警、范围（路权已在派发时取得）。</summary>
+    /// <summary>
+    /// 获取路权 + 设备预约（**真正加锁**，调度器派发时只判断）。
+    /// 先 TryAcquire 路权，再 TryReserve 源/目标；任一步失败 → 回滚（释放已占用、任务回 Waiting、天车让出）。
+    /// </summary>
+    AcquireResources = 15,
+
+    /// <summary>预检查：连接、报警、范围。</summary>
     PreCheck = 1,
 
     /// <summary>二次确认源设备状态，避免派发后现场已变化。</summary>

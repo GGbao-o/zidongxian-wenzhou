@@ -55,6 +55,28 @@ public sealed class RightOfWayManager
     }
 
     /// <summary>
+    /// 只读判断：该区间当前是否可获取（不与任何已锁区间相交），**不加锁**。
+    /// 调度器派发时用它判断候选能否执行；真正加锁由状态机执行任务时 <see cref="TryAcquire"/> 完成。
+    /// </summary>
+    /// <param name="interval">待判断区间</param>
+    /// <returns>可获取返回 true</returns>
+    public bool CanAcquire(XInterval interval)
+    {
+        lock (_sync)
+        {
+            foreach (var existing in _locks.Values)
+            {
+                if (existing.Overlaps(interval))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
     /// 释放任务路权。幂等。
     /// </summary>
     /// <param name="taskId">任务标识</param>
