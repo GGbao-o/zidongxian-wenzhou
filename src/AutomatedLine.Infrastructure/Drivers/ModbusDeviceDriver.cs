@@ -57,12 +57,13 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
     /// <param name="unitId">站号（写死/按规则）</param>
     /// <param name="points">点位表</param>
     /// <param name="logger">日志</param>
-    public ModbusDeviceDriver(int deviceId, string ip, int port, byte unitId, IReadOnlyList<ModbusPoint> points, IAppLogger logger)
+    /// <param name="timeoutMs">单次请求/连接超时（毫秒），来自配置 Collection.CommunicationTimeoutMs</param>
+    public ModbusDeviceDriver(int deviceId, string ip, int port, byte unitId, IReadOnlyList<ModbusPoint> points, IAppLogger logger, int timeoutMs = 3000)
     {
         DeviceId = deviceId;
         _points = points;
         _logger = logger;
-        _client = new ModbusTcpClient(ip, port, unitId);
+        _client = new ModbusTcpClient(ip, port, unitId, timeoutMs);
     }
 
     /// <inheritdoc />

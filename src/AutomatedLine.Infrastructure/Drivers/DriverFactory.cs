@@ -18,29 +18,40 @@ public static class DriverFactory
     /// </summary>
     /// <param name="config">设备配置</param>
     /// <param name="logger">日志</param>
+    /// <param name="configService">程序配置（取 Modbus 请求超时）</param>
     /// <returns>设备驱动；暂不支持的设备类型返回 null</returns>
-    public static IDeviceDriver? CreateDeviceDriver(DeviceConfig config, IAppLogger logger) => config.DeviceType switch
+    public static IDeviceDriver? CreateDeviceDriver(DeviceConfig config, IAppLogger logger, IConfigService configService)
     {
-        DeviceType.BoringMachine => new ModbusDeviceDriver(
-            config.Id, config.IpAddress, BoringMachineAddress.Port, BoringMachineAddress.UnitId,
-            DeviceModbusMaps.Boring(), logger),
+        // Modbus 单次请求/连接超时；配置非法时兜底 3000ms。
+        var timeoutMs = configService.GetAppOptions().Collection.CommunicationTimeoutMs;
+        if (timeoutMs <= 0)
+        {
+            timeoutMs = 3000;
+        }
 
-        DeviceType.GrinderMachine => new ModbusDeviceDriver(
-            config.Id, config.IpAddress, GrinderMachineAddress.Port, GrinderMachineAddress.ResolveUnitId(config.IpAddress),
-            DeviceModbusMaps.Grinder(), logger),
+        return config.DeviceType switch
+        {
+            DeviceType.BoringMachine => new ModbusDeviceDriver(
+                config.Id, config.IpAddress, BoringMachineAddress.Port, BoringMachineAddress.UnitId,
+                DeviceModbusMaps.Boring(), logger, timeoutMs),
 
-        DeviceType.MarkerMachine => new ModbusDeviceDriver(
-            config.Id, config.IpAddress, MarkerMachineAddress.Port, MarkerMachineAddress.UnitId,
-            DeviceModbusMaps.Marker(), logger),
+            DeviceType.GrinderMachine => new ModbusDeviceDriver(
+                config.Id, config.IpAddress, GrinderMachineAddress.Port, GrinderMachineAddress.ResolveUnitId(config.IpAddress),
+                DeviceModbusMaps.Grinder(), logger, timeoutMs),
 
-        DeviceType.LoadRack or DeviceType.UnloadRack => new ModbusDeviceDriver(
-            config.Id, config.IpAddress, RackAddress.Port, RackAddress.UnitId,
-            DeviceModbusMaps.Rack(config.DeviceType), logger),
+            DeviceType.MarkerMachine => new ModbusDeviceDriver(
+                config.Id, config.IpAddress, MarkerMachineAddress.Port, MarkerMachineAddress.UnitId,
+                DeviceModbusMaps.Marker(), logger, timeoutMs),
 
-        DeviceType.LatheMachine => new LatheFocasDriver(config.Id, config.IpAddress, logger),
+            DeviceType.LoadRack or DeviceType.UnloadRack => new ModbusDeviceDriver(
+                config.Id, config.IpAddress, RackAddress.Port, RackAddress.UnitId,
+                DeviceModbusMaps.Rack(config.DeviceType), logger, timeoutMs),
 
-        _ => null
-    };
+            DeviceType.LatheMachine => new LatheFocasDriver(config.Id, config.IpAddress, logger),
+
+            _ => null
+        };
+    }
 
     /// <summary>
     /// 创建天车驱动（真实汇川 Modbus TCP）。IP 来自数据库，端口/协议/站号写死；
