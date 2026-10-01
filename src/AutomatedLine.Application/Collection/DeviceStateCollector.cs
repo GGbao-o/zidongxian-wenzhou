@@ -33,7 +33,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <summary>采集循环任务。</summary>
     private Task? _loop;
 
-    /// <summary>采集序号。</summary>
+    /// <summary>采集序号。</summary>   没有标住值 long属性默认是0
     private long _sequence;
 
     /// <summary>
@@ -119,6 +119,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task LoopAsync(int intervalMs, CancellationToken cancellationToken)
     {
+        //这个可以看到 没有判断线路是否启动 线路是否启动 后台采集全场设备寄存器点位信号都进行
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -155,6 +156,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task CollectAsync(CancellationToken cancellationToken)
     {
+        //原子性+1  确保多个线程调用时候 读的是最新值
         var sequence = Interlocked.Increment(ref _sequence);
 
         // 只含数据库启用且已装载的设备驱动
@@ -165,12 +167,19 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
             return;
         }
 
-        // 每台一个 Task 并发读取（各自 try/catch）；等全部完成（含超时放弃）后再统一替换。
+        // 每台一个 Task 并发读取（各自 try/catch）；等全部完成（含超时放弃）后再统一替换。   
+        /*  因为 Select + ToList 会依次对每个 driver 调用 ReadOneAsync，所以：
+            所有 Task 几乎同时被创建并启动，实现并发。
+            .ToList() 很重要：如果不加，tasks 只是个 IEnumerable，每次枚举都会重新调用 ReadOneAsync，导致重复启动任务。这是个常见的坑。
+            返回类型推测是 Task<(Driver driver, Snapshot snapshot)>[]，因为后面 results 能解构成 (driver, snapshot)。
+        */
         var tasks = drivers.Select(d => ReadOneAsync(d, sequence, cancellationToken)).ToList();
+        //ConfigureAwait(false)：不强制回到原同步上下文，库代码常用，避免死锁、提升性能。
         var results = await Task.WhenAll(tasks).ConfigureAwait(false);
-
+        //遍历List  读到的plc信号点位 放缓存
         foreach (var (driver, snapshot) in results)
         {
+            //通过 driver.DeviceId 去注册表查回设备对象。
             var device = _deviceRegistry.Get(driver.DeviceId);
             if (device is not null)
             {
