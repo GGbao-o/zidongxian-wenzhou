@@ -156,15 +156,23 @@ public sealed class CraneScheduler : IHostedService
     {
         var cranes = _craneRegistry.Snapshot();
 
+        // 先看候选池：空则本轮无事可做，省掉一次天车状态读取
+        var pool = _candidatePool.Snapshot();
+        if (pool.Count == 0)
+        {
+            _logger.Sample(LogCategory.Scheduling, "dispatch-empty", "候选池为空，本轮无任务可派");
+            return;
+        }
+
         // 只对"启用且空闲"的天车按需读一次状态（连接/报警/位置），供本轮选车使用。天车不做后台采集。
         var statuses = await ReadIdleCraneStatusesAsync(cranes, cancellationToken).ConfigureAwait(false);
 
         // 候选排序：优先级降序 → 距离最近（最近可执行天车到源的距离；无可执行天车的排最后）。不做负载均衡。
-        var candidates = _candidatePool.Snapshot()
+        var candidates = pool
             .OrderByDescending(c => c.Priority)
             .ThenBy(c => NearestCraneDistance(c, cranes, statuses))
             .ToList();
-
+        //遍历候选任务
         foreach (var candidate in candidates)
         {
             var task = candidate.Workpiece;
@@ -177,7 +185,8 @@ public sealed class CraneScheduler : IHostedService
 
             // 本候选的**可执行天车**：启用、空闲、范围覆盖源与目标、状态可读且无报警。
             // "一车一任务"由 IsIdle 保证：派发时立即置 State=Reserved，该车 IsIdle 当场变 false，
-            // 后续候选自然排除它（Snapshot 是同一批 Crane 引用）。
+            // 后续候选自然排除它（Snapshot 是同一批 Crane 引用）。  
+            //eligible 是“针对当前这个候选任务，所有有资格执行它的天车”列表，已按“离源最近”排好序。
             var eligible = cranes
                 .Where(c => c.IsEnabled
                             && c.IsIdle
@@ -187,7 +196,17 @@ public sealed class CraneScheduler : IHostedService
                 .OrderBy(c => Math.Abs(statuses[c.Id]!.XDisplay - candidate.Source.PositionX))   // 离源最近
                 .ToList();
 
-            // 逐台车尝试（**换车**）：某台车判断不通过就试下一台，绝不死等
+            if (eligible.Count == 0)
+            {
+                // 逐候选抽样记录"为什么没有可执行天车"，便于现场排查（同一工件每抽样间隔最多一条）
+                _logger.Sample(LogCategory.Scheduling, $"dispatch-noeligible-{task.Id}",
+                    $"候选 {Describe(candidate)} 暂不可派：无可执行天车（{ExplainNoEligible(candidate, cranes, statuses)}）");
+                continue;
+            }
+
+            // 逐台车尝试（**换车**）：某台车判断不通过就试下一台，绝不死等  找到一台能执行任务的天车
+            var dispatched = false;
+            string? blockReason = null;
             foreach (var crane in eligible)
             {
                 var interval = candidate.GetRightOfWayInterval(crane.Width);   // 每车宽度不同 → 区间不同
@@ -195,6 +214,7 @@ public sealed class CraneScheduler : IHostedService
                 // 【只判断·路权】区间是否空闲（不加锁）
                 if (!_rightOfWayManager.CanAcquire(interval))
                 {
+                    blockReason = $"路权区间 {interval} 与在途任务冲突";
                     continue;   // 区间被别的任务占用 → 试下一台车
                 }
 
@@ -202,10 +222,11 @@ public sealed class CraneScheduler : IHostedService
                 if (_reservationManager.IsReserved(candidate.Source.Id)
                     || _reservationManager.IsReserved(candidate.Target.Id))
                 {
+                    blockReason = "源/目标设备已被其他任务预约";
                     continue;   // 设备被别的任务预约 → 试下一台车
                 }
 
-                // 判断通过 → 派发：只登记任务归属，**不占用任何锁**
+                // 判断通过 → 派发：只登记任务归属，**不占用任何锁**   创建一个 TransportTask（运输任务），把所有必要信息打包
                 var transportTask = new TransportTask
                 {
                     WorkpieceRuntimeId = task.Id,
@@ -218,7 +239,7 @@ public sealed class CraneScheduler : IHostedService
                     State = TransportTaskState.Assigned,
                     AssignedCraneId = crane.Id
                 };
-
+                // 登记天车状态
                 crane.Runtime.CurrentTask = transportTask;
                 crane.Runtime.State = CraneState.Reserved;
                 crane.Runtime.Step = TransportStep.AcquireResources;   // 第一步：状态机执行时获取路权+预约
@@ -226,13 +247,61 @@ public sealed class CraneScheduler : IHostedService
 
                 _logger.Info(LogCategory.Scheduling,
                     $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，待状态机执行时取路权/预约）");
+                dispatched = true;
                 break;   // 该候选已派人，处理下一个候选
+            }
+
+            if (!dispatched)
+            {
+                // 有可执行天车，但路权/预约全冲突：本周期不派发，下轮用最新状态重算
+                _logger.Sample(LogCategory.Scheduling, $"dispatch-blocked-{task.Id}",
+                    $"候选 {Describe(candidate)} 暂未派发：{blockReason ?? "无可执行天车"}（{eligible.Count} 台可执行天车均冲突，下轮重试）");
             }
         }
     }
 
+    /// <summary>候选任务日志短文本（工件 + 源→目标）。</summary>
+    /// <param name="candidate">候选任务</param>
+    /// <returns>描述文本</returns>
+    private static string Describe(CandidateTask candidate)
+        => $"{candidate.Workpiece.Info} {candidate.Source.Name}→{candidate.Target.Name}";
+
     /// <summary>
-    /// 计算某候选用"最近的可执行天车到源"的距离，用于候选排序的 tie-break。
+    /// 当某候选没有可执行天车时，逐台天车说明被排除的原因，供日志排查（如全忙/未连接/报警/范围不覆盖/读状态失败）。
+    /// </summary>
+    /// <param name="candidate">候选任务</param>
+    /// <param name="cranes">天车快照</param>
+    /// <param name="statuses">天车号 → 本轮状态</param>
+    /// <returns>原因汇总文本</returns>
+    private static string ExplainNoEligible(CandidateTask candidate, IReadOnlyList<Crane> cranes, IReadOnlyDictionary<int, CraneStatusDto?> statuses)
+    {
+        if (cranes.Count == 0)
+        {
+            return "无天车";
+        }
+
+        var reasons = new List<string>();
+        foreach (var crane in cranes)
+        {
+            if (!crane.IsEnabled) { reasons.Add($"{crane.Name}:未启用"); continue; }
+            if (!crane.IsIdle) { reasons.Add($"{crane.Name}:忙"); continue; }
+            if (!crane.Covers(candidate.Source.PositionX) || !crane.Covers(candidate.Target.PositionX))
+            {
+                reasons.Add($"{crane.Name}:范围不覆盖"); continue;
+            }
+            if (!statuses.TryGetValue(crane.Id, out var status) || status is null)
+            {
+                reasons.Add($"{crane.Name}:状态读取失败"); continue;
+            }
+            if (status.HasAlarm) { reasons.Add($"{crane.Name}:报警"); continue; }
+            reasons.Add($"{crane.Name}:可执行");
+        }
+
+        return string.Join("，", reasons);
+    }
+
+    /// <summary>
+    /// 计算某候选用"最近的可执行天车到源"的距离，用于候选排序的 tie-break。   它不是找“某一台”天车，而是找出“所有能执行这个候选的天车里，离源最近的那台，返回那个最近的距离值”。
     /// 无可执行天车时返回 <see cref="double.MaxValue"/>（排在最后）。
     /// </summary>
     /// <param name="candidate">候选任务</param>

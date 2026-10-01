@@ -57,4 +57,19 @@ public sealed class CandidateTaskPool
             return _tasks.ToList();
         }
     }
+
+    /// <summary>
+    /// 候选池是否为空。
+    /// 供线路未运行时"仅在确有内容才清空"，避免每周期空 Clear 触发无谓的界面刷新。
+    /// </summary>
+    public bool IsEmpty
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _tasks.Count == 0;
+            }
+        }
+    }
 }

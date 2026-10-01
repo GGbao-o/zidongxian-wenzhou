@@ -131,10 +131,12 @@ public sealed class TransportTaskGenerator : IHostedService
                     //生成候选任务
                     GenerateOnce();
                 }
-                else
+                else if (!_candidatePool.IsEmpty)
                 {
-                    // 线路未启动/暂停：不生成，清空候选池（采集仍在后台进行）
+                    // 线路未启动/暂停：不生成，清空候选池（采集仍在后台进行）。
+                    // 仅在确有内容时才 Clear，避免每周期空清空触发无谓的界面刷新。
                     _candidatePool.Clear();
+                    _logger.Sample(LogCategory.Generation, "generate-idle", "线路未运行，候选池已清空");
                 }
             }
             catch (Exception ex)
@@ -182,9 +184,12 @@ public sealed class TransportTaskGenerator : IHostedService
             var runtime = task.Runtime;
 
             //解析工件的源设备并校验源就绪
-            var source = ResolveSource(task, queueHead, devices);
+            var source = ResolveSource(task, queueHead, devices, out var sourceReason);
             if (source is null)
             {
+                // 逐工件抽样记录"为什么没有候选"，便于现场排查（同一工件每抽样间隔最多一条）
+                _logger.Sample(LogCategory.Generation, $"gen-nosource-{task.Id}",
+                    $"工件 {Describe(task)} 无候选：源不可用（{sourceReason}）");
                 continue;
             }
 
@@ -197,33 +202,48 @@ public sealed class TransportTaskGenerator : IHostedService
             {
                 // 后面已无可执行工序：视为走完
                 runtime.TaskState = WorkpieceState.Completed;
+                _logger.Info(LogCategory.Generation, $"工件 {Describe(task)} 已无可执行工序，标记完成");
                 continue;
             }
 
             // 目标全枚举：所有满足条件的同类设备各生成一个候选
             var info = task.Info;
+            var matched = 0;
+            var targetSkips = new List<string>();
             foreach (var target in devices)
             {
-                if (target.Type != next.DeviceType
-                    || !target.IsEnabled
-                    || target.Id == source.Id
-                    || !target.IsConnected
-                    || _reservationManager.IsReserved(target.Id)
-                    || DeviceHandshakeRules.IsAlarm(target)
-                    || !target.CanProcess(info.Diameter, info.Length)
-                    || !DeviceHandshakeRules.CanReceive(target))
+                if (target.Type != next.DeviceType)
                 {
-                    continue;
+                    continue;   // 只看下一道工序对应的设备类型
                 }
 
+                // 逐个收集"被排除的原因"，全部排除时汇总输出，帮助判断是设备没连线还是条件没到
+                if (!target.IsEnabled) { targetSkips.Add($"{target.Name}:未启用"); continue; }
+                if (target.Id == source.Id) { targetSkips.Add($"{target.Name}:与源相同"); continue; }
+                if (!target.IsConnected) { targetSkips.Add($"{target.Name}:未连接"); continue; }
+                if (_reservationManager.IsReserved(target.Id)) { targetSkips.Add($"{target.Name}:已被预约"); continue; }
+                if (DeviceHandshakeRules.IsAlarm(target)) { targetSkips.Add($"{target.Name}:报警"); continue; }
+                if (!target.CanProcess(info.Diameter, info.Length)) { targetSkips.Add($"{target.Name}:超出加工范围"); continue; }
+                if (!DeviceHandshakeRules.CanReceive(target)) { targetSkips.Add($"{target.Name}:{ReceiveHint(target)}"); continue; }
+
                 candidates.Add(new CandidateTask(task, source, target, priority: 100, targetProcess: next.Process));
+                matched++;
+            }
+
+            if (matched == 0)
+            {
+                var detail = targetSkips.Count == 0 ? $"无 {next.DeviceType} 类型设备" : string.Join("，", targetSkips);
+                _logger.Sample(LogCategory.Generation, $"gen-notarget-{task.Id}",
+                    $"工件 {Describe(task)} 下一道 {next.Process}({next.DeviceType}) 无可用目标：{detail}");
             }
         }
 
         _candidatePool.Replace(candidates);
 
-        // 高频循环，成功日志按抽样间隔落盘
-        _logger.Sample(LogCategory.Generation, "generate-cycle", $"候选任务重建完成，共 {candidates.Count} 个");
+        // 高频循环，成功日志按抽样间隔落盘（含入线任务数、上料队头、候选数）
+        var headText = queueHead is null ? "无" : Describe(queueHead);
+        _logger.Sample(LogCategory.Generation, "generate-cycle",
+            $"候选重建：入线任务 {lineTasks.Count}，上料队头 {headText}，候选 {candidates.Count} 个");
     }
 
     /// <summary>
@@ -236,24 +256,23 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <param name="task">工件任务</param>
     /// <param name="queueHead">当前队列队头（仅队头可上料）</param>
     /// <param name="devices">设备快照</param>
+    /// <param name="reason">失败原因（供日志排查；成功为空串）</param>
     /// <returns>源设备；不满足返回 null</returns>
-    private DeviceBase? ResolveSource(WorkpieceTask task, WorkpieceTask? queueHead, IReadOnlyList<DeviceBase> devices)
+    private DeviceBase? ResolveSource(WorkpieceTask task, WorkpieceTask? queueHead, IReadOnlyList<DeviceBase> devices, out string reason)
     {
         var location = task.Runtime.CurrentLocation;
 
         if (location.IsOnDevice && location.ResourceId is int deviceId)
         {
             var device = devices.FirstOrDefault(d => d.Id == deviceId && d.IsEnabled);
-            if (device is null
-                || device.CurrentWorkpiece != task      // 内存一致：源设备上就是该工件
-                || !device.IsConnected
-                || _reservationManager.IsReserved(device.Id)
-                || DeviceHandshakeRules.IsAlarm(device)
-                || !DeviceHandshakeRules.CanProvide(device))
-            {
-                return null;
-            }
+            if (device is null) { reason = $"所在设备 {deviceId} 不存在或未启用"; return null; }
+            if (device.CurrentWorkpiece != task) { reason = $"设备 {device.Name} 上工件与任务不一致"; return null; }   // 内存一致
+            if (!device.IsConnected) { reason = $"设备 {device.Name} 未连接"; return null; }
+            if (_reservationManager.IsReserved(device.Id)) { reason = $"设备 {device.Name} 已被预约"; return null; }
+            if (DeviceHandshakeRules.IsAlarm(device)) { reason = $"设备 {device.Name} 报警"; return null; }
+            if (!DeviceHandshakeRules.CanProvide(device)) { reason = $"设备 {device.Name} 未就绪（{ProvideHint(device)}）"; return null; }
 
+            reason = string.Empty;
             return device;
         }
 
@@ -262,24 +281,45 @@ public sealed class TransportTaskGenerator : IHostedService
             // 只有队头才生成上料候选；上料架唯一
             if (!ReferenceEquals(task, queueHead))
             {
+                reason = "非队列队头（需前面的工件先上料）";
                 return null;
             }
 
             var rack = devices.FirstOrDefault(d => d.Type == DeviceType.LoadRack && d.IsEnabled);
-            if (rack is null
-                || !rack.IsConnected
-                || _reservationManager.IsReserved(rack.Id)
-                || DeviceHandshakeRules.IsAlarm(rack)
-                || !DeviceHandshakeRules.CanProvide(rack))   // 有板
-            {
-                return null;
-            }
+            if (rack is null) { reason = "无启用的上料架"; return null; }
+            if (!rack.IsConnected) { reason = $"上料架 {rack.Name} 未连接"; return null; }
+            if (_reservationManager.IsReserved(rack.Id)) { reason = $"上料架 {rack.Name} 已被预约"; return null; }
+            if (DeviceHandshakeRules.IsAlarm(rack)) { reason = $"上料架 {rack.Name} 报警"; return null; }
+            if (!DeviceHandshakeRules.CanProvide(rack)) { reason = $"上料架 {rack.Name} 无板（HasMaterial=false）"; return null; }
 
+            reason = string.Empty;
             return rack;
         }
 
+        reason = $"工件位置异常（{location}）";
         return null;
     }
+
+    /// <summary>把"源未就绪"翻译成具体缺失的握手信号名，便于日志排查。</summary>
+    private static string ProvideHint(DeviceBase device) => device.Type switch
+    {
+        DeviceType.LoadRack => "HasMaterial=false",
+        DeviceType.BoringMachine or DeviceType.LatheMachine or DeviceType.GrinderMachine => "RequestUnload=false",
+        DeviceType.MarkerMachine => "ProcessDone=false",
+        _ => "无可取料规则"
+    };
+
+    /// <summary>把"目标不可放料"翻译成具体缺失的握手信号名，便于日志排查。</summary>
+    private static string ReceiveHint(DeviceBase device) => device.Type switch
+    {
+        DeviceType.BoringMachine or DeviceType.LatheMachine or DeviceType.GrinderMachine => "RequestData=false",
+        DeviceType.MarkerMachine => "Idle=false",
+        DeviceType.UnloadRack => "有板（不可放）或无采集数据",
+        _ => "无放料规则"
+    };
+
+    /// <summary>工件日志短文本（版号/序号）。</summary>
+    private static string Describe(WorkpieceTask task) => task.Info.ToString();
 
     /// <summary>
     /// 判断某设备类型当前是否存在启用设备，用于决定工序节点是否跳过。
