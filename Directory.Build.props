@@ -1,0 +1,9 @@
+<Project>
+
+  <!-- FOCAS Fwlib32.dll 是 32 位原生库，引用它的进程必须是 32 位：
+       统一把整个解决方案设为 x86，避免 64 位进程 P/Invoke 时报 BadImageFormatException。 -->
+  <PropertyGroup>
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+
+</Project>

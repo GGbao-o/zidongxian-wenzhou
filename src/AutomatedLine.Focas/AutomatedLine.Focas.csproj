@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- FOCAS Fwlib32.dll 为 32 位原生库：引用本库的进程必须以 x86 运行 -->
+    <PlatformTarget>x86</PlatformTarget>
+    <!-- Focas1.cs 为自动生成的 P/Invoke 声明：字段不可空(CS8618)、UnmanagedType.AsAny 过时(CS0618) 均无意义，屏蔽之 -->
+    <NoWarn>$(NoWarn);CS8618;CS0618</NoWarn>
+  </PropertyGroup>
+
+  <!-- 原生 FOCAS DLL 拷到输出根目录，供 P/Invoke 在应用目录查找 -->
+  <ItemGroup>
+    <None Include="native\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+</Project>
