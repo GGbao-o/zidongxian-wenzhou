@@ -125,6 +125,7 @@ public sealed class TransportTaskGenerator : IHostedService
         {
             try
             {
+                //生成候选任务就会判断 线路是否启动 如果未启动就不会生成 并且会清空候选池
                 if (_lineControl.IsRunning)
                 {
                     //生成候选任务
@@ -156,25 +157,29 @@ public sealed class TransportTaskGenerator : IHostedService
     private void GenerateOnce()
     {
         var devices = _deviceRegistry.Snapshot();
-        var tasks = _taskManager.Snapshot();
+
+        // 内存任务表里**既有**"主页面添加但未启动"的任务，**也有**"已启动入线"的任务：
+        //   · 添加（未启动 Created）→ 只是列表上展示，不入队、不生成任务；
+        //   · 启动（Waiting）→ 才算"入线任务"，参与候选生成；
+        //   · 暂停(Paused)/已派发/执行中/完成/丢弃 → 也都不在线。
+        // 这里先只取"入线任务"（= 已启动并排队中），后面所有逻辑都只针对它们。
+        var lineTasks = _taskManager.Snapshot()
+            .Where(t => t.Runtime.TaskState == WorkpieceState.Waiting)
+            .ToList();
+
         var candidates = new List<CandidateTask>();
 
-        // 队列队头：状态 Waiting、在队列、且入线顺序号最小（序号在"启动"时分配，暂停清零、再启动重新入队尾）。
-        var queueHead = tasks
-            .Where(t => t.Runtime.TaskState == WorkpieceState.Waiting
-                        && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
+        // 上料架队头：在"入线任务"中取"在队列、入线顺序号最小"者
+        // （顺序号在"启动"时分配，暂停清零、再启动重新入队尾）。
+        var queueHead = lineTasks
+            .Where(t => t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
             .OrderBy(t => t.Runtime.QueueOrder)
             .FirstOrDefault();
 
-        foreach (var task in tasks)
+        // 只遍历入线任务（已过滤掉未启动/暂停/派发/完成等）
+        foreach (var task in lineTasks)
         {
             var runtime = task.Runtime;
-
-            // 只处理"排队中"的工件；未启动/暂停/已派发/执行中/完成/丢弃 全部跳过
-            if (runtime.TaskState != WorkpieceState.Waiting)
-            {
-                continue; //直接跳过这个循环
-            }
 
             var source = ResolveSource(task, queueHead, devices);
             if (source is null)
