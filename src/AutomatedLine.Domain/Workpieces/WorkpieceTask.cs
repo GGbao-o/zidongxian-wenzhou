@@ -1,6 +1,8 @@
 namespace AutomatedLine.Domain.Workpieces;
 
 /// <summary>
+///
+/// 这个是根
 /// 工件任务。把不可变的工件数据与可变的运行状态组合成一个内存对象，
 /// 它同时也是"工件身份"的载体：任务被丢弃，工件身份即丢失（架构文档 §3.5）。
 /// </summary>
