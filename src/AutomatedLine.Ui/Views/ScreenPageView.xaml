@@ -103,20 +103,7 @@
                                         FontWeight="SemiBold"
                                         Foreground="{StaticResource StatusRunningBrush}"
                                         Text="{Binding MachiningText}" />
-                                    <!-- 当前工件：版号/序号/长度/直径 -->
-                                    <TextBlock
-                                        Margin="0,6,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="12"
-                                        Text="{Binding WorkpieceInfoText}"
-                                        TextWrapping="Wrap" />
-                                    <!-- 多行 PLC 点位信号：点名=值 -->
-                                    <TextBlock
-                                        Margin="0,8,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="12"
-                                        Text="{Binding SignalText}"
-                                        TextWrapping="Wrap" />
+                                    <!-- 工件信息与点位信号较多，移到悬浮框显示 -->
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
@@ -171,18 +158,12 @@
                                     <TextBlock FontFamily="Consolas" Text="{Binding Z, StringFormat=Z：{0:0.###}}" />
                                     <TextBlock Margin="0,6,0,0" Style="{StaticResource CaptionText}" Text="{Binding TaskText, StringFormat=当前任务：{0}}" />
                                     <TextBlock Margin="0,2,0,0" Style="{StaticResource CaptionText}" Text="{Binding RightOfWayText, StringFormat=路权：{0}}" />
-                                    <!-- 当前工件：版号/序号/长度/直径 -->
-                                    <TextBlock
-                                        Margin="0,6,0,0"
-                                        FontFamily="Consolas"
-                                        FontSize="12"
-                                        Text="{Binding WorkpieceInfoText}"
-                                        TextWrapping="Wrap" />
                                     <TextBlock
                                         Margin="0,4,0,0"
                                         FontWeight="SemiBold"
                                         Foreground="{StaticResource StatusRunningBrush}"
                                         Text="{Binding StateText}" />
+                                    <!-- 工件信息较多，移到悬浮框显示 -->
                                 </StackPanel>
                             </Border>
                         </DataTemplate>

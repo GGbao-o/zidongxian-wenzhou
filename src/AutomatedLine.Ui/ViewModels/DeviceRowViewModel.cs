@@ -124,7 +124,7 @@ public partial class DeviceRowViewModel : ObservableObject
             : $"有料={Bool(signals.GetBool("HasMaterial"))} 请求上料={Bool(signals.GetBool("RequestLoad"))} 请求下料={Bool(signals.GetBool("RequestUnload"))} 完成={Bool(signals.GetBool("ProcessDone"))}";
 
         SignalText = BuildSignalText(device, signals);
-        TooltipText = BuildTooltip(device, machining);
+        TooltipText = BuildTooltip(device, machining, signals);
     }
 
     /// <summary>
@@ -160,29 +160,51 @@ public partial class DeviceRowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 组装悬浮详情：加工状态 + 当前工件信息（板号/序号/直径/长度）。
+    /// 组装悬浮详情：连接/加工状态 + 当前工件（版号/序号/长度/直径）+ 全部点位信号。
     /// </summary>
     /// <param name="device">设备对象</param>
     /// <param name="machining">是否加工中</param>
+    /// <param name="signals">信号快照</param>
     /// <returns>详情文本</returns>
-    private static string BuildTooltip(DeviceBase device, bool machining)
+    private static string BuildTooltip(DeviceBase device, bool machining, Domain.Signals.SignalSnapshot? signals)
     {
         var builder = new StringBuilder();
         builder.Append(device.Name).Append("（").Append(DisplayText.DeviceTypeText(device.Type)).Append('）');
         builder.AppendLine();
-        builder.Append("状态：").Append(machining ? "加工中" : "空闲");
+        builder.Append("连接：").Append(device.IsConnected ? "已连接" : "未连接")
+            .Append("    状态：").Append(machining ? "加工中" : "空闲");
 
         var info = device.CurrentWorkpiece?.Info;
-        if (info is not null)
+        builder.AppendLine();
+        builder.Append("当前工件：");
+        if (info is null)
+        {
+            builder.Append("无");
+        }
+        else
         {
             builder.AppendLine();
-            builder.Append("板号：").Append(info.PlateNo);
+            builder.Append("  版号：").Append(info.PlateNo).Append("  序号：").Append(info.SerialNo);
             builder.AppendLine();
-            builder.Append("序号：").Append(info.SerialNo);
-            builder.AppendLine();
-            builder.Append("直径：").Append(info.Diameter.ToString("0.###"));
-            builder.AppendLine();
-            builder.Append("长度：").Append(info.Length.ToString("0.###"));
+            builder.Append("  长度：").Append(info.Length.ToString("0.###")).Append("  直径：").Append(info.Diameter.ToString("0.###"));
+        }
+
+        builder.AppendLine();
+        builder.Append("点位信号：");
+        if (signals is null)
+        {
+            builder.Append("无数据");
+        }
+        else
+        {
+            foreach (var point in device.SignalPoints)
+            {
+                if (signals.Values.TryGetValue(point.Name, out var value))
+                {
+                    builder.AppendLine();
+                    builder.Append("  ").Append(point.Name).Append('=').Append(FormatValue(value));
+                }
+            }
         }
 
         return builder.ToString();

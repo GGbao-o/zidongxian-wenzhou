@@ -193,6 +193,8 @@ public partial class CraneRowViewModel : ObservableObject
         var builder = new StringBuilder();
         builder.Append(crane.Name).Append("（").Append(DisplayText.CraneStateText(crane.Runtime.State)).Append('）');
         builder.AppendLine();
+        builder.Append("连接：").Append(ConnectionText).Append("    路权：").Append(RightOfWayText);
+        builder.AppendLine();
         builder.Append("X：").Append(X.ToString("0.###"))
             .Append("  Y：").Append(Y.ToString("0.###"))
             .Append("  Z：").Append(Z.ToString("0.###"));
