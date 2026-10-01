@@ -12,7 +12,8 @@ namespace AutomatedLine.Application.Workers;
 
 /// <summary>
 /// 天车搬运状态机（架构文档 §8.5）。
-/// 每周期只推进一步，绝不阻塞；路权在派发时已取得，这里从 PreCheck 开始。
+/// 每周期只推进一步，绝不阻塞；调度器派发时只判断，这里从 <see cref="TransportStep.AcquireResources"/> 开始，
+/// 真正获取路权/预约，成功后才把天车与工件置为"执行中"。
 /// 任何一步异常 → <see cref="TaskAbortCoordinator"/> 自动清理并暂停线路。
 /// 取放料确认在 P3 由状态机按内存语义完成，并同步写模拟驱动的"有料"信号以保持界面一致；
 /// 现场点位到位后改为读取 PLC 反馈判定。
@@ -173,11 +174,20 @@ public sealed class CraneStateMachine
             return;
         }
 
-        // 3) 路权 + 预约都拿到：记录区间，进入预检查
+        // 3) 路权 + 预约都拿到：正式进入执行态（Reserved → Running），记录区间，进入预检查
         crane.Runtime.LockedInterval = interval;
+        crane.Runtime.State = CraneState.Running;
+
+        // 工件同步进入"执行中"（此前调度派发时置的是 Assigned，界面据此显示"执行中"）
+        var workpieceTask = _taskManager.Get(task.WorkpieceRuntimeId);
+        if (workpieceTask is not null)
+        {
+            workpieceTask.Runtime.TaskState = WorkpieceState.Running;
+        }
+
         crane.Runtime.Step = TransportStep.PreCheck;
         _logger.Info(LogCategory.StateMachine,
-            $"{crane.Name} 获取路权 {interval}、预约设备 {task.SourceDeviceId}/{task.TargetDeviceId} 成功");
+            $"{crane.Name} 获取路权 {interval}、预约设备 {task.SourceDeviceId}/{task.TargetDeviceId} 成功，进入执行");
     }
 
     /// <summary>
