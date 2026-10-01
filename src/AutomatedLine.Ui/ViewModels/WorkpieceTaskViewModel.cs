@@ -30,6 +30,34 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private double _length;
 
+    /// <summary>左堵厚。</summary>
+    [ObservableProperty]
+    private double _leftPlugThickness;
+
+    /// <summary>右堵厚。</summary>
+    [ObservableProperty]
+    private double _rightPlugThickness;
+
+    /// <summary>堵孔文本（70=小孔 / 100=大孔）。</summary>
+    [ObservableProperty]
+    private string _plugHoleText = string.Empty;
+
+    /// <summary>打印内容。</summary>
+    [ObservableProperty]
+    private string _printContent = string.Empty;
+
+    /// <summary>内孔锥度。</summary>
+    [ObservableProperty]
+    private double _innerHoleTaper;
+
+    /// <summary>圆角大小。</summary>
+    [ObservableProperty]
+    private double _filletSize;
+
+    /// <summary>是否做动平衡文本（需要/不需要）。</summary>
+    [ObservableProperty]
+    private string _needBalancingText = string.Empty;
+
     /// <summary>当前工序文本。</summary>
     [ObservableProperty]
     private string _processText = string.Empty;
@@ -91,6 +119,18 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         SerialNo = info.SerialNo.ToString();
         Diameter = info.Diameter;
         Length = info.Length;
+        LeftPlugThickness = info.LeftPlugThickness;
+        RightPlugThickness = info.RightPlugThickness;
+        PlugHoleText = info.PlugHole switch
+        {
+            70 => "70（小孔）",
+            100 => "100（大孔）",
+            _ => info.PlugHole.ToString()
+        };
+        PrintContent = info.PrintContent;
+        InnerHoleTaper = info.InnerHoleTaper;
+        FilletSize = info.FilletSize;
+        NeedBalancingText = info.NeedBalancing == 1 ? "需要" : "不需要";
         ProcessText = ProcessToText(runtime.CurrentProcess);
         QueueOrderText = runtime.QueueOrder > 0 ? runtime.QueueOrder.ToString() : "-";
         LocationText = runtime.CurrentLocation.ToString();

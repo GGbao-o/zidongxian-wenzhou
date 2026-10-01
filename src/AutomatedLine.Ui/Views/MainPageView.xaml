@@ -117,6 +117,13 @@
                         <DataGridTextColumn Header="序号" Binding="{Binding SerialNo}" />
                         <DataGridTextColumn Header="直径" Binding="{Binding Diameter}" />
                         <DataGridTextColumn Header="长度" Binding="{Binding Length}" />
+                        <DataGridTextColumn Header="左堵厚" Binding="{Binding LeftPlugThickness}" />
+                        <DataGridTextColumn Header="右堵厚" Binding="{Binding RightPlugThickness}" />
+                        <DataGridTextColumn Header="堵孔" Binding="{Binding PlugHoleText}" />
+                        <DataGridTextColumn Header="内孔锥度" Binding="{Binding InnerHoleTaper}" />
+                        <DataGridTextColumn Header="圆角大小" Binding="{Binding FilletSize}" />
+                        <DataGridTextColumn Header="是否动平衡" Binding="{Binding NeedBalancingText}" />
+                        <DataGridTextColumn Header="打印内容" Binding="{Binding PrintContent}" />
                         <DataGridTextColumn Header="当前工序" Binding="{Binding ProcessText}" />
                         <DataGridTextColumn Header="入线顺序" Binding="{Binding QueueOrderText}" />
                         <DataGridTextColumn Header="当前位置" Binding="{Binding LocationText}" />
