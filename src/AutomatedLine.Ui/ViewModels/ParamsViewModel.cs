@@ -95,7 +95,6 @@ public partial class ParamsViewModel : ObservableObject
 
         var collection = new ParamCategoryViewModel("采集", "设备/天车采集周期与通信超时");
         collection.Items.Add(IntItem("设备采集周期(ms)", () => _options.Collection.DeviceIntervalMs, v => _options.Collection.DeviceIntervalMs = v));
-        collection.Items.Add(IntItem("天车采集周期(ms)", () => _options.Collection.CraneIntervalMs, v => _options.Collection.CraneIntervalMs = v));
         collection.Items.Add(IntItem("通信超时(ms)", () => _options.Collection.CommunicationTimeoutMs, v => _options.Collection.CommunicationTimeoutMs = v));
         Categories.Add(collection);
 

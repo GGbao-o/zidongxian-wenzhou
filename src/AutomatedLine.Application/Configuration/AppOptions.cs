@@ -29,9 +29,6 @@ public sealed class CollectionOptions
     /// <summary>设备 PLC 信号采集周期（毫秒）。默认 500ms（架构文档 §8.2）。</summary>
     public int DeviceIntervalMs { get; set; } = 500;
 
-    /// <summary>天车位置/信号采集周期（毫秒）。</summary>
-    public int CraneIntervalMs { get; set; } = 500;
-
     /// <summary>单次通信请求超时（毫秒）。超时按瞬时故障处理，触发重连重试。</summary>
     public int CommunicationTimeoutMs { get; set; } = 3000;
 }

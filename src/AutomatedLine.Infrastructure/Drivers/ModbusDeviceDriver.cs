@@ -82,9 +82,15 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
     /// <inheritdoc />
     public async Task<IReadOnlyDictionary<string, object?>> ReadAllSignalsAsync(CancellationToken cancellationToken = default)
     {
+        // 只读**输入信号**（机床→上位机，均为 1/0 或状态字）；下发的加工参数与握手输出位只写不读。
         var result = new Dictionary<string, object?>();
         foreach (var point in _points)
         {
+            if (point.Writable)
+            {
+                continue;
+            }
+
             result[point.Name] = await ReadPointAsync(point, cancellationToken).ConfigureAwait(false);
         }
 
