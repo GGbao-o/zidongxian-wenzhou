@@ -27,6 +27,20 @@ public interface IRuntimeTaskManager
     bool Remove(Guid taskId);
 
     /// <summary>
+    /// 启动任务：未启动/已暂停 → 排队中，并分配**入线顺序号**（入队尾）。
+    /// </summary>
+    /// <param name="taskId">任务标识</param>
+    /// <returns>成功返回 true；任务不存在或状态不允许返回 false</returns>
+    bool Start(Guid taskId);
+
+    /// <summary>
+    /// 暂停任务：排队中 → 已暂停，并清空入线顺序号（出队）。
+    /// </summary>
+    /// <param name="taskId">任务标识</param>
+    /// <returns>成功返回 true；任务不存在或状态不允许返回 false</returns>
+    bool Pause(Guid taskId);
+
+    /// <summary>
     /// 按任务标识查找任务。
     /// </summary>
     /// <param name="taskId">任务标识</param>

@@ -34,6 +34,18 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private string _processText = string.Empty;
 
+    /// <summary>入线顺序（上料架取板顺序）；未入队显示"-"。</summary>
+    [ObservableProperty]
+    private string _queueOrderText = "-";
+
+    /// <summary>下一道工序文本（由主 ViewModel 依据启用设备计算）。</summary>
+    [ObservableProperty]
+    private string _nextProcessText = "-";
+
+    /// <summary>下一道工序位置（目标设备 X 位置，多个逗号分隔；由主 ViewModel 计算）。</summary>
+    [ObservableProperty]
+    private string _nextPositionText = "-";
+
     /// <summary>当前位置文本。</summary>
     [ObservableProperty]
     private string _locationText = string.Empty;
@@ -80,6 +92,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         Diameter = info.Diameter;
         Length = info.Length;
         ProcessText = ProcessToText(runtime.CurrentProcess);
+        QueueOrderText = runtime.QueueOrder > 0 ? runtime.QueueOrder.ToString() : "-";
         LocationText = runtime.CurrentLocation.ToString();
         StateText = StateToText(runtime.TaskState);
 

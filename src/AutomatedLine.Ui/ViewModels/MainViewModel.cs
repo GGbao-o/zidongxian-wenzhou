@@ -3,8 +3,11 @@ using System.Windows.Media;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Domain.Devices;
 using AutomatedLine.Domain.Line;
+using AutomatedLine.Domain.Routing;
 using AutomatedLine.Domain.Workpieces;
+using AutomatedLine.Ui.Helpers;
 using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -50,6 +53,10 @@ public partial class MainViewModel : ObservableObject
     /// <summary>线路状态对应的强调色，浅色风格下用颜色区分状态。</summary>
     [ObservableProperty]
     private Brush _lineStateBrush = Brushes.Gray;
+
+    /// <summary>入线按钮文本：未运行显示"启动线路"，运行中显示"暂停线路"。</summary>
+    [ObservableProperty]
+    private string _lineButtonText = "启动线路";
 
     /// <summary>候选任务生成周期（毫秒）。</summary>
     [ObservableProperty]
@@ -142,15 +149,10 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var task = _taskManager.Get(row.TaskId);
-        if (task is null)
+        if (_taskManager.Start(row.TaskId))
         {
-            return;
+            Console.WriteLine($"[MainViewModel] 已启动任务 {row.PlateNo}/{row.SerialNo}");
         }
-
-        task.Runtime.TaskState = WorkpieceState.Waiting;
-        Console.WriteLine($"[MainViewModel] 已启动任务 {row.PlateNo}/{row.SerialNo}");
-        RefreshTasks();
     }
 
     /// <summary>
@@ -165,15 +167,10 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var task = _taskManager.Get(row.TaskId);
-        if (task is null)
+        if (_taskManager.Pause(row.TaskId))
         {
-            return;
+            Console.WriteLine($"[MainViewModel] 已暂停任务 {row.PlateNo}/{row.SerialNo}");
         }
-
-        task.Runtime.TaskState = WorkpieceState.Paused;
-        Console.WriteLine($"[MainViewModel] 已暂停任务 {row.PlateNo}/{row.SerialNo}");
-        RefreshTasks();
     }
 
     /// <summary>
@@ -193,11 +190,18 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 启动线路命令（P2 仍为骨架，P3 接入 LineControlService）。
+    /// 入线按钮（启动/暂停共用一个按钮）：
+    /// 未运行 → 先冷启动核对再启动线路（生成器等服务随之工作）；运行中 → 暂停线路（服务停止生成）。
     /// </summary>
     [RelayCommand]
-    private async Task StartLine()
+    private async Task ToggleLine()
     {
+        if (_lineControl.IsRunning)
+        {
+            _lineControl.Pause();
+            return;
+        }
+
         // 启动前先做冷启动核对：现场有料但内存无数据 → 仅告警，不阻塞（天车状态按需读取）
         var blocks = await _coldStartChecker.CheckAsync();
         if (blocks.Count > 0)
@@ -206,15 +210,6 @@ public partial class MainViewModel : ObservableObject
         }
 
         _lineControl.Start();
-    }
-
-    /// <summary>
-    /// 暂停线路命令。
-    /// </summary>
-    [RelayCommand]
-    private void PauseLine()
-    {
-        _lineControl.Pause();
     }
 
     /// <summary>
@@ -255,13 +250,45 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     private void RefreshTasks()
     {
+        var devices = _deviceRegistry.Snapshot();
         Tasks.Clear();
         foreach (var task in _taskManager.Snapshot())
         {
-            Tasks.Add(new WorkpieceTaskViewModel(task));
+            var row = new WorkpieceTaskViewModel(task);
+            FillNextProcess(row, task, devices);
+            Tasks.Add(row);
         }
 
         TaskCount = Tasks.Count;
+    }
+
+    /// <summary>工艺路线（只读，用于展示"下一道工序/位置"）。</summary>
+    private static readonly ProcessRoute Route = ProcessRoute.CreateDefault();
+
+    /// <summary>
+    /// 依据启用设备计算并填充"下一道工序 + 其目标设备位置"。
+    /// 队列中的新工件当前工序为 Unknown，等价"上料"，从它往后找第一道有启用设备的工序。
+    /// </summary>
+    /// <param name="row">行 VM</param>
+    /// <param name="task">工件任务</param>
+    /// <param name="devices">设备快照</param>
+    private static void FillNextProcess(WorkpieceTaskViewModel row, WorkpieceTask task, IReadOnlyList<DeviceBase> devices)
+    {
+        var current = task.Runtime.CurrentProcess == ProcessType.Unknown ? ProcessType.Loading : task.Runtime.CurrentProcess;
+        var next = Route.GetNextAvailable(current, type => devices.Any(d => d.Type == type && d.IsEnabled));
+        if (next is null)
+        {
+            row.NextProcessText = "已完成";
+            row.NextPositionText = "-";
+            return;
+        }
+
+        row.NextProcessText = DisplayText.ProcessText(next.Process);
+        var positions = devices
+            .Where(d => d.Type == next.DeviceType && d.IsEnabled)
+            .Select(d => d.PositionX.ToString("0.###"))
+            .ToList();
+        row.NextPositionText = positions.Count > 0 ? string.Join(", ", positions) : "-";
     }
 
     /// <summary>
@@ -289,6 +316,9 @@ public partial class MainViewModel : ObservableObject
             LineState.PausedByFault => "故障暂停",
             _ => "未知"
         };
+
+        // 启动/暂停共用一个按钮：运行/启动中显示"暂停线路"，其余显示"启动线路"
+        LineButtonText = value is LineState.Running or LineState.Starting ? "暂停线路" : "启动线路";
 
         // 颜色与状态语义一致：绿=正常，蓝=运行，橙=等待，红=故障，灰=停止
         LineStateBrush = value switch

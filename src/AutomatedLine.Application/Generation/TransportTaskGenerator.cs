@@ -158,10 +158,12 @@ public sealed class TransportTaskGenerator : IHostedService
         var tasks = _taskManager.Snapshot();
         var candidates = new List<CandidateTask>();
 
-        // 队列队头：第一个"状态 Waiting 且在队列"的工件（只有它可上料）。
-        var queueHead = tasks.FirstOrDefault(t =>
-            t.Runtime.TaskState == WorkpieceState.Waiting
-            && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue);
+        // 队列队头：状态 Waiting、在队列、且入线顺序号最小（序号在"启动"时分配，暂停清零、再启动重新入队尾）。
+        var queueHead = tasks
+            .Where(t => t.Runtime.TaskState == WorkpieceState.Waiting
+                        && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
+            .OrderBy(t => t.Runtime.QueueOrder)
+            .FirstOrDefault();
 
         foreach (var task in tasks)
         {

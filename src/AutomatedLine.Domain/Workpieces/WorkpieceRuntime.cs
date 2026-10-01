@@ -20,6 +20,12 @@ public sealed class WorkpieceRuntime
     /// </summary>
     public WorkpieceState TaskState { get; set; } = WorkpieceState.Created;
 
+    /// <summary>
+    /// 入线顺序号（上料架取板顺序）。0 表示未入队（未启动/已暂停）；
+    /// 点"启动"时分配递增序号入队尾，点"暂停"时清零，再次启动重新入队尾。
+    /// </summary>
+    public int QueueOrder { get; set; }
+
     /// <summary>创建时间。用于排序与时长统计。</summary>
     public DateTime CreatedAt { get; init; } = DateTime.Now;
 }
