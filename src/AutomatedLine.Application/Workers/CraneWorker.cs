@@ -92,6 +92,7 @@ public sealed class CraneWorker : IHostedService
         var interval = Math.Max(50, _configService.GetAppOptions().StateMachine.ExecuteIntervalMs);
         while (!cancellationToken.IsCancellationRequested)
         {
+            //有进行判断线路是否启动
             if (_lineControl.IsRunning)
             {
                 foreach (var crane in _craneRegistry.Snapshot())

@@ -181,6 +181,7 @@ public sealed class TransportTaskGenerator : IHostedService
         {
             var runtime = task.Runtime;
 
+            //解析工件的源设备并校验源就绪
             var source = ResolveSource(task, queueHead, devices);
             if (source is null)
             {
@@ -190,6 +191,7 @@ public sealed class TransportTaskGenerator : IHostedService
             // 下一道实际可执行工序（跳过没有启用设备的节点）。
             // 队列中的新工件 CurrentProcess 还是 Unknown，等价于"处于上料工序"，从它往后找第一道可执行工序。
             var currentProcess = runtime.CurrentProcess == ProcessType.Unknown ? ProcessType.Loading : runtime.CurrentProcess;
+            //GetNextAvailable 会跳过没有启用设备的工艺节点
             var next = _route.GetNextAvailable(currentProcess, type => HasUsableDevice(devices, type));
             if (next is null)
             {
