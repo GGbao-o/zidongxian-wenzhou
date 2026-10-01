@@ -165,9 +165,6 @@ public sealed class CraneScheduler : IHostedService
             .ThenBy(c => NearestCraneDistance(c, cranes, statuses))
             .ToList();
 
-        // 本轮已派出的天车：一车一任务（硬约束）
-        var usedCranes = new HashSet<int>();
-
         foreach (var candidate in candidates)
         {
             var task = candidate.Workpiece;
@@ -178,11 +175,12 @@ public sealed class CraneScheduler : IHostedService
                 continue;
             }
 
-            // 本候选的**可执行天车**：启用、空闲、本轮未用、范围覆盖源与目标、状态可读且无报警
+            // 本候选的**可执行天车**：启用、空闲、范围覆盖源与目标、状态可读且无报警。
+            // "一车一任务"由 IsIdle 保证：派发时立即置 State=Reserved，该车 IsIdle 当场变 false，
+            // 后续候选自然排除它（Snapshot 是同一批 Crane 引用）。
             var eligible = cranes
                 .Where(c => c.IsEnabled
                             && c.IsIdle
-                            && !usedCranes.Contains(c.Id)
                             && c.Covers(candidate.Source.PositionX)
                             && c.Covers(candidate.Target.PositionX)
                             && statuses.TryGetValue(c.Id, out var s) && s is not null && !s.HasAlarm)
@@ -225,7 +223,6 @@ public sealed class CraneScheduler : IHostedService
                 crane.Runtime.State = CraneState.Reserved;
                 crane.Runtime.Step = TransportStep.AcquireResources;   // 第一步：状态机执行时获取路权+预约
                 task.Runtime.TaskState = WorkpieceState.Assigned;
-                usedCranes.Add(crane.Id);
 
                 _logger.Info(LogCategory.Scheduling,
                     $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，待状态机执行时取路权/预约）");
