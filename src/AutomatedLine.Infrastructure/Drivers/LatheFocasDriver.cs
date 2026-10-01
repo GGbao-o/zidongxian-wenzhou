@@ -17,23 +17,22 @@ public sealed class LatheFocasDriver : IDeviceDriver
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
-    /// <summary>读取快照时批量读的宏变量（顺序与 <see cref="ReadAllSignalsAsync"/> 一一对应）。</summary>
+    /// <summary>
+    /// 后台采集的宏变量（顺序与 <see cref="ReadAllSignalsAsync"/> 一一对应）：
+    /// 机床状态 #1001~#1005 + 天车握手 #1101~#1105，均为 1/0 信号；参数宏只写不读。
+    /// </summary>
     private static readonly int[] SnapshotMacros =
     {
-        LatheMacroAddress.MachineReady,
         LatheMacroAddress.RequestData,
         LatheMacroAddress.RequestLoad,
         LatheMacroAddress.TailstockClamped,
         LatheMacroAddress.RequestUnload,
         LatheMacroAddress.TailstockOpened,
-        LatheMacroAddress.AutoDoorOpen,
-        LatheMacroAddress.YAxisSafePos,
-        LatheMacroAddress.ZAxisSafePos,
-        LatheMacroAddress.TurretSafePos,
-        LatheMacroAddress.XAxisSafePos,
-        LatheMacroAddress.OperationMode,
-        LatheMacroAddress.Tool1LifeEnd,
-        LatheMacroAddress.Tool2LifeEnd
+        LatheMacroAddress.DataSentDone,
+        LatheMacroAddress.CraneLoadInPlace,
+        LatheMacroAddress.CraneLoadDone,
+        LatheMacroAddress.CraneUnloadInPlace,
+        LatheMacroAddress.CraneUnloadDone
     };
 
     /// <summary>
@@ -70,20 +69,16 @@ public sealed class LatheFocasDriver : IDeviceDriver
 
         return new Dictionary<string, object?>
         {
-            ["MachineReady"] = ToBool(values[0]),
-            ["RequestData"] = ToBool(values[1]),
-            ["RequestLoad"] = ToBool(values[2]),
-            ["TailstockClamped"] = ToBool(values[3]),
-            ["RequestUnload"] = ToBool(values[4]),
-            ["TailstockOpened"] = ToBool(values[5]),
-            ["AutoDoorOpen"] = ToBool(values[6]),
-            ["YAxisSafe"] = ToBool(values[7]),
-            ["ZAxisSafe"] = ToBool(values[8]),
-            ["TurretSafe"] = ToBool(values[9]),
-            ["XAxisSafe"] = ToBool(values[10]),
-            ["OperationMode"] = (int)Math.Round(values[11]),
-            ["Tool1LifeEnd"] = ToBool(values[12]),
-            ["Tool2LifeEnd"] = ToBool(values[13])
+            ["RequestData"] = ToBool(values[0]),
+            ["RequestLoad"] = ToBool(values[1]),
+            ["TailstockClamped"] = ToBool(values[2]),
+            ["RequestUnload"] = ToBool(values[3]),
+            ["TailstockOpened"] = ToBool(values[4]),
+            ["DataSentDone"] = ToBool(values[5]),
+            ["CraneLoadInPlace"] = ToBool(values[6]),
+            ["CraneLoadDone"] = ToBool(values[7]),
+            ["CraneUnloadInPlace"] = ToBool(values[8]),
+            ["CraneUnloadDone"] = ToBool(values[9])
         };
     }
 
