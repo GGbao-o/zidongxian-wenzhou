@@ -5,7 +5,8 @@
 
 ## 1. 职责
 
-全系统**唯一**的集中调度器：决定"**哪个候选任务 → 哪台天车**"，并**原子**占用路权与设备预约。
+全系统**唯一**的集中调度器：决定"**哪个候选任务 → 哪台天车**"。
+**只做判断（是否可执行），不真正加锁**——路权/预约的**真正获取**在**天车状态机开始执行任务时**完成（见 §9）。
 天车自己不抢任务，避免两台车抢同一任务。
 
 ## 2. 输入
@@ -51,12 +52,11 @@ DispatchOnceAsync:
      foreach crane in eligible:                              // 换车
          interval = cand.GetRightOfWayInterval(crane.Width)  // 每车宽度不同 → 区间不同
 
-         if !RightOfWay.TryAcquire(task.Id, interval):
-             continue                                        // 路权拿不到 → 试下一台车，不死等
-         if !Reservation.TryReserve(task.Id, cand.Source.Id, cand.Target.Id):
-             RightOfWay.Release(task.Id)                     // 预约失败 → 回滚路权
-             continue
-         // 路权 + 预约都成功 → 占用
+         if !RightOfWay.CanAcquire(interval):                // 【判断】区间是否空闲，不加锁
+             continue                                        // 拿不到 → 试下一台车，不死等
+         if Reservation.IsReserved(cand.Source.Id) || Reservation.IsReserved(cand.Target.Id):
+             continue                                        // 【判断】源/目标是否已被别的任务预约
+         // 判断通过 → 派发（不改任何锁）
 
 ## 6. 选车规则
 
@@ -70,9 +70,11 @@ DispatchOnceAsync:
 
 ## 7. 竞态与原子性
 
-- **调度器单线程**：一轮内"判断 + 占用"串行，无 check-then-act 空档。
-- `TryAcquire`（路权）、`TryReserve`（预约）内部加锁、原子；顺序 **先路权、后预约**，预约失败**回滚路权**。
+- **调度器只判断、不加锁**：`CanAcquire` / `IsReserved` 都是**只读查询**。
+- 判断通过后**派发**，但**真正加锁在状态机执行时**（见 §9）。因此存在"判断通过 → 执行前被别的车抢先"的窗口；
+  这个窗口由**状态机执行时的原子 `TryAcquire`** 兜底（谁先原子拿到谁执行，后到者失败并回滚）。
 - 天车"锁" = `crane.Runtime.CurrentTask`；本轮 `used` 集合保证一车一任务。
+- 调度器**单线程**，判断过程无不一致空档。
 
 ## 8. 换目标 / 换车 / 不死等
 
@@ -80,16 +82,32 @@ DispatchOnceAsync:
 - **换目标**：生成器已为同一工件的**每个目标各生成一个候选**；某目标失败时，其它目标候选仍在列表中会被继续尝试。某候选一旦成功，工件 `TaskState=Assigned`，其剩余目标候选下轮自动跳过。
 - **不死等**：拿不到只是**本周期不派发**，候选保留在池中，下一轮用最新状态重算再试。
 
-## 9. 派发成功后
+## 9. 派发成功后 / 路权获取时机
+
+派发只置任务归属，**不加锁、不算持路权**：
 
 ```
-crane.Runtime.CurrentTask    = TransportTask{...}
-crane.Runtime.State          = Reserved
-crane.Runtime.Step           = PreCheck
-crane.Runtime.LockedInterval = interval
-task.TaskState               = Assigned
+crane.Runtime.CurrentTask = TransportTask{...}
+crane.Runtime.State       = Reserved
+crane.Runtime.Step        = PreCheck
+task.TaskState            = Assigned
 ```
-随后 `CraneWorker` 的状态机接手推进（路权已在派发时取得，状态机内不再获取）。
+
+**真正获取路权/设备预约在状态机开始执行时**（`CraneWorker` / `CraneStateMachine`）：
+
+```
+状态机开始执行：
+    1) if !RightOfWay.TryAcquire(task.Id, 任务区间):     // 原子加锁，谁先拿谁执行
+           → 回滚：释放天车锁、TaskState = Waiting，return（下一轮重新派发）
+    2) if !Reservation.TryReserve(task.Id, source, target):
+           RightOfWay.Release(task.Id)                    // 回滚已取得的路权
+           → 回滚：释放天车锁、TaskState = Waiting，return
+    → 持有【路权 + 设备预约】后推进各步骤；任务结束（回安全位后）释放路权与预约
+```
+
+- 调度器**只判断**（`CanAcquire` / `IsReserved`），不 `TryAcquire`、不 `TryReserve`、不设置 `LockedInterval`。
+- 路权/预约由**状态机持有并在其结束时释放**（与"异常时释放路权/预约"的既有约定一致）。
+- **拿不到就回滚**：释放天车锁（`CurrentTask=null`、`State=Idle`）、任务 `TaskState=Waiting`，下一轮由调度器重新派发。
 
 ## 10. 边界（不做的事）
 
