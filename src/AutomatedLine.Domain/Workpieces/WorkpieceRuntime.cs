@@ -14,8 +14,11 @@ public sealed class WorkpieceRuntime
     /// <summary>位置唯一事实来源。只允许天车状态机在取放料确认成功时单点写入。</summary>
     public WorkpieceLocation CurrentLocation { get; set; } = WorkpieceLocation.Queue;
 
-    /// <summary>任务状态。描述是否已派发/执行中/完成/丢弃（架构文档 §11 WorkpieceState）。</summary>
-    public WorkpieceState TaskState { get; set; } = WorkpieceState.Waiting;
+    /// <summary>
+    /// 任务状态。描述是否已启动/暂停/派发/执行中/完成/丢弃（架构文档 §11 WorkpieceState）。
+    /// 初始为 <see cref="WorkpieceState.Created"/>（未启动，不生成候选）；人工点"启动"后才进入 <see cref="WorkpieceState.Waiting"/>。
+    /// </summary>
+    public WorkpieceState TaskState { get; set; } = WorkpieceState.Created;
 
     /// <summary>创建时间。用于排序与时长统计。</summary>
     public DateTime CreatedAt { get; init; } = DateTime.Now;

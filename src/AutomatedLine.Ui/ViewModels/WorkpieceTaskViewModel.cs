@@ -42,9 +42,17 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private string _stateText = string.Empty;
 
-    /// <summary>是否允许"清除"（仅尚未派发的等待任务可清除，架构文档 §13.1）。</summary>
+    /// <summary>是否允许"清除/删除"（未派发的 Created/Waiting/Paused 可删，架构文档 §13.1）。</summary>
     [ObservableProperty]
     private bool _canClear;
+
+    /// <summary>是否允许"启动"（未启动/已暂停 可启动入队）。</summary>
+    [ObservableProperty]
+    private bool _canStart;
+
+    /// <summary>是否允许"暂停"（仅排队中可暂停）。</summary>
+    [ObservableProperty]
+    private bool _canPause;
 
     /// <summary>
     /// 构造函数。
@@ -75,8 +83,10 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         LocationText = runtime.CurrentLocation.ToString();
         StateText = StateToText(runtime.TaskState);
 
-        // 只有"等待中"的任务允许被人工清除；已派发/执行中的由调度与状态机负责
-        CanClear = runtime.TaskState == WorkpieceState.Waiting;
+        // 行内操作可用性：未派发前（未启动/排队/暂停）才可由人工启动/暂停/删除
+        CanStart = runtime.TaskState is WorkpieceState.Created or WorkpieceState.Paused;
+        CanPause = runtime.TaskState == WorkpieceState.Waiting;
+        CanClear = runtime.TaskState is WorkpieceState.Created or WorkpieceState.Waiting or WorkpieceState.Paused;
     }
 
     /// <summary>
@@ -105,7 +115,9 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     /// <returns>中文文本</returns>
     private static string StateToText(WorkpieceState state) => state switch
     {
-        WorkpieceState.Waiting => "等待中",
+        WorkpieceState.Created => "未启动",
+        WorkpieceState.Waiting => "排队中",
+        WorkpieceState.Paused => "已暂停",
         WorkpieceState.Assigned => "已派发",
         WorkpieceState.Running => "执行中",
         WorkpieceState.Completed => "已完成",

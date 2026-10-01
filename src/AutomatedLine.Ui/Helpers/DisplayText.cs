@@ -80,7 +80,9 @@ public static class DisplayText
     /// <returns>中文文本</returns>
     public static string WorkpieceStateText(WorkpieceState state) => state switch
     {
-        WorkpieceState.Waiting => "等待中",
+        WorkpieceState.Created => "未启动",
+        WorkpieceState.Waiting => "排队中",
+        WorkpieceState.Paused => "已暂停",
         WorkpieceState.Assigned => "已派发",
         WorkpieceState.Running => "执行中",
         WorkpieceState.Completed => "已完成",

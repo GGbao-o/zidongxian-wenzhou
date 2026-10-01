@@ -127,11 +127,28 @@
                         <DataGridTemplateColumn Header="操作">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
-                                    <ui:Button
-                                        Padding="8,2"
-                                        Command="{Binding DataContext.ClearTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                        CommandParameter="{Binding}"
-                                        Content="清除" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:Button
+                                            Margin="0,0,6,0"
+                                            Padding="8,2"
+                                            Command="{Binding DataContext.StartTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"
+                                            Content="启动"
+                                            IsEnabled="{Binding CanStart}" />
+                                        <ui:Button
+                                            Margin="0,0,6,0"
+                                            Padding="8,2"
+                                            Command="{Binding DataContext.PauseTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"
+                                            Content="暂停"
+                                            IsEnabled="{Binding CanPause}" />
+                                        <ui:Button
+                                            Padding="8,2"
+                                            Command="{Binding DataContext.ClearTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"
+                                            Content="删除"
+                                            IsEnabled="{Binding CanClear}" />
+                                    </StackPanel>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>

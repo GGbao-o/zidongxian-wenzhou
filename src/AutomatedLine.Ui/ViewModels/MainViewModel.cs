@@ -4,6 +4,7 @@ using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Line;
+using AutomatedLine.Domain.Workpieces;
 using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -130,7 +131,53 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 清除任务命令：仅允许清除尚未派发的等待任务（架构文档 §13.1）。
+    /// 启动任务命令：把未启动/已暂停的任务置为排队中（入队，参与候选生成）。
+    /// </summary>
+    /// <param name="row">任务行</param>
+    [RelayCommand]
+    private void StartTask(WorkpieceTaskViewModel? row)
+    {
+        if (row is null || !row.CanStart)
+        {
+            return;
+        }
+
+        var task = _taskManager.Get(row.TaskId);
+        if (task is null)
+        {
+            return;
+        }
+
+        task.Runtime.TaskState = WorkpieceState.Waiting;
+        Console.WriteLine($"[MainViewModel] 已启动任务 {row.PlateNo}/{row.SerialNo}");
+        RefreshTasks();
+    }
+
+    /// <summary>
+    /// 暂停任务命令：把排队中的任务置为已暂停（该任务不再生成候选；线路级暂停是另一回事）。
+    /// </summary>
+    /// <param name="row">任务行</param>
+    [RelayCommand]
+    private void PauseTask(WorkpieceTaskViewModel? row)
+    {
+        if (row is null || !row.CanPause)
+        {
+            return;
+        }
+
+        var task = _taskManager.Get(row.TaskId);
+        if (task is null)
+        {
+            return;
+        }
+
+        task.Runtime.TaskState = WorkpieceState.Paused;
+        Console.WriteLine($"[MainViewModel] 已暂停任务 {row.PlateNo}/{row.SerialNo}");
+        RefreshTasks();
+    }
+
+    /// <summary>
+    /// 清除任务命令：仅允许清除尚未派发的任务（未启动/排队/已暂停，架构文档 §13.1）。
     /// </summary>
     /// <param name="row">待清除的任务行</param>
     [RelayCommand]

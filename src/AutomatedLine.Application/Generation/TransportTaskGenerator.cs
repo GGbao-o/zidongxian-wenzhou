@@ -1,4 +1,5 @@
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Devices;
@@ -12,14 +13,19 @@ namespace AutomatedLine.Application.Generation;
 
 /// <summary>
 /// 候选任务生成器（架构文档 §8.3）。
-/// 每周期根据当前内存状态**整体重建**候选任务池（Snapshot / Rebuild），不维护传统任务队列。
-/// 生成规则（P3 初版，现场可细化）：
+/// <para>
+/// 每周期按当前内存状态与设备 PLC 信号**整体重建**候选任务池（Snapshot / Rebuild）。
+/// 只在**线路运行中**（<see cref="LineControlService.IsRunning"/>）生成；线路未启动/暂停时清空候选池。
+/// </para>
+/// <para>
+/// 生成规则：
 /// <list type="number">
-/// <item>只处理未派发/未执行的工件任务；</item>
-/// <item>源 = 工件当前所在设备；若在队列（尚未上线）则以启用的上料架为源；</item>
-/// <item>下一工序由 <see cref="ProcessRoute.GetNext"/> 现算；走完最后一道则标记完成；</item>
-/// <item>目标 = 同类设备中"启用、未被预约、加工范围匹配"里，优先空闲、再取离源最近的；</item>
+/// <item>只处理状态为 <see cref="WorkpieceState.Waiting"/> 的工件（未启动/暂停/已派发等一律跳过）；</item>
+/// <item>源 = 工件当前所在设备（队列中的工件**只取队头**，源为唯一上料架）；</item>
+/// <item>下一工序由 <see cref="ProcessRoute.GetNextAvailable"/> 现算（**跳过没有启用设备的节点**）；</item>
+/// <item>目标 = 同类型设备中**全部**满足<连接/未预约/未报警/加工范围/放料就绪>者（全枚举，不预先选最优）。</item>
 /// </list>
+/// </para>
 /// </summary>
 public sealed class TransportTaskGenerator : IHostedService
 {
@@ -32,8 +38,11 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <summary>候选任务池。</summary>
     private readonly CandidateTaskPool _candidatePool;
 
-    /// <summary>设备预约管理器（用于排除已被预约的目标）。</summary>
+    /// <summary>设备预约管理器（排除已被其他任务预约的源/目标）。</summary>
     private readonly ResourceReservationManager _reservationManager;
+
+    /// <summary>线路控制（只有运行中才生成）。</summary>
+    private readonly LineControlService _lineControl;
 
     /// <summary>配置服务。</summary>
     private readonly IConfigService _configService;
@@ -57,6 +66,7 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="candidatePool">候选任务池</param>
     /// <param name="reservationManager">预约管理器</param>
+    /// <param name="lineControl">线路控制</param>
     /// <param name="configService">配置服务</param>
     /// <param name="logger">日志</param>
     public TransportTaskGenerator(
@@ -64,6 +74,7 @@ public sealed class TransportTaskGenerator : IHostedService
         DeviceRegistry deviceRegistry,
         CandidateTaskPool candidatePool,
         ResourceReservationManager reservationManager,
+        LineControlService lineControl,
         IConfigService configService,
         IAppLogger logger)
     {
@@ -71,6 +82,7 @@ public sealed class TransportTaskGenerator : IHostedService
         _deviceRegistry = deviceRegistry;
         _candidatePool = candidatePool;
         _reservationManager = reservationManager;
+        _lineControl = lineControl;
         _configService = configService;
         _logger = logger;
     }
@@ -104,7 +116,7 @@ public sealed class TransportTaskGenerator : IHostedService
         _cts = null;
     }
 
-    /// <summary>生成主循环。</summary>
+    /// <summary>生成主循环：线路运行中才重建候选池，否则清空。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -113,7 +125,15 @@ public sealed class TransportTaskGenerator : IHostedService
         {
             try
             {
-                GenerateOnce();
+                if (_lineControl.IsRunning)
+                {
+                    GenerateOnce();
+                }
+                else
+                {
+                    // 线路未启动/暂停：不生成，清空候选池（采集仍在后台进行）
+                    _candidatePool.Clear();
+                }
             }
             catch (Exception ex)
             {
@@ -135,47 +155,59 @@ public sealed class TransportTaskGenerator : IHostedService
     private void GenerateOnce()
     {
         var devices = _deviceRegistry.Snapshot();
+        var tasks = _taskManager.Snapshot();
         var candidates = new List<CandidateTask>();
 
-        foreach (var task in _taskManager.Snapshot())
+        // 队列队头：第一个"状态 Waiting 且在队列"的工件（只有它可上料）。
+        var queueHead = tasks.FirstOrDefault(t =>
+            t.Runtime.TaskState == WorkpieceState.Waiting
+            && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue);
+
+        foreach (var task in tasks)
         {
             var runtime = task.Runtime;
 
-            // 已派发/执行中/已完成/已丢弃的不再生成
-            if (runtime.TaskState is WorkpieceState.Assigned or WorkpieceState.Running
-                or WorkpieceState.Completed or WorkpieceState.Discarded)
+            // 只处理"排队中"的工件；未启动/暂停/已派发/执行中/完成/丢弃 全部跳过
+            if (runtime.TaskState != WorkpieceState.Waiting)
             {
                 continue;
             }
 
-            var source = ResolveSource(runtime, devices);
+            var source = ResolveSource(task, queueHead, devices);
             if (source is null)
             {
                 continue;
             }
 
-            // 源设备正被别的工件占用则跳过
-            if (source.CurrentWorkpiece is not null && source.CurrentWorkpiece != task)
-            {
-                continue;
-            }
-
-            // 计算下一道可执行工序：可选工序缺设备时自动跳过（§3.1 设备允许缺失）
-            var next = _route.GetNextAvailable(runtime.CurrentProcess, type => HasUsableDevice(devices, type));
+            // 下一道实际可执行工序（跳过没有启用设备的节点）。
+            // 队列中的新工件 CurrentProcess 还是 Unknown，等价于"处于上料工序"，从它往后找第一道可执行工序。
+            var currentProcess = runtime.CurrentProcess == ProcessType.Unknown ? ProcessType.Loading : runtime.CurrentProcess;
+            var next = _route.GetNextAvailable(currentProcess, type => HasUsableDevice(devices, type));
             if (next is null)
             {
-                // 已是最后一道工序：视为完成，退出候选
+                // 后面已无可执行工序：视为走完
                 runtime.TaskState = WorkpieceState.Completed;
                 continue;
             }
 
-            var target = SelectTarget(next, task, source, devices);
-            if (target is null)
+            // 目标全枚举：所有满足条件的同类设备各生成一个候选
+            var info = task.Info;
+            foreach (var target in devices)
             {
-                continue;
-            }
+                if (target.Type != next.DeviceType
+                    || !target.IsEnabled
+                    || target.Id == source.Id
+                    || !target.IsConnected
+                    || _reservationManager.IsReserved(target.Id)
+                    || DeviceHandshakeRules.IsAlarm(target)
+                    || !target.CanProcess(info.Diameter, info.Length)
+                    || !DeviceHandshakeRules.CanReceive(target))
+                {
+                    continue;
+                }
 
-            candidates.Add(new CandidateTask(task, source, target, priority: 100, targetProcess: next.Process));
+                candidates.Add(new CandidateTask(task, source, target, priority: 100, targetProcess: next.Process));
+            }
         }
 
         _candidatePool.Replace(candidates);
@@ -185,55 +217,66 @@ public sealed class TransportTaskGenerator : IHostedService
     }
 
     /// <summary>
-    /// 解析工件当前的源设备：在设备上则取该设备；在队列（未上线）则取启用的上料架。
+    /// 解析工件的源设备并校验源就绪。
+    /// <list type="bullet">
+    /// <item>在设备上：源=该设备；要求内存一致（设备当前工件就是本任务）、已连接、未预约、未报警、可取料；</item>
+    /// <item>在队列：仅队头；源=唯一上料架；要求已连接、未预约、未报警、有板。</item>
+    /// </list>
     /// </summary>
-    /// <param name="runtime">工件运行态</param>
+    /// <param name="task">工件任务</param>
+    /// <param name="queueHead">当前队列队头（仅队头可上料）</param>
     /// <param name="devices">设备快照</param>
-    /// <returns>源设备；无法确定返回 null</returns>
-    private static DeviceBase? ResolveSource(WorkpieceRuntime runtime, IReadOnlyList<DeviceBase> devices)
+    /// <returns>源设备；不满足返回 null</returns>
+    private DeviceBase? ResolveSource(WorkpieceTask task, WorkpieceTask? queueHead, IReadOnlyList<DeviceBase> devices)
     {
-        if (runtime.CurrentLocation.IsOnDevice && runtime.CurrentLocation.ResourceId is int deviceId)
+        var location = task.Runtime.CurrentLocation;
+
+        if (location.IsOnDevice && location.ResourceId is int deviceId)
         {
-            return devices.FirstOrDefault(d => d.Id == deviceId);
+            var device = devices.FirstOrDefault(d => d.Id == deviceId && d.IsEnabled);
+            if (device is null
+                || device.CurrentWorkpiece != task      // 内存一致：源设备上就是该工件
+                || !device.IsConnected
+                || _reservationManager.IsReserved(device.Id)
+                || DeviceHandshakeRules.IsAlarm(device)
+                || !DeviceHandshakeRules.CanProvide(device))
+            {
+                return null;
+            }
+
+            return device;
         }
 
-        if (runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
+        if (location.Kind == WorkpieceLocationKind.Queue)
         {
-            return devices.FirstOrDefault(d => d.Type == DeviceType.LoadRack && d.IsEnabled);
+            // 只有队头才生成上料候选；上料架唯一
+            if (!ReferenceEquals(task, queueHead))
+            {
+                return null;
+            }
+
+            var rack = devices.FirstOrDefault(d => d.Type == DeviceType.LoadRack && d.IsEnabled);
+            if (rack is null
+                || !rack.IsConnected
+                || _reservationManager.IsReserved(rack.Id)
+                || DeviceHandshakeRules.IsAlarm(rack)
+                || !DeviceHandshakeRules.CanProvide(rack))   // 有板
+            {
+                return null;
+            }
+
+            return rack;
         }
 
         return null;
     }
 
     /// <summary>
-    /// 判断某设备类型当前是否存在可用（启用）设备，用于决定可选工序是否跳过。
+    /// 判断某设备类型当前是否存在启用设备，用于决定工序节点是否跳过。
     /// </summary>
     /// <param name="devices">设备快照</param>
     /// <param name="type">设备类型</param>
     /// <returns>存在启用设备返回 true</returns>
     private static bool HasUsableDevice(IReadOnlyList<DeviceBase> devices, DeviceType type)
         => devices.Any(d => d.Type == type && d.IsEnabled);
-
-    /// <summary>
-    /// 选择目标设备：同类型、启用、未被预约、加工范围匹配；优先空闲，再取离源最近。
-    /// </summary>
-    /// <param name="node">目标工序节点</param>
-    /// <param name="task">工件任务</param>
-    /// <param name="source">源设备</param>
-    /// <param name="devices">设备快照</param>
-    /// <returns>目标设备；无可用返回 null</returns>
-    private DeviceBase? SelectTarget(ProcessNode node, WorkpieceTask task, DeviceBase source, IReadOnlyList<DeviceBase> devices)
-    {
-        var info = task.Info;
-
-        return devices
-            .Where(d => d.Type == node.DeviceType
-                        && d.IsEnabled
-                        && d.Id != source.Id
-                        && !_reservationManager.IsReserved(d.Id)
-                        && d.CanProcess(info.Diameter, info.Length))
-            .OrderBy(d => d.ResourceState == ResourceState.Available ? 0 : 1)
-            .ThenBy(d => Math.Abs(d.PositionX - source.PositionX))
-            .FirstOrDefault();
-    }
 }
