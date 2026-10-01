@@ -18,6 +18,9 @@ public sealed class ColdStartChecker : IColdStartChecker
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
 
+    /// <summary>驱动注册表（天车按需读状态）。</summary>
+    private readonly DriverRegistry _driverRegistry;
+
     /// <summary>报警管理器。</summary>
     private readonly AlarmManager _alarmManager;
 
@@ -26,16 +29,18 @@ public sealed class ColdStartChecker : IColdStartChecker
     /// </summary>
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
+    /// <param name="driverRegistry">驱动注册表</param>
     /// <param name="alarmManager">报警管理器</param>
-    public ColdStartChecker(DeviceRegistry deviceRegistry, CraneRegistry craneRegistry, AlarmManager alarmManager)
+    public ColdStartChecker(DeviceRegistry deviceRegistry, CraneRegistry craneRegistry, DriverRegistry driverRegistry, AlarmManager alarmManager)
     {
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
+        _driverRegistry = driverRegistry;
         _alarmManager = alarmManager;
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<string> Check()
+    public async Task<IReadOnlyList<string>> CheckAsync(CancellationToken cancellationToken = default)
     {
         var found = new List<string>();
 
@@ -57,12 +62,10 @@ public sealed class ColdStartChecker : IColdStartChecker
 
         foreach (var crane in _craneRegistry.Snapshot())
         {
-            if (crane.Signals is null)
-            {
-                continue;
-            }
-
-            if (crane.Signals.GetBool("HasMaterial") && crane.CurrentWorkpiece is null)
+            // 天车不再后台采集：按需读一次状态，有板信号看 X11
+            var driver = _driverRegistry.GetCrane(crane.Id);
+            var status = driver is null ? null : await driver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+            if (status?.HasPlate == true && crane.CurrentWorkpiece is null)
             {
                 var message = $"天车[{crane.Name}] 现场有料但内存无数据，将不参与调度";
                 found.Add(message);

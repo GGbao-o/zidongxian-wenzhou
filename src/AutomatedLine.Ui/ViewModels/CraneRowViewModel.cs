@@ -1,7 +1,7 @@
 using System.Text;
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Devices;
-using AutomatedLine.Domain.Signals;
 using AutomatedLine.Ui.Helpers;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -76,80 +76,68 @@ public partial class CraneRowViewModel : ObservableObject
     /// </summary>
     /// <param name="crane">天车对象</param>
     /// <param name="deviceLookup">设备查询委托，可为空（列表页可不需要解析设备名）</param>
-    public CraneRowViewModel(Crane crane, Func<int, DeviceBase?>? deviceLookup = null)
+    /// <param name="status">按需读到的天车状态（null=未读到/未连接）</param>
+    public CraneRowViewModel(Crane crane, Func<int, DeviceBase?>? deviceLookup = null, CraneStatusDto? status = null)
     {
         Id = crane.Id;
         _deviceLookup = deviceLookup;
-        Refresh(crane);
+        Refresh(crane, status);
     }
 
     /// <summary>
-    /// 依据天车最新状态刷新展示字段。
+    /// 依据天车最新状态（按需读取的结果）刷新展示字段。
     /// </summary>
     /// <param name="crane">天车对象</param>
-    public void Refresh(Crane crane)
+    /// <param name="status">按需读到的天车状态（null=未读到/未连接）</param>
+    public void Refresh(Crane crane, CraneStatusDto? status)
     {
         No = crane.No;
         Name = crane.Name;
         StateText = DisplayText.CraneStateText(crane.Runtime.State);
 
-        var signals = crane.Signals;
-        ConnectionText = crane.IsConnected ? "已连接" : "未连接";
-        X = signals?.GetDouble("X") ?? 0;
-        Y = signals?.GetDouble("Y") ?? 0;
-        Z = signals?.GetDouble("Z") ?? 0;
-        HasAlarm = signals?.GetBool("Alarm") == true;
+        ConnectionText = status is not null ? "已连接" : "未连接";
+        X = status?.XDisplay ?? 0;
+        Y = status?.YDisplay ?? 0;
+        Z = status?.ZDisplay ?? 0;
+        HasAlarm = status?.HasAlarm == true;
         AlarmText = HasAlarm ? "报警" : "正常";
 
-        SignalSummary = signals is null
+        SignalSummary = status is null
             ? "无数据"
-            : $"到位={Bool(signals.GetBool("InPosition"))} 有料={Bool(signals.GetBool("HasMaterial"))} 伴信号={signals.GetInt("CompanionSignal")}";
+            : $"有板={Lvl(status.HasPlate)} 充磁={Lvl(status.MagnetizeFeedback)} 退磁={Lvl(status.DemagnetizeFeedback)} 下压={Lvl(status.PressureLimit)}";
 
-        SignalText = BuildSignalText(signals);
+        SignalText = BuildSignalText(status);
 
         TaskText = BuildTaskShort(crane);
         TooltipText = BuildTooltip(crane);
     }
 
     /// <summary>
-    /// 组装多行信号明细：按天车信号点位目录逐点点名，取快照值（布尔显示 1/0）。
+    /// 组装多行信号明细（来自按需读到的状态）。
     /// </summary>
-    /// <param name="signals">信号快照</param>
+    /// <param name="status">天车状态</param>
     /// <returns>多行文本</returns>
-    private static string BuildSignalText(SignalSnapshot? signals)
+    private static string BuildSignalText(CraneStatusDto? status)
     {
-        if (signals is null)
+        if (status is null)
         {
             return "无数据";
         }
 
-        var builder = new StringBuilder();
-        foreach (var point in CraneSignalCatalog.Points)
+        var lines = new List<string>
         {
-            if (!signals.Values.TryGetValue(point.Name, out var value))
-            {
-                continue;
-            }
-
-            if (builder.Length > 0)
-            {
-                builder.AppendLine();
-            }
-
-            builder.Append(point.Name).Append('=').Append(FormatValue(value));
-        }
-
-        return builder.Length == 0 ? "无数据" : builder.ToString();
+            $"X显示={status.XDisplay}  Y显示={status.YDisplay}  Z显示={status.ZDisplay}",
+            $"X编码={status.XEncoder}  Y编码={status.YEncoder}  Z编码={status.ZEncoder}",
+            $"回原点 X={Bool(status.XHomeCompleted)} Y={Bool(status.YHomeCompleted)} Z={Bool(status.ZHomeCompleted)}",
+            $"伺服报警={status.ServoAlarm}  PLC伺服={status.PlcServoAlarm}  PLC报警={status.PlcAlarm}",
+            $"有板={Lvl(status.HasPlate)} 充磁={Lvl(status.MagnetizeFeedback)} 退磁={Lvl(status.DemagnetizeFeedback)} 下压={Lvl(status.PressureLimit)}",
+            $"接液盘 开={Lvl(status.DrainOpen)} 关={Lvl(status.DrainClose)}  物理原点 X={Lvl(status.PhysicalHomeX)} Y={Lvl(status.PhysicalHomeY)} Z={Lvl(status.PhysicalHomeZ)}"
+        };
+        return string.Join(Environment.NewLine, lines);
     }
 
-    /// <summary>信号值格式化。</summary>
-    private static string FormatValue(object? value) => value switch
-    {
-        null => "-",
-        bool b => b ? "1" : "0",
-        double d => d.ToString("0.###"),
-        _ => value.ToString() ?? "-"
-    };
+    /// <summary>可空布尔格式化为 PLC 风格 1/0/—（未知）。</summary>
+    private static string Lvl(bool? value) => value is null ? "—" : value.Value ? "1" : "0";
 
     /// <summary>
     /// 列表用任务简述：无任务显示"无"，有任务显示"源→目标设备名"。

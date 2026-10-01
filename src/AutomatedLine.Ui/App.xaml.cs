@@ -79,7 +79,7 @@ public partial class App : System.Windows.Application
         // 冷启动核对：等采集器跑一轮拿到信号后，检查现场是否有无法关联的内存在制品
         var coldStartChecker = _host.Services.GetRequiredService<IColdStartChecker>();
         await Task.Delay(700);
-        var blocks = coldStartChecker.Check();
+        var blocks = await coldStartChecker.CheckAsync();
         if (blocks.Count > 0)
         {
             Console.WriteLine($"[App] 冷启动核对发现 {blocks.Count} 个物理阻塞资源");

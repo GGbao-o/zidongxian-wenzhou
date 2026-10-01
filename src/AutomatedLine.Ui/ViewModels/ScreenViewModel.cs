@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Ui.Helpers;
 using AutomatedLine.Ui.Services;
@@ -18,6 +19,9 @@ public partial class ScreenViewModel : ObservableObject
 
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
+
+    /// <summary>驱动注册表（天车状态按需读取）。</summary>
+    private readonly DriverRegistry _driverRegistry;
 
     /// <summary>候选任务池（TransportTaskGenerator 产物）。</summary>
     private readonly CandidateTaskPool _candidateTaskPool;
@@ -44,28 +48,31 @@ public partial class ScreenViewModel : ObservableObject
     /// </summary>
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
+    /// <param name="driverRegistry">驱动注册表（天车状态按需读取）</param>
     /// <param name="candidateTaskPool">候选任务池</param>
     /// <param name="taskManager">工件任务总表</param>
     /// <param name="ticker">运行态节拍器</param>
     public ScreenViewModel(
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
+        DriverRegistry driverRegistry,
         CandidateTaskPool candidateTaskPool,
         IRuntimeTaskManager taskManager,
         IRuntimeTicker ticker)
     {
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
+        _driverRegistry = driverRegistry;
         _candidateTaskPool = candidateTaskPool;
         _taskManager = taskManager;
-        ticker.Tick += (_, _) => Refresh();
-        Refresh();
+        ticker.Tick += (_, _) => _ = RefreshAsync();
+        _ = RefreshAsync();
     }
 
     /// <summary>
-    /// 差量刷新设备与天车卡片。
+    /// 差量刷新设备卡片（读缓存）与天车卡片（按需读状态）。
     /// </summary>
-    private void Refresh()
+    private async Task RefreshAsync()
     {
         ObservableCollectionSync.SyncById(
             Devices,
@@ -75,13 +82,35 @@ public partial class ScreenViewModel : ObservableObject
             device => new DeviceRowViewModel(device),
             (row, device) => row.Refresh(device));
 
+        // 天车不再后台采集：刷新时按需读一次状态
+        var craneList = _craneRegistry.Snapshot().OrderBy(c => c.No).ToList();
+        var statuses = new Dictionary<int, CraneStatusDto?>();
+        foreach (var crane in craneList)
+        {
+            var driver = _driverRegistry.GetCrane(crane.Id);
+            if (driver is null)
+            {
+                statuses[crane.Id] = null;
+                continue;
+            }
+
+            try
+            {
+                statuses[crane.Id] = await driver.ReadStatusAsync().ConfigureAwait(true);
+            }
+            catch
+            {
+                statuses[crane.Id] = null;
+            }
+        }
+
         ObservableCollectionSync.SyncById(
             Cranes,
-            _craneRegistry.Snapshot().OrderBy(c => c.No).ToList(),
+            craneList,
             row => row.Id,
             crane => crane.Id,
-            crane => new CraneRowViewModel(crane, _deviceRegistry.Get),
-            (row, crane) => row.Refresh(crane));
+            crane => new CraneRowViewModel(crane, _deviceRegistry.Get, statuses.GetValueOrDefault(crane.Id)),
+            (row, crane) => row.Refresh(crane, statuses.GetValueOrDefault(crane.Id)));
 
         // 顶部应用服务卡片：候选任务数、已派发任务数
         CandidateTaskCount = _candidateTaskPool.Snapshot().Count;

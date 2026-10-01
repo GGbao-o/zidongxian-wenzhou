@@ -139,16 +139,17 @@ public sealed class CraneStateMachine
         }
     }
 
-    /// <summary>预检查：连接与报警。</summary>
-    private Task StepPreCheckAsync(Crane crane, CancellationToken cancellationToken)
+    /// <summary>预检查：按需读天车状态，检查连接与报警（不再依赖后台采集快照）。</summary>
+    private async Task StepPreCheckAsync(Crane crane, CancellationToken cancellationToken)
     {
-        if (crane.Signals is not null && (!crane.IsConnected || crane.Signals.GetBool("Alarm")))
+        var driver = _driverRegistry.GetCrane(crane.Id);
+        var status = driver is null ? null : await driver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+        if (status is null || status.HasAlarm)
         {
             throw new InvalidOperationException("预检查失败：天车未连接或报警");
         }
 
         crane.Runtime.Step = TransportStep.ConfirmSource;
-        return Task.CompletedTask;
     }
 
     /// <summary>二次确认源设备状态。</summary>

@@ -9,9 +9,10 @@ using Microsoft.Extensions.Hosting;
 namespace AutomatedLine.Application.Collection;
 
 /// <summary>
-/// 设备/天车状态采集器实现（架构文档 §8.2、§12.1）。
-/// 作为一个后台服务随宿主启动，按配置周期循环采集；
+/// 设备状态采集器实现（架构文档 §8.2、§12.1）。
+/// 作为一个后台服务随宿主启动，按配置周期循环采集**设备**；
 /// 采集失败按**瞬时故障**处理：写断开快照并记录告警，不丢弃任务、不暂停整线（架构文档 §10.4）。
+/// 天车不做后台采集：运动/到位由 CraneService 方法实时读，其余按需调用 ICraneDriver.ReadStatusAsync。
 /// </summary>
 public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
 {
@@ -116,13 +117,11 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     private async Task RunAsync(CancellationToken cancellationToken)
     {
         var options = _configService.GetAppOptions().Collection;
-        // 设备与天车各有独立采集周期：设备=DeviceIntervalMs，天车=CraneIntervalMs
         var deviceInterval = Math.Max(50, options.DeviceIntervalMs);
-        var craneInterval = Math.Max(50, options.CraneIntervalMs);
 
-        var deviceLoop = LoopAsync(cranes: false, deviceInterval, cancellationToken);
-        var craneLoop = LoopAsync(cranes: true, craneInterval, cancellationToken);
-        await Task.WhenAll(deviceLoop, craneLoop).ConfigureAwait(false);
+        // 只采集设备。天车不再后台轮询：运动/到位由 CraneService 的方法自身实时读取，
+        // 调度/预检查/冷启动/界面按需调用 ICraneDriver.ReadStatusAsync（见各消费点）。
+        await LoopAsync(cranes: false, deviceInterval, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

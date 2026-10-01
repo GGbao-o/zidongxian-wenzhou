@@ -8,8 +8,9 @@ namespace AutomatedLine.Application.Line;
 public interface IColdStartChecker
 {
     /// <summary>
-    /// 执行一次冷启动核对。
+    /// 执行一次冷启动核对（天车状态按需读取）。
     /// </summary>
+    /// <param name="cancellationToken">取消令牌</param>
     /// <returns>被标记为物理阻塞的资源描述列表；为空表示无异常</returns>
-    IReadOnlyList<string> Check();
+    Task<IReadOnlyList<string>> CheckAsync(CancellationToken cancellationToken = default);
 }

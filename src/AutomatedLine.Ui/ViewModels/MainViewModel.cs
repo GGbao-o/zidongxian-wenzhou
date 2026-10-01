@@ -149,10 +149,10 @@ public partial class MainViewModel : ObservableObject
     /// 启动线路命令（P2 仍为骨架，P3 接入 LineControlService）。
     /// </summary>
     [RelayCommand]
-    private void StartLine()
+    private async Task StartLine()
     {
-        // 启动前先做冷启动核对：现场有料但内存无数据 → 仅告警，不阻塞
-        var blocks = _coldStartChecker.Check();
+        // 启动前先做冷启动核对：现场有料但内存无数据 → 仅告警，不阻塞（天车状态按需读取）
+        var blocks = await _coldStartChecker.CheckAsync();
         if (blocks.Count > 0)
         {
             Console.WriteLine($"[MainViewModel] 冷启动核对发现 {blocks.Count} 个现场残留资源");
