@@ -68,6 +68,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        //启动采集
         _loop = Task.Run(() => RunAsync(_cts.Token), CancellationToken.None);
 
         Console.WriteLine("[DeviceStateCollector] 采集循环已启动");
@@ -114,7 +115,6 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <summary>
     /// 单个采集循环：按周期采集设备或天车。
     /// </summary>
-    /// <param name="cranes">true 采天车、false 采设备</param>
     /// <param name="intervalMs">周期（毫秒）</param>
     /// <param name="cancellationToken">取消令牌</param>
     private async Task LoopAsync(int intervalMs, CancellationToken cancellationToken)
@@ -123,6 +123,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
         {
             try
             {
+                //执行一轮采集：**并发**读取所有已装载设备，全部完成后统一替换缓存。
                 await CollectAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -137,6 +138,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
 
             try
             {
+                //延迟500ms(json配置的采集周期)
                 await Task.Delay(intervalMs, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
