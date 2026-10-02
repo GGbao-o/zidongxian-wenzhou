@@ -77,6 +77,41 @@ public sealed class RightOfWayManager
     }
 
     /// <summary>
+    /// 调整（缩小/替换）某任务已持有的路权区间。用于"到达目标后把路权缩到车体范围"。
+    /// 新区间与**其它**任务的锁相交则失败并保留原区间；任务未持有路权也返回 false。
+    /// </summary>
+    /// <param name="taskId">任务标识</param>
+    /// <param name="interval">新区间</param>
+    /// <returns>成功返回 true</returns>
+    public bool Resize(Guid taskId, XInterval interval)
+    {
+        lock (_sync)
+        {
+            if (!_locks.ContainsKey(taskId))
+            {
+                return false;
+            }
+
+            foreach (var kv in _locks)
+            {
+                if (kv.Key == taskId)
+                {
+                    continue;   // 只与别的任务比较
+                }
+
+                if (kv.Value.Overlaps(interval))
+                {
+                    return false;
+                }
+            }
+
+            _locks[taskId] = interval;
+            _logger.Info(LogCategory.Scheduling, $"调整路权：任务 {Short(taskId)} → {interval}");
+            return true;
+        }
+    }
+
+    /// <summary>
     /// 释放任务路权。幂等。
     /// </summary>
     /// <param name="taskId">任务标识</param>
