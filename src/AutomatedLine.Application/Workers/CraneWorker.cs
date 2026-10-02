@@ -1,22 +1,22 @@
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Diagnostics;
 using Microsoft.Extensions.Hosting;
 
 namespace AutomatedLine.Application.Workers;
 
 /// <summary>
-/// 天车 Worker：按固定周期推进各天车的状态机（架构文档 §8.5「CraneWorker 与状态机」）。
-/// 说明：P3 用一个循环统一推进每台天车一步；若后续需要各车独立节拍，再拆成"每车一个 Worker 任务"。
-/// 只有线路处于自动运行时才推进。推进周期来自 <c>StateMachine.ExecuteIntervalMs</c>。
+/// 天车执行 Worker：**每台启用天车一个独立后台循环**，各自推进自己的任务（真正并行）。
+/// 每台车有任务时一次跑完整条线性流程（见 <see cref="CraneStateMachine.RunFlowAsync"/>）。
 /// </summary>
 public sealed class CraneWorker : IHostedService
 {
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
 
-    /// <summary>状态机。</summary>
+    /// <summary>状态机（编排器）。</summary>
     private readonly CraneStateMachine _stateMachine;
 
     /// <summary>线路控制。</summary>
@@ -31,14 +31,14 @@ public sealed class CraneWorker : IHostedService
     /// <summary>取消源。</summary>
     private CancellationTokenSource? _cts;
 
-    /// <summary>循环任务。</summary>
-    private Task? _loop;
+    /// <summary>各天车的执行循环。</summary>
+    private readonly List<Task> _loops = new();
 
     /// <summary>
     /// 构造函数。
     /// </summary>
     /// <param name="craneRegistry">天车注册表</param>
-    /// <param name="stateMachine">状态机</param>
+    /// <param name="stateMachine">状态机编排器</param>
     /// <param name="lineControl">线路控制</param>
     /// <param name="configService">配置服务</param>
     /// <param name="logger">日志</param>
@@ -56,17 +56,22 @@ public sealed class CraneWorker : IHostedService
         _logger = logger;
     }
 
-    /// <summary>启动执行循环。</summary>
+    /// <summary>启动每台启用天车的执行循环。</summary>
     /// <param name="cancellationToken">宿主取消令牌</param>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _loop = Task.Run(() => RunAsync(_cts.Token), CancellationToken.None);
-        Console.WriteLine("[CraneWorker] 天车状态机推进循环已启动");
+        foreach (var crane in _craneRegistry.Snapshot().Where(c => c.IsEnabled))
+        {
+            var c = crane;
+            _loops.Add(Task.Run(() => RunCraneAsync(c, _cts.Token), CancellationToken.None));
+        }
+
+        Console.WriteLine($"[CraneWorker] 已启动 {_loops.Count} 个天车执行循环");
         return Task.CompletedTask;
     }
 
-    /// <summary>停止执行循环。</summary>
+    /// <summary>停止全部执行循环。</summary>
     /// <param name="cancellationToken">宿主取消令牌</param>
     public async Task StopAsync(CancellationToken cancellationToken)
     {
@@ -76,45 +81,38 @@ public sealed class CraneWorker : IHostedService
         }
 
         _cts.Cancel();
-        if (_loop is not null)
+        foreach (var loop in _loops)
         {
-            await Task.WhenAny(_loop, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
+            await Task.WhenAny(loop, Task.Delay(Timeout.Infinite, cancellationToken)).ConfigureAwait(false);
         }
 
         _cts.Dispose();
         _cts = null;
     }
 
-    /// <summary>执行主循环。</summary>
+    /// <summary>单台天车的执行循环：有任务则一次跑完整条流程。</summary>
+    /// <param name="crane">天车</param>
     /// <param name="cancellationToken">取消令牌</param>
-    private async Task RunAsync(CancellationToken cancellationToken)
+    private async Task RunCraneAsync(Crane crane, CancellationToken cancellationToken)
     {
         var interval = Math.Max(50, _configService.GetAppOptions().StateMachine.ExecuteIntervalMs);
         while (!cancellationToken.IsCancellationRequested)
         {
-            //有进行判断线路是否启动
-            if (_lineControl.IsRunning)
+            // 线路运行中且本车有任务 → 推进整条流程（一次 await 到底）
+            if (_lineControl.IsRunning && crane.Runtime.CurrentTask is { } task)
             {
-                foreach (var crane in _craneRegistry.Snapshot())
+                try
                 {
-                    if (crane.Runtime.CurrentTask is null)
-                    {
-                        continue;
-                    }
-
-                    try
-                    {
-                        await _stateMachine.AdvanceAsync(crane, cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
-                    {
-                        // 状态机内部已捕获，这里兜底，避免执行循环退出
-                        _logger.Error(LogCategory.StateMachine, $"{crane.Name} 状态机推进异常", ex);
-                    }
+                    await _stateMachine.RunFlowAsync(crane, task, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // 状态机内部已按二分处理；这里兜底，避免循环退出
+                    _logger.Error(LogCategory.StateMachine, $"{crane.Name} 流程异常", ex);
                 }
             }
 

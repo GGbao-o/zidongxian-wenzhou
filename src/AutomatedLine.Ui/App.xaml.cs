@@ -154,6 +154,16 @@ public partial class App : System.Windows.Application
         services.AddSingleton<RightOfWayManager>();
         services.AddSingleton<LineControlService>();
         services.AddSingleton<TaskAbortCoordinator>();
+
+        // 取放料策略：每类设备一个 handler + 注册表（状态机按 DeviceType 分派）
+        services.AddSingleton<AutomatedLine.Application.Transfer.ITransferHandler, AutomatedLine.Application.Transfer.Handlers.LoadRackHandler>();
+        services.AddSingleton<AutomatedLine.Application.Transfer.ITransferHandler, AutomatedLine.Application.Transfer.Handlers.BoringHandler>();
+        services.AddSingleton<AutomatedLine.Application.Transfer.ITransferHandler, AutomatedLine.Application.Transfer.Handlers.LatheHandler>();
+        services.AddSingleton<AutomatedLine.Application.Transfer.ITransferHandler, AutomatedLine.Application.Transfer.Handlers.GrinderHandler>();
+        services.AddSingleton<AutomatedLine.Application.Transfer.ITransferHandler, AutomatedLine.Application.Transfer.Handlers.MarkerHandler>();
+        services.AddSingleton<AutomatedLine.Application.Transfer.ITransferHandler, AutomatedLine.Application.Transfer.Handlers.UnloadRackHandler>();
+        services.AddSingleton<AutomatedLine.Application.Transfer.TransferHandlerRegistry>();
+
         services.AddSingleton<CraneStateMachine>();
 
         // P3 后台循环：候选生成、集中调度、天车执行（同一实例既作服务也作宿主服务）
