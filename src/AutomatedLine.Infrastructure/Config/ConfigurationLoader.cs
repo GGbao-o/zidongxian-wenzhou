@@ -31,6 +31,9 @@ public class ConfigurationLoader : IConfigurationLoader
     /// <summary>驱动注册表。</summary>
     private readonly DriverRegistry _driverRegistry;
 
+    /// <summary>每车任务队列（重载时排空，避免残留旧任务）。</summary>
+    private readonly CraneTaskChannels _craneChannels;
+
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
@@ -44,6 +47,7 @@ public class ConfigurationLoader : IConfigurationLoader
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="driverRegistry">驱动注册表</param>
+    /// <param name="craneChannels">每车任务队列</param>
     /// <param name="logger">日志</param>
     /// <param name="configService">程序配置</param>
     public ConfigurationLoader(
@@ -51,6 +55,7 @@ public class ConfigurationLoader : IConfigurationLoader
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
         DriverRegistry driverRegistry,
+        CraneTaskChannels craneChannels,
         IAppLogger logger,
         IConfigService configService)
     {
@@ -58,6 +63,7 @@ public class ConfigurationLoader : IConfigurationLoader
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
         _driverRegistry = driverRegistry;
+        _craneChannels = craneChannels;
         _logger = logger;
         _configService = configService;
     }
@@ -69,6 +75,7 @@ public class ConfigurationLoader : IConfigurationLoader
         _deviceRegistry.Clear();
         _craneRegistry.Clear();
         _driverRegistry.Clear();
+        _craneChannels.Clear();   // 排空残留任务，避免旧配置的任务继续执行
 
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

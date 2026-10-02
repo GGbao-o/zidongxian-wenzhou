@@ -37,4 +37,21 @@ public sealed class CraneTaskChannels
             return channel;
         }
     }
+
+    /// <summary>
+    /// 清空所有天车队列中**尚未被取走**的任务。配置重载时调用，避免残留旧任务。
+    /// 采用**排空**而非替换，保证 Worker 持有的队列引用仍有效。
+    /// </summary>
+    public void Clear()
+    {
+        lock (_sync)
+        {
+            foreach (var channel in _channels.Values)
+            {
+                while (channel.Reader.TryRead(out _))
+                {
+                }
+            }
+        }
+    }
 }

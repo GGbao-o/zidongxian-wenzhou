@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
+using AutomatedLine.Application.Line;
 using AutomatedLine.Domain.Devices;
 using AutomatedLine.Ui.Helpers;
 using AutomatedLine.Ui.Services;
@@ -24,6 +25,9 @@ public partial class DeviceViewModel : ObservableObject
     /// <summary>弹窗服务。</summary>
     private readonly IDialogService _dialogService;
 
+    /// <summary>线路控制（运行中禁止改配置）。</summary>
+    private readonly LineControlService _lineControl;
+
     /// <summary>数据库配置缓存：设备号 → 配置。</summary>
     private Dictionary<int, DeviceConfigDto> _configs = new();
 
@@ -36,16 +40,36 @@ public partial class DeviceViewModel : ObservableObject
     /// <param name="configurationStore">配置存储</param>
     /// <param name="configurationLoader">配置装载器</param>
     /// <param name="dialogService">弹窗服务</param>
+    /// <param name="lineControl">线路控制</param>
     public DeviceViewModel(
         IConfigurationStore configurationStore,
         IConfigurationLoader configurationLoader,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        LineControlService lineControl)
     {
         _configurationStore = configurationStore;
         _configurationLoader = configurationLoader;
         _dialogService = dialogService;
+        _lineControl = lineControl;
 
         _ = LoadConfigsAsync();
+    }
+
+    /// <summary>配置改动需先停线：运行中弹出提示并拒绝本次改动。</summary>
+    /// <returns>允许改动返回 true</returns>
+    private bool EnsureLineStopped()
+    {
+        if (!_lineControl.IsRunning)
+        {
+            return true;
+        }
+
+        System.Windows.MessageBox.Show(
+            "线路正在运行，禁止修改设备配置。请先到主页面暂停线路后再修改。",
+            "无法修改配置",
+            System.Windows.MessageBoxButton.OK,
+            System.Windows.MessageBoxImage.Warning);
+        return false;
     }
 
     /// <summary>从数据库重新加载全部设备配置并重建行。</summary>
@@ -80,6 +104,11 @@ public partial class DeviceViewModel : ObservableObject
     [RelayCommand]
     private async Task AddDeviceAsync()
     {
+        if (!EnsureLineStopped())
+        {
+            return;
+        }
+
         var dto = new DeviceConfigDto();
         if (!EditDialog("新增设备", dto))
         {
@@ -95,7 +124,7 @@ public partial class DeviceViewModel : ObservableObject
     [RelayCommand]
     private async Task EditDeviceAsync(DeviceConfigRowViewModel? row)
     {
-        if (row is null)
+        if (row is null || !EnsureLineStopped())
         {
             return;
         }
@@ -114,7 +143,7 @@ public partial class DeviceViewModel : ObservableObject
     [RelayCommand]
     private async Task DeleteDeviceAsync(DeviceConfigRowViewModel? row)
     {
-        if (row is null)
+        if (row is null || !EnsureLineStopped())
         {
             return;
         }

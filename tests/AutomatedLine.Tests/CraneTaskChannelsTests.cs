@@ -31,4 +31,16 @@ public class CraneTaskChannelsTests
         Assert.True(channels.For(1).Writer.TryWrite(new TransportTask()));
         Assert.True(channels.For(2).Writer.TryWrite(new TransportTask()));   // 车1满不影响车2
     }
+
+    /// <summary>Clear 排空残留任务后队列可再次写入。</summary>
+    [Fact]
+    public void Clear_Drains_Pending()
+    {
+        var channels = new CraneTaskChannels();
+        Assert.True(channels.For(1).Writer.TryWrite(new TransportTask()));
+
+        channels.Clear();
+
+        Assert.True(channels.For(1).Writer.TryWrite(new TransportTask()));   // 已排空
+    }
 }
