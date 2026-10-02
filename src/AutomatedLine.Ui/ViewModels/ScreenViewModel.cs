@@ -49,6 +49,14 @@ public partial class ScreenViewModel : ObservableObject
     [ObservableProperty]
     private int _dispatchedTaskCount;
 
+    /// <summary>候选任务悬浮详情（多行）：工件 源→目标 优先级。</summary>
+    [ObservableProperty]
+    private string _candidateTasksText = "无候选任务";
+
+    /// <summary>已派发任务悬浮详情（多行）：天车 工件 源→目标 状态。</summary>
+    [ObservableProperty]
+    private string _dispatchedTasksText = "无已派发任务";
+
     /// <summary>
     /// 构造函数。订阅节拍器定期刷新。
     /// </summary>
@@ -128,11 +136,29 @@ public partial class ScreenViewModel : ObservableObject
             crane => new CraneRowViewModel(crane, _deviceRegistry.Get, statuses.GetValueOrDefault(crane.Id)),
             (row, crane) => row.Refresh(crane, statuses.GetValueOrDefault(crane.Id)));
 
-        // 顶部应用服务卡片：候选任务数、已派发任务数
-        CandidateTaskCount = _candidateTaskPool.Snapshot().Count;
-        DispatchedTaskCount = _taskManager.Snapshot().Count(t =>
-            t.Runtime.TaskState is Domain.Workpieces.WorkpieceState.Assigned
-                or Domain.Workpieces.WorkpieceState.Running);
+        // 顶部应用服务卡片：候选任务数、已派发任务数 + 悬浮详情
+        var candidatePool = _candidateTaskPool.Snapshot();
+        CandidateTaskCount = candidatePool.Count;
+        CandidateTasksText = candidatePool.Count == 0
+            ? "无候选任务"
+            : string.Join(Environment.NewLine, candidatePool.Select(c =>
+                $"{c.Workpiece.Info}  {c.Source.Name}→{c.Target.Name}  优先级{c.Priority}"));
+
+        var dispatched = craneList
+            .Where(c => c.Runtime.CurrentTask is not null)
+            .Select(c =>
+            {
+                var t = c.Runtime.CurrentTask!;
+                var wp = _taskManager.Get(t.WorkpieceRuntimeId)?.Info.ToString() ?? "?";
+                var src = _deviceRegistry.Get(t.SourceDeviceId)?.Name ?? $"设备{t.SourceDeviceId}";
+                var dst = _deviceRegistry.Get(t.TargetDeviceId)?.Name ?? $"设备{t.TargetDeviceId}";
+                return $"{c.Name}  {wp}  {src}→{dst}  {DisplayText.CraneStateText(c.Runtime.State)}";
+            })
+            .ToList();
+        DispatchedTaskCount = dispatched.Count;
+        DispatchedTasksText = dispatched.Count == 0
+            ? "无已派发任务"
+            : string.Join(Environment.NewLine, dispatched);
     }
 
     /// <summary>上料架显示队头工件；其余设备返回 null（用设备自身内存工件）。</summary>
