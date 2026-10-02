@@ -142,35 +142,21 @@ public partial class DeviceRowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 组装多行信号明细：按设备信号点位目录逐点点名，取快照值。
+    /// 组装多行信号明细：**直接遍历采集器写入的快照**（`DeviceStateCollector` 后台读到的全部点位）。
     /// </summary>
     /// <param name="device">设备对象</param>
     /// <param name="signals">信号快照</param>
     /// <returns>多行文本</returns>
     private static string BuildSignalText(DeviceBase device, Domain.Signals.SignalSnapshot? signals)
     {
-        if (signals is null)
+        if (signals is null || signals.Values.Count == 0)
         {
             return "无数据";
         }
 
-        var builder = new StringBuilder();
-        foreach (var point in device.SignalPoints)
-        {
-            if (!signals.Values.TryGetValue(point.Name, out var value))
-            {
-                continue;
-            }
-
-            if (builder.Length > 0)
-            {
-                builder.AppendLine();
-            }
-
-            builder.Append(point.Name).Append('=').Append(FormatValue(value));
-        }
-
-        return builder.Length == 0 ? "无数据" : builder.ToString();
+        return string.Join(Environment.NewLine,
+            signals.Values.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                .Select(kv => $"{DisplayText.SignalNameText(kv.Key)}={FormatValue(kv.Value)}"));
     }
 
     /// <summary>
@@ -205,19 +191,16 @@ public partial class DeviceRowViewModel : ObservableObject
 
         builder.AppendLine();
         builder.Append("点位信号：");
-        if (signals is null)
+        if (signals is null || signals.Values.Count == 0)
         {
             builder.Append("无数据");
         }
         else
         {
-            foreach (var point in device.SignalPoints)
+            foreach (var kv in signals.Values.OrderBy(kv => kv.Key, StringComparer.Ordinal))
             {
-                if (signals.Values.TryGetValue(point.Name, out var value))
-                {
-                    builder.AppendLine();
-                    builder.Append("  ").Append(point.Name).Append('=').Append(FormatValue(value));
-                }
+                builder.AppendLine();
+                builder.Append("  ").Append(DisplayText.SignalNameText(kv.Key)).Append('=').Append(FormatValue(kv.Value));
             }
         }
 

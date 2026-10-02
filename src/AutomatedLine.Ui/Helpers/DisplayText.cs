@@ -89,4 +89,38 @@ public static class DisplayText
         WorkpieceState.Discarded => "已丢弃",
         _ => "未知"
     };
+
+    /// <summary>设备点位名转中文（用于大屏/详情展示采集到的点位）。未知点名原样返回。</summary>
+    /// <param name="name">点位名（驱动点位表的键）</param>
+    /// <returns>中文文本</returns>
+    public static string SignalNameText(string name) => name switch
+    {
+        "HasMaterial" => "有料",
+        "Alarm" => "报警",
+        "RequestData" => "请求数据",
+        "RequestLoad" => "请求上料",
+        "RequestUnload" => "请求下料",
+        "ProcessDone" => "加工完成",
+        "Idle" => "空闲",
+        "Running" => "运行中",
+        "NewPrintContent" => "有新打印内容",
+        "Machining" => "加工中",
+        "SafetyDoor" => "安全门",
+        "RunState" => "运行状态",
+        "LoadLockDone" => "锁紧完成上料退出",
+        "UnloadReleaseDone" => "松开完成下料退出",
+        "TailstockClamped" => "尾座夹紧到位",
+        "TailstockOpened" => "尾座分开到位",
+        "DataSentDone" => "数据下发完成",
+        "DataTransDone" => "数据传输完成",
+        "LoadInPlace" => "上料到达锁紧位置",
+        "LoadDone" => "上料完成",
+        "UnloadInPlace" => "下料到达松开位置",
+        "UnloadDone" => "下料完成",
+        "CraneLoadInPlace" => "天车上料到位",
+        "CraneLoadDone" => "天车上料完成",
+        "CraneUnloadInPlace" => "天车下料到位",
+        "CraneUnloadDone" => "天车下料完成",
+        _ => name
+    };
 }

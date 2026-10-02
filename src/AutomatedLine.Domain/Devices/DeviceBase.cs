@@ -46,9 +46,6 @@ public abstract class DeviceBase
     /// <summary>是否已连接（依据最近快照）。</summary>
     public bool IsConnected => Signals is not null && Signals.IsConnected;
 
-    /// <summary>本设备类型对应的信号点位（逻辑点名，地址待点位表补入）。</summary>
-    public IReadOnlyList<SignalPoint> SignalPoints => DeviceSignalCatalog.Get(Type);
-
     /// <summary>
     /// 当前工件。这是**只读派生缓存**，不是权威状态：
     /// 权威状态是 <see cref="WorkpieceRuntime.CurrentLocation"/>，此处只在取放料确认时由天车状态机同步。
