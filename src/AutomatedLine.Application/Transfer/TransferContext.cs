@@ -8,7 +8,7 @@ using AutomatedLine.Domain.Workpieces;
 namespace AutomatedLine.Application.Transfer;
 
 /// <summary>
-/// 一次搬运流程的上下文（《CraneStateMachine设计.md》§4）。
+/// 一次搬运流程的上下文（《应用层设计.md》§5.4）。
 /// 提供给 handler 的原语：坐标换算（设备坐标现查数据库）、移动、等待信号、读写设备、充放磁。
 /// </summary>
 public sealed class TransferContext

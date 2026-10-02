@@ -3,7 +3,7 @@ using AutomatedLine.Domain.Devices;
 namespace AutomatedLine.Application.Transfer.Handlers;
 
 /// <summary>
-/// 沈阳斜床：取/放料均含 Y 二次偏移（每台一份参数，见《CraneStateMachine设计.md》§9.1）。
+/// 沈阳斜床：取/放料均含 Y 二次偏移（每台一份参数，见《应用层设计.md》§7.2）。
 /// </summary>
 public sealed class LatheHandler : ITransferHandler
 {

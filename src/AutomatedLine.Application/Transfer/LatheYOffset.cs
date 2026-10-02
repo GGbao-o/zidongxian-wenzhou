@@ -3,7 +3,7 @@ using AutomatedLine.Application.Configuration;
 namespace AutomatedLine.Application.Transfer;
 
 /// <summary>
-/// 斜床 Y 二次偏移计算（《CraneStateMachine设计.md》§9.1）。
+/// 斜床 Y 二次偏移计算（《应用层设计.md》§7.2）。
 /// YOffset = Round( (顶尖距离 − 工件长度) / 2 + 孔径偏移 )；大孔 122、小孔 55。
 /// </summary>
 public static class LatheYOffset

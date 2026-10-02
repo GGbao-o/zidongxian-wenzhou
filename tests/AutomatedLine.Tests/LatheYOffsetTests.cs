@@ -4,7 +4,7 @@ using AutomatedLine.Application.Transfer;
 namespace AutomatedLine.Tests;
 
 /// <summary>
-/// 斜床 Y 二次偏移计算测试（《CraneStateMachine设计.md》§9.1）。
+/// 斜床 Y 二次偏移计算测试（《应用层设计.md》§7.2）。
 /// </summary>
 public class LatheYOffsetTests
 {

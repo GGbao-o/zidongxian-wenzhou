@@ -4,7 +4,7 @@ using AutomatedLine.Domain.Devices;
 namespace AutomatedLine.Application.Transfer;
 
 /// <summary>
-/// 天车坐标换算（《CraneStateMachine设计.md》§4.1）。
+/// 天车坐标换算（《应用层设计.md》§8.1）。
 /// 绝对运动目标 = 设备数据库 X/Y/Z + 本车偏移量，Z 再减去随工件直径变化的下压量。
 /// 设备坐标由调用方现查数据库后以参数传入（不缓存到领域对象）。
 /// </summary>

@@ -15,7 +15,7 @@ using AutomatedLine.Domain.Workpieces;
 namespace AutomatedLine.Application.Workers;
 
 /// <summary>
-/// 天车搬运编排器（线性 async，架构文档 §8.5 / 《CraneStateMachine设计.md》）。
+/// 天车搬运编排器（线性 async，架构文档 §8.5 / 《应用层设计.md》§5）。
 /// 通用骨架：Acquire → Pick(源类型) → Transit → Place(目标类型) → Finish；
 /// 取放料细节由 <see cref="ITransferHandler"/> 按设备类型实现。
 /// </summary>
