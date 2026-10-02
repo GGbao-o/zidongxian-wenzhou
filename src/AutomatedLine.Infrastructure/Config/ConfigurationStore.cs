@@ -192,6 +192,8 @@ public class ConfigurationStore : IConfigurationStore
         IpAddress = e.IpAddress,
         Port = e.Port,
         PositionX = e.PositionX,
+        PositionY = e.PositionY,
+        PositionZ = e.PositionZ,
         MinDiameter = e.MinDiameter,
         MaxDiameter = e.MaxDiameter,
         MinLength = e.MinLength,
@@ -208,6 +210,8 @@ public class ConfigurationStore : IConfigurationStore
         e.IpAddress = dto.IpAddress;
         e.Port = dto.Port;
         e.PositionX = dto.PositionX;
+        e.PositionY = dto.PositionY;
+        e.PositionZ = dto.PositionZ;
         e.MinDiameter = dto.MinDiameter;
         e.MaxDiameter = dto.MaxDiameter;
         e.MinLength = dto.MinLength;

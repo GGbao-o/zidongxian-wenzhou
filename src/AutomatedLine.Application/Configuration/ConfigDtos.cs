@@ -108,6 +108,12 @@ public sealed class DeviceConfigDto
     /// <summary>物理 X 位置。</summary>
     public double PositionX { get; set; }
 
+    /// <summary>物理 Y 位置。</summary>
+    public double PositionY { get; set; }
+
+    /// <summary>物理 Z 位置（台面 Z）。</summary>
+    public double PositionZ { get; set; }
+
     /// <summary>可加工最小直径。</summary>
     public double MinDiameter { get; set; }
 

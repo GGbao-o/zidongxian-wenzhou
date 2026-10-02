@@ -30,6 +30,12 @@ public class DeviceConfig
     /// <summary>设备物理 X 位置。用于计算搬运任务的路权区间。</summary>
     public double PositionX { get; set; }
 
+    /// <summary>设备物理 Y 位置。</summary>
+    public double PositionY { get; set; }
+
+    /// <summary>设备物理 Z 位置（台面 Z）。</summary>
+    public double PositionZ { get; set; }
+
     /// <summary>可加工最小直径。与工件直径比较，不匹配的设备不进入候选目标（架构文档 §8.3.1）。</summary>
     public double MinDiameter { get; set; }
 
