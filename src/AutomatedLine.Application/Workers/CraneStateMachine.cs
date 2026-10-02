@@ -102,6 +102,7 @@ public sealed class CraneStateMachine
                      ?? throw new InvalidOperationException($"目标设备 {task.TargetDeviceId} 不存在");
 
         var ctx = new TransferContext(crane, wp, _driverRegistry, _configStore, _configService.GetAppOptions(), _logger);
+        var route = $"{wp.Info} {source.Name}→{target.Name}";
 
         // 标记本车归属（Worker 通常已设；此处兜底，且让异常协调器能取到当前任务）
         crane.Runtime.CurrentTask = task;
@@ -114,25 +115,33 @@ public sealed class CraneStateMachine
 
         crane.Runtime.State = CraneState.Running;
         wp.Runtime.TaskState = WorkpieceState.Running;
+        _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务开始：{route}");
 
+        // 记录当前步骤（异常日志用），覆盖各阶段
+        var phase = "未知";
         try
         {
             // 2) 再审核源（内存一致；PLC 点位由 handler 首步等待）
+            phase = $"审核源({source.Name})";
             AuditSource(source, wp);
 
             // 下发本车运动速度（每次执行前设置一次）
+            phase = "设置速度";
             await ctx.SetCraneSpeedAsync(cancellationToken).ConfigureAwait(false);
 
             // 3) 取料
+            phase = $"取料({source.Name})";
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
             source.CurrentWorkpiece = null;
             crane.CurrentWorkpiece = wp;
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
 
             // 4) 中转：XY→目标、释放源预约、缩小路权
+            phase = $"中转({source.Name}→{target.Name})";
             await TransitAsync(ctx, crane, task, target, cancellationToken).ConfigureAwait(false);
 
             // 5) 放料
+            phase = $"放料({target.Name})";
             await _handlers.Get(target.Type).PlaceAsync(ctx, target, cancellationToken).ConfigureAwait(false);
             target.CurrentWorkpiece = wp;
             crane.CurrentWorkpiece = null;
@@ -140,16 +149,21 @@ public sealed class CraneStateMachine
             wp.Runtime.CurrentProcess = task.TargetProcess;
 
             // 6) 完成：回安全位、释放全部
+            phase = "收尾";
             await FinishAsync(ctx, crane, task, target, wp, cancellationToken).ConfigureAwait(false);
+
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}");
         }
         catch (OperationCanceledException)
         {
-            HandleAbnormal(crane, task, ctx, "任务被取消");
+            _logger.Error(LogCategory.StateMachine, $"[{crane.Name}] 任务 {route} 步骤[{phase}] 被取消");
+            HandleAbnormal(crane, task, ctx, $"取消于步骤[{phase}]");
             throw;
         }
         catch (Exception ex)
         {
-            HandleAbnormal(crane, task, ctx, ex.Message);
+            _logger.Error(LogCategory.StateMachine, $"[{crane.Name}] 任务 {route} 步骤[{phase}] 异常：{ex.Message}", ex);
+            HandleAbnormal(crane, task, ctx, $"{phase}：{ex.Message}");
         }
     }
 

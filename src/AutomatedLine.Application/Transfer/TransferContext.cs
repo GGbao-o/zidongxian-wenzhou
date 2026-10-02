@@ -3,6 +3,7 @@ using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Devices;
+using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Application.Transfer;
@@ -66,6 +67,9 @@ public sealed class TransferContext
     public ICraneDriver CraneDriver
         => _drivers.GetCrane(Crane.Id) ?? throw new InvalidOperationException($"天车 {Crane.Id} 无驱动");
 
+    /// <summary>日志前缀：天车 + 工件。</summary>
+    private string Tag => $"[{Crane.Name}] 工件 {Workpiece.Info}";
+
     /// <summary>按设备号取设备驱动。</summary>
     /// <param name="deviceId">设备号</param>
     /// <returns>设备驱动</returns>
@@ -98,11 +102,12 @@ public sealed class TransferContext
     /// <param name="cancellationToken">取消令牌</param>
     public async Task MoveAbsoluteAsync(double x, double y, double z, CancellationToken cancellationToken)
     {
-        var result = await CraneDriver.MoveAbsoluteAsync(
-            (int)Math.Round(x), (int)Math.Round(y), (int)Math.Round(z), cancellationToken).ConfigureAwait(false);
+        var (ix, iy, iz) = ((int)Math.Round(x), (int)Math.Round(y), (int)Math.Round(z));
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 绝对运动 → X{ix} Y{iy} Z{iz}");
+        var result = await CraneDriver.MoveAbsoluteAsync(ix, iy, iz, cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
-            throw new InvalidOperationException($"天车绝对移动失败：{result.Code} {result.Message}");
+            throw new InvalidOperationException($"{Tag} 绝对运动失败（目标 X{ix} Y{iy} Z{iz}）：{result.Code} {result.Message}");
         }
     }
 
@@ -113,10 +118,11 @@ public sealed class TransferContext
     /// <param name="cancellationToken">取消令牌</param>
     public async Task MoveRelativeAsync(int dx, int dy, int dz, CancellationToken cancellationToken)
     {
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 相对运动 → dX{dx} dY{dy} dZ{dz}");
         var result = await CraneDriver.MoveRelativeAsync(dx, dy, dz, cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
-            throw new InvalidOperationException($"天车相对移动失败：{result.Code} {result.Message}");
+            throw new InvalidOperationException($"{Tag} 相对运动失败（dX{dx} dY{dy} dZ{dz}）：{result.Code} {result.Message}");
         }
     }
 
@@ -124,6 +130,7 @@ public sealed class TransferContext
     /// <param name="cancellationToken">取消令牌</param>
     public async Task SetCraneSpeedAsync(CancellationToken cancellationToken)
     {
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 设置天车速度");
         var result = await CraneDriver.SetAbsoluteSpeedAsync(
             (int)Math.Round(Crane.SpeedX), (int)Math.Round(Crane.AccelX), (int)Math.Round(Crane.DecelX),
             (int)Math.Round(Crane.SpeedY), (int)Math.Round(Crane.AccelY), (int)Math.Round(Crane.DecelY),
@@ -139,10 +146,11 @@ public sealed class TransferContext
     /// <param name="cancellationToken">取消令牌</param>
     public async Task MagnetOnAsync(CancellationToken cancellationToken)
     {
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 充磁");
         var result = await CraneDriver.MagnetOnAsync(cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
-            throw new InvalidOperationException($"充磁失败：{result.Code} {result.Message}");
+            throw new InvalidOperationException($"{Tag} 充磁失败：{result.Code} {result.Message}");
         }
 
         HasPieceOnCrane = true;   // 指令一发出即视为已吸起，之后异常不可回滚
@@ -152,10 +160,11 @@ public sealed class TransferContext
     /// <param name="cancellationToken">取消令牌</param>
     public async Task MagnetOffAsync(CancellationToken cancellationToken)
     {
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 放磁");
         var result = await CraneDriver.MagnetOffAsync(cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
-            throw new InvalidOperationException($"放磁失败：{result.Code} {result.Message}");
+            throw new InvalidOperationException($"{Tag} 放磁失败：{result.Code} {result.Message}");
         }
     }
 
@@ -165,6 +174,7 @@ public sealed class TransferContext
     /// <param name="cancellationToken">取消令牌</param>
     public async Task WaitCraneAsync(Func<CraneStatusDto, bool> predicate, string description, CancellationToken cancellationToken)
     {
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 等待天车 {description}");
         var timeout = TimeSpan.FromMilliseconds(Options.StateMachine.HandshakeTimeoutMs);
         var deadline = DateTime.UtcNow + timeout;
         while (true)
@@ -173,7 +183,7 @@ public sealed class TransferContext
             var dto = await CraneDriver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
             if (dto is not null && dto.HasAlarm)
             {
-                throw new InvalidOperationException($"天车报警，等待 {description} 中止");
+                throw new InvalidOperationException($"{Tag} 天车报警，等待 {description} 中止");
             }
 
             if (dto is not null && predicate(dto))
@@ -183,7 +193,7 @@ public sealed class TransferContext
 
             if (DateTime.UtcNow >= deadline)
             {
-                throw new InvalidOperationException($"等待天车 {description} 超时（{timeout.TotalMilliseconds}ms）");
+                throw new InvalidOperationException($"{Tag} 等待天车 {description} 超时（{timeout.TotalMilliseconds}ms）");
             }
 
             await Task.Delay(200, cancellationToken).ConfigureAwait(false);
@@ -198,6 +208,7 @@ public sealed class TransferContext
     public async Task WaitDeviceAsync(DeviceBase device, string signal, bool expected, CancellationToken cancellationToken)
     {
         var driver = DeviceDriver(device.Id);
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 等待 {device.Name}.{signal}={expected}");
         var timeout = TimeSpan.FromMilliseconds(Options.StateMachine.HandshakeTimeoutMs);
         var deadline = DateTime.UtcNow + timeout;
         while (true)
@@ -218,7 +229,7 @@ public sealed class TransferContext
 
             if (DateTime.UtcNow >= deadline)
             {
-                throw new InvalidOperationException($"设备[{device.Name}] 等待 {signal}={expected} 超时（{timeout.TotalMilliseconds}ms）");
+                throw new InvalidOperationException($"{Tag} 等待 {device.Name}.{signal}={expected} 超时（{timeout.TotalMilliseconds}ms）");
             }
 
             await Task.Delay(200, cancellationToken).ConfigureAwait(false);
@@ -231,5 +242,8 @@ public sealed class TransferContext
     /// <param name="value">值</param>
     /// <param name="cancellationToken">取消令牌</param>
     public Task WriteDeviceAsync(DeviceBase device, string signal, object? value, CancellationToken cancellationToken)
-        => DeviceDriver(device.Id).WriteSignalAsync(signal, value, cancellationToken);
+    {
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 写 {device.Name}.{signal}={value}");
+        return DeviceDriver(device.Id).WriteSignalAsync(signal, value, cancellationToken);
+    }
 }

@@ -120,6 +120,7 @@ public sealed class CraneScheduler : IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        //集中式调度周期
         var interval = Math.Max(50, _configService.GetAppOptions().Scheduling.ScheduleIntervalMs);
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -263,7 +264,7 @@ public sealed class CraneScheduler : IHostedService
                 }
 
                 _logger.Info(LogCategory.Scheduling,
-                    $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，已入队待执行）");
+                    $"派发：工件 {task.Info}（任务 {Short(task.Id)}）{candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，已入队待执行）");
                 dispatched = true;
                 break;   // 该候选已派人，处理下一个候选
             }
