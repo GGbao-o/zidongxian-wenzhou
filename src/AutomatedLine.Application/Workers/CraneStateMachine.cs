@@ -115,14 +115,16 @@ public sealed class CraneStateMachine
 
         crane.Runtime.State = CraneState.Running;
         wp.Runtime.TaskState = WorkpieceState.Running;
+        //打印日志
         _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务开始：{route}");
 
-        // 记录当前步骤（异常日志用），覆盖各阶段
+        // 记录当前步骤（异常日志用），覆盖各阶段   phase是阶段 只是用来输出日志
         var phase = "未知";
         try
         {
             // 2) 再审核源（内存一致；PLC 点位由 handler 首步等待）
             phase = $"审核源({source.Name})";
+            //再审核源设备内存一致
             AuditSource(source, wp);
 
             // 下发本车运动速度（每次执行前设置一次）

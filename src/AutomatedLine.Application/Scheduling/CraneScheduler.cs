@@ -194,7 +194,7 @@ public sealed class CraneScheduler : IHostedService
             // 本候选的**可执行天车**：启用、空闲、范围覆盖源与目标、状态可读且无报警。
             // "一车一任务"由 IsIdle 保证：派发时立即置 State=Reserved，该车 IsIdle 当场变 false，
             // 后续候选自然排除它（Snapshot 是同一批 Crane 引用）。  
-            //eligible 是“针对当前这个候选任务，所有有资格执行它的天车”列表，已按“离源最近”排好序。
+            //eligible 是“针对当前这个候选任务，所有有资格执行它的天车”列表，已按“离源最近”排好序。 判断是否启动  IsIdle是否空闲(CraneStated的状态和Runtime.CurrentTask)
             var eligible = cranes
                 .Where(c => c.IsEnabled
                             && c.IsIdle

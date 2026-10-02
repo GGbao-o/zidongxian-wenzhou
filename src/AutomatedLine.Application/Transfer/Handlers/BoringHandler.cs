@@ -11,13 +11,14 @@ public sealed class BoringHandler : ITransferHandler
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.BoringMachine;
 
-    /// <inheritdoc />取料
+    /// <inheritdoc /> 上料架->双头镗
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
+        // 轮询设备输入信号直到等于期望值
         await ctx.WaitDeviceAsync(source, "RequestUnload", true, cancellationToken).ConfigureAwait(false);
-
+        //拿到的xyz三个值是加了偏移的
         var (x, y, z) = await ctx.BaseOfAsync(source, cancellationToken).ConfigureAwait(false);
-        //三轴运动
+        //三轴运动   去source上方
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
