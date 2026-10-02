@@ -10,9 +10,6 @@ public sealed class ActiveAlarm
     /// <summary>报警唯一标识。</summary>
     public Guid Id { get; init; } = Guid.NewGuid();
 
-    /// <summary>首次发生时间。</summary>
-    public DateTime RaisedAt { get; init; } = DateTime.Now;
-
     /// <summary>最近一次发生时间（同源同内容会合并计数）。</summary>
     public DateTime LastAt { get; set; } = DateTime.Now;
 

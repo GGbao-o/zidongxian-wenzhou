@@ -74,11 +74,6 @@ public abstract class DeviceBase
     }
 
     /// <summary>
-    /// 判断本设备当前是否可被调度（启用、可用、连接正常由派生信息决定）。
-    /// </summary>
-    public bool IsAvailable => IsEnabled && ResourceState == ResourceState.Available;
-
-    /// <summary>
     /// 判断工件尺寸是否在本设备的加工范围内。用于候选任务的目标设备匹配（架构文档 §8.3.1）。
     /// </summary>
     /// <param name="diameter">工件直径</param>

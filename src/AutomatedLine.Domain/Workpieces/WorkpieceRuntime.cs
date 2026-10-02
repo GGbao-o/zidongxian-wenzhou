@@ -43,7 +43,4 @@ public sealed class WorkpieceRuntime
     /// 点"启动"时分配递增序号入队尾，点"暂停"时清零，再次启动重新入队尾。
     /// </summary>
     public int QueueOrder { get; set; }
-
-    /// <summary>创建时间。用于排序与时长统计。</summary>
-    public DateTime CreatedAt { get; init; } = DateTime.Now;
 }

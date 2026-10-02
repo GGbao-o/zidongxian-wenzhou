@@ -45,12 +45,6 @@ public sealed class ProcessRoute
     });
 
     /// <summary>
-    /// 获取第一个工艺节点。
-    /// </summary>
-    /// <returns>第一个节点；路线为空时返回 null</returns>
-    public ProcessNode? GetFirst() => _nodes.Count > 0 ? _nodes[0] : null;
-
-    /// <summary>
     /// 计算指定工序的下一道工序（架构文档 §6.5：现算，不持久化）。
     /// </summary>
     /// <param name="current">当前工序</param>

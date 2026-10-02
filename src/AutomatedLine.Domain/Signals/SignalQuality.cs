@@ -8,9 +8,6 @@ public enum SignalQuality
     /// <summary>良好：本次采集完整成功。</summary>
     Good = 0,
 
-    /// <summary>过期：数据来自较早的快照，可能已不反映现场。</summary>
-    Stale = 1,
-
     /// <summary>差：采集失败或数据不可信。</summary>
     Bad = 2
 }
