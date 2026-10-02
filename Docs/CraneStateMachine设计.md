@@ -21,10 +21,11 @@
 **目标**：每台天车一个独立 `Task.Run` 循环（文档 §8.5 本来就要求），实现真正并行。
 
 ```
-对每台启用天车启动一个循环：
+调度器：只读判断通过 → channel[crane.Id].Writer.TryWrite(task)   // 不碰 Crane.Runtime
+对每台启用天车启动一个循环（Worker）：
   while (running):
-    task = crane.Runtime.CurrentTask
-    if task != null and crane not busy:
+    if 线路运行 and channel[crane.Id].Reader.TryRead(out task):
+        crane.Runtime.CurrentTask = task; crane.Runtime.State = Reserved   // Worker 独占写本车 Runtime
         try:
             await StateMachine.RunFlowAsync(crane, task, ct)   // 从取料到完成，一次性 await 到底
         catch OperationCanceledException: throw
@@ -32,6 +33,7 @@
     await Task.Delay(ExecuteIntervalMs)
 ```
 
+- **任务交接用每车一个 `Channel<TransportTask>`**（容量 1）：调度器只入队、**不写 `Crane.Runtime`**；Worker 出队并**独占**写本车 Runtime。从根上消除"两线程写同一对象"的交接竞态（见架构文档 §8.5.1）。
 - 一个任务从头跑到尾（可能数十秒~分钟）；其它天车各自并行，互不阻塞。
 - `RunFlowAsync` 每一步运动/握手都 `await` 到"到位 / 超时 / 报警"。
 - `TransportStep` 枚举**不再用于逐 tick 推进**；可保留少量作"当前阶段"展示/日志（取料/中转/放料/完成）。
@@ -264,9 +266,9 @@ Finish：
 | 设备 | 参数与换算 |
 |---|---|
 | 双头镗 | 长度=`Length`；直径/左堵厚/右堵厚/内孔锥度/内孔成活或版孔/圆角均 **×100** 取整 |
-| 研磨机 | 版辊直径=`Diameter`(mm)、版辊长度=`Length`(mm)、加工模式=大孔/小孔 |
-| 斜床 | `#800` 长度、`#801` 成活直径、`#802` 堵孔尺寸/版孔类型、`#909` 加工模式 |
-| 打号机 | 打印内容 FC16、外径/内径 FC06 |
+| 研磨机 | 版辊直径=`Diameter`(mm)、版辊长度=`Length`(mm)、加工模式=`PlugHole==100(大孔)?1:2`（`R7317`：1=大孔/2=小孔） |
+| 斜床 | `#800` 长度、`#801` 成活直径、`#802` 堵孔尺寸/版孔类型=`PlugHole`、`#909` 加工模式**暂写死 1** |
+| 打号机 | 打印内容 FC16=`PrintContent`；**外径=`Length`（板长）**、**内径=`PlugHole`（70/100）** |
 
 > 参数下发依赖设备驱动的写点位/宏变量接口；缺哪个补哪个（`DeviceModbusMaps` / `LatheMacroAddress`）。
 
@@ -328,13 +330,12 @@ public interface ITransferHandler
 
 ## 11. 待现场确认 / 未定项
 
-1. 斜床 Y 偏移三项参数放**哪个配置页面**（「每台一份」「`YOffset` 取整」已定）。
-2. 打号机完整握手序列与打印内容下发时机。
-3. **设备数据库需补 `PositionY`/`PositionZ`**（现在只有 `PositionX`）；补列后按 §4.1 换算绝对目标。
-4. Z 下降公式是否**取料/放料一致**；`Round` 取整规则（`.5` 进位）。
-5. 下料架是否需要写放料完成脉冲（现说不需要）。
-6. 料架取料是否需要 X0/X1 门、X2 下压等额外动作。
-7. 各设备是否还有未列出的中间信号。
+> 多数已确认：斜床参数已加入【参数设置 → 斜床搬运】（每台一份）；打号机外径=`Length`、内径=`PlugHole`；
+> `DeviceConfig` 已补 `PositionY/PositionZ`（运行期现查）；Z 下降公式**取放料一致**；下料架不写放料脉冲；
+> 料架取料**不需要** X0/X1/X2 动作。
+
+1. 斜床 `#909` 加工模式取值（现**暂写死 1**，待现场给出含义）。
+2. 各设备是否还有未列出的中间信号。
 
 ## 12. 测试策略
 
