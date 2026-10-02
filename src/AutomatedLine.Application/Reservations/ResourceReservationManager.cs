@@ -10,8 +10,8 @@ namespace AutomatedLine.Application.Reservations;
 /// </summary>
 public sealed class ResourceReservationManager
 {
-    /// <summary>任务标识 → (源设备号, 目标设备号)。</summary>
-    private readonly Dictionary<Guid, (int Source, int Target)> _byTask = new();
+    /// <summary>任务标识 → (源设备号, 目标设备号)。源为 null 表示源预约已提前释放。</summary>
+    private readonly Dictionary<Guid, (int? Source, int Target)> _byTask = new();
 
     /// <summary>设备号 → 占用它的任务标识。</summary>
     private readonly Dictionary<int, Guid> _byDevice = new();
@@ -74,7 +74,11 @@ public sealed class ResourceReservationManager
             released = _byTask.Remove(taskId, out var devices);
             if (released)
             {
-                _byDevice.Remove(devices.Source);
+                if (devices.Source is int sourceId)
+                {
+                    _byDevice.Remove(sourceId);
+                }
+
                 _byDevice.Remove(devices.Target);
             }
         }
@@ -82,6 +86,33 @@ public sealed class ResourceReservationManager
         if (released)
         {
             _logger.Info(LogCategory.Scheduling, $"释放预约：任务 {Short(taskId)}");
+        }
+
+        return released;
+    }
+
+    /// <summary>
+    /// 只释放任务的**源设备**预约，保留目标设备预约。用于"到达目标后释放源"。
+    /// 源已释放或任务不存在返回 false（幂等）。
+    /// </summary>
+    /// <param name="taskId">任务标识</param>
+    /// <returns>确实释放了返回 true</returns>
+    public bool ReleaseSource(Guid taskId)
+    {
+        bool released = false;
+        lock (_sync)
+        {
+            if (_byTask.TryGetValue(taskId, out var devices) && devices.Source is int sourceId)
+            {
+                _byDevice.Remove(sourceId);
+                _byTask[taskId] = (null, devices.Target);
+                released = true;
+            }
+        }
+
+        if (released)
+        {
+            _logger.Info(LogCategory.Scheduling, $"释放源预约：任务 {Short(taskId)}");
         }
 
         return released;

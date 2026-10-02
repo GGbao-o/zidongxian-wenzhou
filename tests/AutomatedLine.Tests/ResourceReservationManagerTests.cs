@@ -52,4 +52,43 @@ public class ResourceReservationManagerTests
 
         Assert.False(manager.TryReserve(Guid.NewGuid(), 5, 5));
     }
+
+    /// <summary>只释放源设备，目标仍被预约。</summary>
+    [Fact]
+    public void ReleaseSource_Frees_OnlySource()
+    {
+        var manager = new ResourceReservationManager(new TestLogger());
+        var task = Guid.NewGuid();
+        manager.TryReserve(task, sourceId: 2, targetId: 3);
+
+        Assert.True(manager.ReleaseSource(task));
+        Assert.False(manager.IsReserved(2));   // 源已释放
+        Assert.True(manager.IsReserved(3));    // 目标仍占用
+        Assert.True(manager.TryReserve(Guid.NewGuid(), 2, 9));   // 源可被别的任务预约
+    }
+
+    /// <summary>源已释放后再 ReleaseSource 返回 false（幂等）。</summary>
+    [Fact]
+    public void ReleaseSource_SecondCall_ReturnsFalse()
+    {
+        var manager = new ResourceReservationManager(new TestLogger());
+        var task = Guid.NewGuid();
+        manager.TryReserve(task, 2, 3);
+
+        Assert.True(manager.ReleaseSource(task));
+        Assert.False(manager.ReleaseSource(task));
+    }
+
+    /// <summary>ReleaseSource 后整体 Release 仍能释放目标。</summary>
+    [Fact]
+    public void Release_AfterReleaseSource_FreesTarget()
+    {
+        var manager = new ResourceReservationManager(new TestLogger());
+        var task = Guid.NewGuid();
+        manager.TryReserve(task, 2, 3);
+
+        manager.ReleaseSource(task);
+        Assert.True(manager.Release(task));
+        Assert.False(manager.IsReserved(3));
+    }
 }
