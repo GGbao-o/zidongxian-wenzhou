@@ -107,9 +107,8 @@ public class CraneStateMachineTests
     public async Task NormalFlow_Completes_And_Releases()
     {
         var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), handshakeTimeoutMs: 10000);
-        h.SourceDriver.Signals["HasMaterial"] = true;
-        h.TargetDriver.Signals["RequestData"] = true;
-        h.TargetDriver.Signals["RequestLoad"] = true;
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
         var (wp, task) = h.NewTask();
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
@@ -164,7 +163,7 @@ public class CraneStateMachineTests
     public async Task AfterMagnet_Failure_Aborts_And_Pauses()
     {
         var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), handshakeTimeoutMs: 0);
-        h.SourceDriver.Signals["HasMaterial"] = true;   // 取料成功（充磁 → HasPieceOnCrane=true）
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true));   // 取料成功（充磁 → HasPieceOnCrane=true）
         // 目标请求数据始终为 false → 放料等待超时 → Abort
         var (wp, task) = h.NewTask();
 

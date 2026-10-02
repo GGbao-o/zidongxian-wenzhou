@@ -13,6 +13,8 @@
       对 UI 层不可见，从编译期强制单写者原则（架构文档 §12.3）。
     -->
     <InternalsVisibleTo Include="AutomatedLine.Application" />
+    <!-- 测试需要构造设备信号快照（Signals 为 internal set），故对测试程序集开放 -->
+    <InternalsVisibleTo Include="AutomatedLine.Tests" />
   </ItemGroup>
 
 </Project>

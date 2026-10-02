@@ -89,6 +89,7 @@ public sealed class TransferContext
             throw new InvalidOperationException($"设备配置 {device.Id} 不存在");
         }
 
+        //return的是加了天车偏移的
         return (
             CraneCoordinate.BaseX(cfg.PositionX, Crane),
             CraneCoordinate.BaseY(cfg.PositionY, Crane),
@@ -207,18 +208,18 @@ public sealed class TransferContext
     /// <param name="cancellationToken">取消令牌</param>
     public async Task WaitDeviceAsync(DeviceBase device, string signal, bool expected, CancellationToken cancellationToken)
     {
-        var driver = DeviceDriver(device.Id);
         _logger.Info(LogCategory.StateMachine, $"{Tag} 等待 {device.Name}.{signal}={expected}");
         var timeout = TimeSpan.FromMilliseconds(Options.StateMachine.HandshakeTimeoutMs);
         var deadline = DateTime.UtcNow + timeout;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var signals = await driver.ReadAllSignalsAsync(cancellationToken).ConfigureAwait(false);
 
+            // 读采集器写入的**缓存快照**（不实时读 PLC，避免与 DeviceStateCollector 争连接）。
             // 信号必须真实读到：缺失视为"未知"，不算满足。
             // 否则 expected=false（如"下料架无板"）会把"没采到数据"误当成"无料"，可能往实际有板的架子放料。
-            if (signals.TryGetValue(signal, out var v))
+            var snapshot = device.Signals;
+            if (snapshot is not null && snapshot.Values.TryGetValue(signal, out var v))
             {
                 var value = v is bool b && b;
                 if (value == expected)

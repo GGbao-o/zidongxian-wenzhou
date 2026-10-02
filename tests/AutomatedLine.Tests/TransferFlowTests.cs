@@ -44,8 +44,8 @@ public class TransferFlowTests
         var source = new LoadRack(1, "上料架", 1000);
         var target = new BoringMachine(2, "双头镗", 2000);
         var wp = new WorkpieceTask(new WorkpieceInfo { Diameter = 100, Length = 700 });
-        var ctx = BuildContext(out var craneDriver, out var sourceDriver, out _, source, target, wp);
-        sourceDriver.Signals["HasMaterial"] = true;
+        var ctx = BuildContext(out var craneDriver, out _, out _, source, target, wp);
+        source.Signals = TestSignals.Of(("HasMaterial", true));
 
         await new LoadRackHandler().PickAsync(ctx, source, CancellationToken.None);
 
@@ -62,8 +62,7 @@ public class TransferFlowTests
         var target = new BoringMachine(2, "双头镗", 2000);
         var wp = new WorkpieceTask(new WorkpieceInfo { Diameter = 100, Length = 700 });
         var ctx = BuildContext(out var craneDriver, out _, out var targetDriver, source, target, wp);
-        targetDriver.Signals["RequestData"] = true;
-        targetDriver.Signals["RequestLoad"] = true;
+        target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
 
         await new BoringHandler().PlaceAsync(ctx, target, CancellationToken.None);
 
@@ -82,9 +81,7 @@ public class TransferFlowTests
         var ctx = BuildContext(out var craneDriver, out _, out var targetDriver, source, target, wp);
         // 每台斜床一份参数：顶尖距离 800、大孔 122 → YOffset = (800-700)/2 + 122 = 172
         ctx.Options.Transfer.Lathes[5] = new LatheTransferOptions { TailstockCenterDistance = 800, BigHoleOffset = 122, SmallHoleOffset = 55 };
-        targetDriver.Signals["RequestData"] = true;
-        targetDriver.Signals["RequestLoad"] = true;
-        targetDriver.Signals["TailstockClamped"] = true;
+        target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("TailstockClamped", true));
 
         await new LatheHandler().PlaceAsync(ctx, target, CancellationToken.None);
 
@@ -101,7 +98,7 @@ public class TransferFlowTests
         var target = new UnloadRack(9, "下料架", 9000);
         var wp = new WorkpieceTask(new WorkpieceInfo { Diameter = 100, Length = 700 });
         var ctx = BuildContext(out var craneDriver, out _, out var targetDriver, source, target, wp);
-        targetDriver.Signals["HasMaterial"] = false;
+        target.Signals = TestSignals.Of(("HasMaterial", false));
 
         await new UnloadRackHandler().PlaceAsync(ctx, target, CancellationToken.None);
 
