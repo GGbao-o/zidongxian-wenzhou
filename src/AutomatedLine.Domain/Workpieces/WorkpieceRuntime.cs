@@ -8,15 +8,16 @@ namespace AutomatedLine.Domain.Workpieces;
 /// </summary>
 /// <remarks>
 /// <see cref="TaskState"/>、<see cref="CurrentProcess"/> 会被"调度器 / CraneWorker / 生成器 / UI"跨线程读写，
-/// 故用 <c>volatile</c> 字段保证可见性。<see cref="CurrentLocation"/> 是结构体，无法 volatile，由单点写入方负责一致性。
+/// 故用 <c>Volatile</c> 保证可见性、<c>Interlocked</c> 保证状态迁移原子。<see cref="CurrentLocation"/> 是结构体，
+/// 由单点写入方负责一致性。
 /// </remarks>
 public sealed class WorkpieceRuntime
 {
     /// <summary>当前工序 backing 字段（volatile）。</summary>
     private volatile ProcessType _currentProcess = ProcessType.Unknown;
 
-    /// <summary>任务状态 backing 字段（volatile）。</summary>
-    private volatile WorkpieceState _taskState = WorkpieceState.Created;
+    /// <summary>任务状态 backing 字段（int，供 Interlocked/Volatile 使用）。</summary>
+    private int _taskState = (int)WorkpieceState.Created;
 
     /// <summary>当前工序。完成一道搬运后由状态机在放料确认时更新。</summary>
     public ProcessType CurrentProcess
@@ -34,9 +35,19 @@ public sealed class WorkpieceRuntime
     /// </summary>
     public WorkpieceState TaskState
     {
-        get => _taskState;
-        set => _taskState = value;
+        get => (WorkpieceState)Volatile.Read(ref _taskState);
+        set => Volatile.Write(ref _taskState, (int)value);
     }
+
+    /// <summary>
+    /// 原子迁移任务状态：仅当当前等于 <paramref name="expected"/> 时改为 <paramref name="next"/>。
+    /// 用于调度器把 `Waiting → Assigned` **只成功一次**，避免同一任务被并发派发。
+    /// </summary>
+    /// <param name="expected">期望的当前状态</param>
+    /// <param name="next">要迁移到的状态</param>
+    /// <returns>迁移成功返回 true；当前状态不是 expected 返回 false</returns>
+    public bool TryTransition(WorkpieceState expected, WorkpieceState next)
+        => Interlocked.CompareExchange(ref _taskState, (int)next, (int)expected) == (int)expected;
 
     /// <summary>
     /// 入线顺序号（上料架取板顺序）。0 表示未入队（未启动/已暂停）；

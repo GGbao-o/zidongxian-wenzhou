@@ -247,13 +247,20 @@ public sealed class CraneScheduler : IHostedService
                     AssignedCraneId = crane.Id
                 };
 
-                if (!_channels.For(crane.Id).Writer.TryWrite(transportTask))
+                // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）
+                if (!task.Runtime.TryTransition(WorkpieceState.Waiting, WorkpieceState.Assigned))
                 {
-                    blockReason = $"{crane.Name} 任务队列已满（已有一条待执行）";
-                    continue;   // 该车已占位 → 试下一台车
+                    blockReason = "任务已被其它周期派发";
+                    break;   // 本轮无需再处理该候选
                 }
 
-                task.Runtime.TaskState = WorkpieceState.Assigned;
+                if (!_channels.For(crane.Id).Writer.TryWrite(transportTask))
+                {
+                    // 入队失败：回退状态，换下一台车
+                    task.Runtime.TaskState = WorkpieceState.Waiting;
+                    blockReason = $"{crane.Name} 任务队列已满（已有一条待执行）";
+                    continue;
+                }
 
                 _logger.Info(LogCategory.Scheduling,
                     $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，已入队待执行）");
