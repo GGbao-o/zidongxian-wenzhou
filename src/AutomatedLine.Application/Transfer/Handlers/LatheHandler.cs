@@ -53,8 +53,9 @@ public sealed class LatheHandler : ITransferHandler
         var zTarget = z - CraneCoordinate.ZDrop(target.Type, info.Diameter);
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
 
-        // 目标特有：Y 二次偏移 → 尾座夹紧
+        // 目标特有：Y 二次偏移 → 发天车上料到位(#1102) → 尾座夹紧
         await ctx.MoveRelativeAsync(0, -yOffset, 0, cancellationToken).ConfigureAwait(false);
+        await ctx.WriteDeviceAsync(target, "CraneLoadInPlace", 1, cancellationToken).ConfigureAwait(false);
         await ctx.WaitDeviceAsync(target, "TailstockClamped", true, cancellationToken).ConfigureAwait(false);
         await ctx.MagnetOffAsync(cancellationToken).ConfigureAwait(false);
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
