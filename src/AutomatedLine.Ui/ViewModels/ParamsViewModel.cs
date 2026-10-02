@@ -88,8 +88,8 @@ public partial class ParamsViewModel : ObservableObject
             Console.WriteLine($"[ParamsViewModel] 保存参数失败：{ex.Message}");
         }
 
-        // 保存后重建，界面值以最新配置为准
-        BuildCategories();
+        // 保存后按内存值重建卡片；此处**不重读配置**（文件重载有延迟，会读回旧值导致看起来没生效）
+        RebuildCards();
     }
 
     /// <summary>
@@ -98,6 +98,14 @@ public partial class ParamsViewModel : ObservableObject
     private void BuildCategories()
     {
         _options = _configService.GetAppOptions();
+        RebuildCards();
+    }
+
+    /// <summary>
+    /// 用当前 <c>_options</c> 重建分类卡片。**不重读配置**，避免磁盘重载延迟读到旧值。
+    /// </summary>
+    private void RebuildCards()
+    {
         Categories.Clear();
 
         var collection = new ParamCategoryViewModel("采集", "设备/天车采集周期与通信超时");
@@ -108,7 +116,6 @@ public partial class ParamsViewModel : ObservableObject
         var scheduling = new ParamCategoryViewModel("调度", "候选任务重算与派发节奏");
         scheduling.Items.Add(IntItem("候选任务生成周期(ms)", () => _options.Scheduling.GenerateIntervalMs, v => _options.Scheduling.GenerateIntervalMs = v));
         scheduling.Items.Add(IntItem("调度周期(ms)", () => _options.Scheduling.ScheduleIntervalMs, v => _options.Scheduling.ScheduleIntervalMs = v));
-        scheduling.Items.Add(IntItem("设备预约超时(ms)", () => _options.Scheduling.ReservationTimeoutMs, v => _options.Scheduling.ReservationTimeoutMs = v));
         Categories.Add(scheduling);
 
         var crane = new ParamCategoryViewModel("天车", "运动超时与到位/下压容差");

@@ -44,9 +44,6 @@ public sealed class SchedulingOptions
 
     /// <summary>集中调度周期（毫秒）。</summary>
     public int ScheduleIntervalMs { get; set; } = 500;
-
-    /// <summary>设备预约超时（毫秒）。超时后回收预约，避免死占资源。</summary>
-    public int ReservationTimeoutMs { get; set; } = 60000;
 }
 
 /// <summary>
