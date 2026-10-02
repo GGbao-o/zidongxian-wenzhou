@@ -14,13 +14,17 @@ namespace AutomatedLine.Application.Scheduling;
 /// <summary>
 /// 集中式调度器（架构文档 §8.4）。
 /// 全系统只有一个调度器，统一决定"哪个任务 → 哪台天车"，避免两台天车抢同一任务。
-/// 派发流程：选天车 → 原子获取路权 → 预约源/目标设备 → 占用天车执行锁 → 置 CurrentTask，Worker 推进状态机。
-/// 路权统一在**派发时**获取；失败则本周期跳过（此时尚未占用天车，无需回滚）。
+/// 派发只做只读判断（路权/预约/空闲等），通过后把任务写入**该车任务队列**（<see cref="Runtime.CraneTaskChannels"/>）：
+/// **不碰 <c>Crane.Runtime</c>**，天车空闲/任务/执行由该车 Worker 独占决定。
+/// 真正的路权/预约获取在状态机执行时完成，拿不到则回滚。
 /// </summary>
 public sealed class CraneScheduler : IHostedService
 {
     /// <summary>候选任务池。</summary>
     private readonly CandidateTaskPool _candidatePool;
+
+    /// <summary>每车任务队列（调度器→Worker 交接通道）。</summary>
+    private readonly CraneTaskChannels _channels;
 
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
@@ -53,6 +57,7 @@ public sealed class CraneScheduler : IHostedService
     /// 构造函数。
     /// </summary>
     /// <param name="candidatePool">候选任务池</param>
+    /// <param name="channels">每车任务队列</param>
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="driverRegistry">驱动注册表（按需读天车状态）</param>
     /// <param name="rightOfWayManager">路权管理器</param>
@@ -62,6 +67,7 @@ public sealed class CraneScheduler : IHostedService
     /// <param name="logger">日志</param>
     public CraneScheduler(
         CandidateTaskPool candidatePool,
+        CraneTaskChannels channels,
         CraneRegistry craneRegistry,
         DriverRegistry driverRegistry,
         RightOfWayManager rightOfWayManager,
@@ -71,6 +77,7 @@ public sealed class CraneScheduler : IHostedService
         IAppLogger logger)
     {
         _candidatePool = candidatePool;
+        _channels = channels;
         _craneRegistry = craneRegistry;
         _driverRegistry = driverRegistry;
         _rightOfWayManager = rightOfWayManager;
@@ -226,7 +233,7 @@ public sealed class CraneScheduler : IHostedService
                     continue;   // 设备被别的任务预约 → 试下一台车
                 }
 
-                // 判断通过 → 派发：只登记任务归属，**不占用任何锁**   创建一个 TransportTask（运输任务），把所有必要信息打包
+                // 判断通过 → 派发：只把任务写入该车队列（**不碰 Crane.Runtime**；天车状态由 Worker 独占管理）
                 var transportTask = new TransportTask
                 {
                     WorkpieceRuntimeId = task.Id,
@@ -239,14 +246,17 @@ public sealed class CraneScheduler : IHostedService
                     State = TransportTaskState.Assigned,
                     AssignedCraneId = crane.Id
                 };
-                // 登记天车状态
-                crane.Runtime.CurrentTask = transportTask;
-                crane.Runtime.State = CraneState.Reserved;
-                crane.Runtime.Step = TransportStep.AcquireResources;   // 第一步：状态机执行时获取路权+预约
+
+                if (!_channels.For(crane.Id).Writer.TryWrite(transportTask))
+                {
+                    blockReason = $"{crane.Name} 任务队列已满（已有一条待执行）";
+                    continue;   // 该车已占位 → 试下一台车
+                }
+
                 task.Runtime.TaskState = WorkpieceState.Assigned;
 
                 _logger.Info(LogCategory.Scheduling,
-                    $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，待状态机执行时取路权/预约）");
+                    $"派发：任务 {Short(task.Id)} {candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，已入队待执行）");
                 dispatched = true;
                 break;   // 该候选已派人，处理下一个候选
             }

@@ -150,6 +150,7 @@ public partial class App : System.Windows.Application
 
         // P3 调度链：候选池、预约、路权、线路控制、异常协调、状态机
         services.AddSingleton<CandidateTaskPool>();
+        services.AddSingleton<CraneTaskChannels>();   // 每车任务队列（调度器→Worker 交接）
         services.AddSingleton<ResourceReservationManager>();
         services.AddSingleton<RightOfWayManager>();
         services.AddSingleton<LineControlService>();

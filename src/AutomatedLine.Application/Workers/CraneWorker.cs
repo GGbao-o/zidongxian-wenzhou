@@ -3,18 +3,23 @@ using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Diagnostics;
+using AutomatedLine.Domain.Tasks;
 using Microsoft.Extensions.Hosting;
 
 namespace AutomatedLine.Application.Workers;
 
 /// <summary>
 /// 天车执行 Worker：**每台启用天车一个独立后台循环**，各自推进自己的任务（真正并行）。
-/// 每台车有任务时一次跑完整条线性流程（见 <see cref="CraneStateMachine.RunFlowAsync"/>）。
+/// 任务经 <see cref="CraneTaskChannels"/> 交接：Worker 出队后**独占**写本车 <see cref="Crane.Runtime"/>，
+/// 一次跑完整条线性流程（见 <see cref="CraneStateMachine.RunFlowAsync"/>）。
 /// </summary>
 public sealed class CraneWorker : IHostedService
 {
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
+
+    /// <summary>每车任务队列（交接通道）。</summary>
+    private readonly CraneTaskChannels _channels;
 
     /// <summary>状态机（编排器）。</summary>
     private readonly CraneStateMachine _stateMachine;
@@ -38,18 +43,21 @@ public sealed class CraneWorker : IHostedService
     /// 构造函数。
     /// </summary>
     /// <param name="craneRegistry">天车注册表</param>
+    /// <param name="channels">每车任务队列</param>
     /// <param name="stateMachine">状态机编排器</param>
     /// <param name="lineControl">线路控制</param>
     /// <param name="configService">配置服务</param>
     /// <param name="logger">日志</param>
     public CraneWorker(
         CraneRegistry craneRegistry,
+        CraneTaskChannels channels,
         CraneStateMachine stateMachine,
         LineControlService lineControl,
         IConfigService configService,
         IAppLogger logger)
     {
         _craneRegistry = craneRegistry;
+        _channels = channels;
         _stateMachine = stateMachine;
         _lineControl = lineControl;
         _configService = configService;
@@ -90,29 +98,39 @@ public sealed class CraneWorker : IHostedService
         _cts = null;
     }
 
-    /// <summary>单台天车的执行循环：有任务则一次跑完整条流程。</summary>
+    /// <summary>
+    /// 单台天车的执行循环：线路运行中且队列有任务 → 出队、独占写本车 Runtime、一次跑完整条流程。
+    /// </summary>
     /// <param name="crane">天车</param>
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunCraneAsync(Crane crane, CancellationToken cancellationToken)
     {
         var interval = Math.Max(50, _configService.GetAppOptions().StateMachine.ExecuteIntervalMs);
+        var channel = _channels.For(crane.Id);
+
         while (!cancellationToken.IsCancellationRequested)
         {
-            // 线路运行中且本车有任务 → 推进整条流程（一次 await 到底）
-            if (_lineControl.IsRunning && crane.Runtime.CurrentTask is { } task)
+            if (_lineControl.IsRunning && channel.Reader.TryRead(out var task))
             {
+                // 本车 Runtime 由本循环独占写（调度器不再碰它）
+                crane.Runtime.CurrentTask = task;
+                crane.Runtime.State = CraneState.Reserved;
+                crane.Runtime.Step = TransportStep.AcquireResources;
+
                 try
                 {
                     await _stateMachine.RunFlowAsync(crane, task, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
+                    ClearRuntime(crane);
                     throw;
                 }
                 catch (Exception ex)
                 {
                     // 状态机内部已按二分处理；这里兜底，避免循环退出
                     _logger.Error(LogCategory.StateMachine, $"{crane.Name} 流程异常", ex);
+                    ClearRuntime(crane);
                 }
             }
 
@@ -125,5 +143,15 @@ public sealed class CraneWorker : IHostedService
                 break;
             }
         }
+    }
+
+    /// <summary>异常兜底：清空本车任务态（幂等）。</summary>
+    /// <param name="crane">天车</param>
+    private static void ClearRuntime(Crane crane)
+    {
+        crane.Runtime.CurrentTask = null;
+        crane.Runtime.State = CraneState.Idle;
+        crane.Runtime.Step = TransportStep.Idle;
+        crane.Runtime.LockedInterval = null;
     }
 }
