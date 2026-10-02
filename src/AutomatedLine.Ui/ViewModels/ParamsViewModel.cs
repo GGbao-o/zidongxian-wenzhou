@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
+using AutomatedLine.Application.Runtime;
+using AutomatedLine.Domain.Devices;
 using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -20,6 +22,9 @@ public partial class ParamsViewModel : ObservableObject
     /// <summary>弹窗服务。</summary>
     private readonly IDialogService _dialogService;
 
+    /// <summary>运行态容器（枚举斜床设备）。</summary>
+    private readonly DeviceRegistry _deviceRegistry;
+
     /// <summary>当前参数快照。编辑时直接改这里，再整体保存。</summary>
     private AppOptions _options = new();
 
@@ -31,10 +36,12 @@ public partial class ParamsViewModel : ObservableObject
     /// </summary>
     /// <param name="configService">配置服务</param>
     /// <param name="dialogService">弹窗服务</param>
-    public ParamsViewModel(IConfigService configService, IDialogService dialogService)
+    /// <param name="deviceRegistry">设备注册表</param>
+    public ParamsViewModel(IConfigService configService, IDialogService dialogService, DeviceRegistry deviceRegistry)
     {
         _configService = configService;
         _dialogService = dialogService;
+        _deviceRegistry = deviceRegistry;
         BuildCategories();
     }
 
@@ -117,6 +124,30 @@ public partial class ParamsViewModel : ObservableObject
         stateMachine.Items.Add(IntItem("状态机推进周期(ms)", () => _options.StateMachine.ExecuteIntervalMs, v => _options.StateMachine.ExecuteIntervalMs = v));
         Categories.Add(stateMachine);
 
+        // 斜床搬运参数：每台斜床一份（顶尖距离 / 大孔 / 小孔偏移），保存到 App:Transfer
+        var lathes = _deviceRegistry.Snapshot()
+            .Where(d => d.Type == DeviceType.LatheMachine)
+            .OrderBy(d => d.Id)
+            .ToList();
+        if (lathes.Count > 0)
+        {
+            var transfer = new ParamCategoryViewModel("斜床搬运", "每台斜床的 Y 二次偏移参数");
+            foreach (var lathe in lathes)
+            {
+                if (!_options.Transfer.Lathes.TryGetValue(lathe.Id, out var opt))
+                {
+                    opt = new LatheTransferOptions();
+                    _options.Transfer.Lathes[lathe.Id] = opt;
+                }
+
+                transfer.Items.Add(DoubleItem($"{lathe.Name} 顶尖距离", () => opt.TailstockCenterDistance, v => opt.TailstockCenterDistance = v));
+                transfer.Items.Add(DoubleItem($"{lathe.Name} 大孔偏移", () => opt.BigHoleOffset, v => opt.BigHoleOffset = v));
+                transfer.Items.Add(DoubleItem($"{lathe.Name} 小孔偏移", () => opt.SmallHoleOffset, v => opt.SmallHoleOffset = v));
+            }
+
+            Categories.Add(transfer);
+        }
+
         var logging = new ParamCategoryViewModel("日志", "目录与滚动策略");
         logging.Items.Add(TextItem("日志目录", () => _options.Logging.Directory, v => _options.Logging.Directory = v));
         logging.Items.Add(IntItem("保留天数", () => _options.Logging.RetentionDays, v => _options.Logging.RetentionDays = v));
@@ -137,6 +168,10 @@ public partial class ParamsViewModel : ObservableObject
     /// <summary>构造文本参数项。</summary>
     private static ParamItemViewModel TextItem(string name, Func<string> get, Action<string> set)
         => new(name, get(), set);
+
+    /// <summary>构造浮点参数项。</summary>
+    private static ParamItemViewModel DoubleItem(string name, Func<double> get, Action<double> set)
+        => new(name, get().ToString("0.###"), text => set(double.TryParse(text, out var v) ? v : 0));
 }
 
 /// <summary>
