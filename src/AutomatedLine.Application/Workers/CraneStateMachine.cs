@@ -103,6 +103,9 @@ public sealed class CraneStateMachine
 
         var ctx = new TransferContext(crane, wp, _driverRegistry, _configStore, _configService.GetAppOptions(), _logger);
 
+        // 标记本车归属（Worker 通常已设；此处兜底，且让异常协调器能取到当前任务）
+        crane.Runtime.CurrentTask = task;
+
         // 1) 原子获取路权 + 预约；失败回滚、任务回 Waiting
         if (!Acquire(crane, task))
         {

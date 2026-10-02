@@ -89,6 +89,7 @@ public class TransferFlowTests
         await new LatheHandler().PlaceAsync(ctx, target, CancellationToken.None);
 
         Assert.Contains("REL(0,-172,0)", craneDriver.Actions);
+        Assert.Contains("CraneLoadInPlace=1", targetDriver.Writes);   // #1102 天车上料到位
         Assert.Contains("CraneLoadDone=1", targetDriver.Writes);
     }
 
