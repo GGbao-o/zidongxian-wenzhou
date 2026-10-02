@@ -39,7 +39,8 @@ public sealed class GrinderHandler : ITransferHandler
         var info = ctx.Workpiece.Info;
         await ctx.WriteDeviceAsync(target, "RollerDiameter", info.Diameter, cancellationToken).ConfigureAwait(false);
         await ctx.WriteDeviceAsync(target, "RollerLength", info.Length, cancellationToken).ConfigureAwait(false);
-        await ctx.WriteDeviceAsync(target, "MachiningMode", info.PlugHole, cancellationToken).ConfigureAwait(false);
+        // 加工模式：1=大孔(PlugHole=100)、2=小孔(PlugHole=70)
+        await ctx.WriteDeviceAsync(target, "MachiningMode", info.PlugHole == 100 ? 1 : 2, cancellationToken).ConfigureAwait(false);
         await ctx.WriteDeviceAsync(target, "DataTransDone", 1, cancellationToken).ConfigureAwait(false);
         await ctx.WaitDeviceAsync(target, "RequestLoad", true, cancellationToken).ConfigureAwait(false);
 

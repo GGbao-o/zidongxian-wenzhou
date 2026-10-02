@@ -33,10 +33,11 @@ public sealed class MarkerHandler : ITransferHandler
     {
         await ctx.WaitDeviceAsync(target, "Idle", true, cancellationToken).ConfigureAwait(false);
 
-        // 下发打印内容（FC16）与直径
+        // 下发打印内容（FC16）、外径（=板长）、内径（=堵孔 70/100）
         var info = ctx.Workpiece.Info;
         await ctx.WriteDeviceAsync(target, "PrintContent", info.PrintContent, cancellationToken).ConfigureAwait(false);
-        await ctx.WriteDeviceAsync(target, "RollerOuterDiameter", info.Diameter, cancellationToken).ConfigureAwait(false);
+        await ctx.WriteDeviceAsync(target, "RollerOuterDiameter", info.Length, cancellationToken).ConfigureAwait(false);
+        await ctx.WriteDeviceAsync(target, "RollerInnerDiameter", info.PlugHole, cancellationToken).ConfigureAwait(false);
 
         var (x, y, z) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         var zTarget = z - CraneCoordinate.ZDrop(target.Type, info.Diameter);
