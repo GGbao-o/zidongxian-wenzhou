@@ -69,6 +69,7 @@ public sealed class CraneWorker : IHostedService
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        //对每一个天车启动task.run
         foreach (var crane in _craneRegistry.Snapshot().Where(c => c.IsEnabled))
         {
             var c = crane;
@@ -105,7 +106,9 @@ public sealed class CraneWorker : IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunCraneAsync(Crane crane, CancellationToken cancellationToken)
     {
+        //天车状态机（Worker）推进周期（毫秒）。
         var interval = Math.Max(50, _configService.GetAppOptions().StateMachine.ExecuteIntervalMs);
+        //天车任务队列 容量未1
         var channel = _channels.For(crane.Id);
 
         while (!cancellationToken.IsCancellationRequested)
@@ -116,13 +119,14 @@ public sealed class CraneWorker : IHostedService
                 crane.Runtime.CurrentTask = task;
                 crane.Runtime.State = CraneState.Reserved;
                 crane.Runtime.Step = TransportStep.AcquireResources;
-
                 try
                 {
+                    //开始执行任务
                     await _stateMachine.RunFlowAsync(crane, task, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
+                    //清空本车任务态
                     ClearRuntime(crane);
                     throw;
                 }

@@ -120,6 +120,7 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        //从配置中拿候选任务生成周期 500ms
         var interval = Math.Max(50, _configService.GetAppOptions().Scheduling.GenerateIntervalMs);
         while (!cancellationToken.IsCancellationRequested)
         {
@@ -146,6 +147,7 @@ public sealed class TransportTaskGenerator : IHostedService
 
             try
             {
+                //延迟500ms
                 await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)

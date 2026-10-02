@@ -11,12 +11,13 @@ public sealed class BoringHandler : ITransferHandler
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.BoringMachine;
 
-    /// <inheritdoc />
+    /// <inheritdoc />取料
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         await ctx.WaitDeviceAsync(source, "RequestUnload", true, cancellationToken).ConfigureAwait(false);
 
         var (x, y, z) = await ctx.BaseOfAsync(source, cancellationToken).ConfigureAwait(false);
+        //三轴运动
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
