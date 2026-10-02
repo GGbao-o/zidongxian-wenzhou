@@ -204,10 +204,16 @@ public sealed class TransferContext
         {
             cancellationToken.ThrowIfCancellationRequested();
             var signals = await driver.ReadAllSignalsAsync(cancellationToken).ConfigureAwait(false);
-            var value = signals.TryGetValue(signal, out var v) && v is bool b && b;
-            if (value == expected)
+
+            // 信号必须真实读到：缺失视为"未知"，不算满足。
+            // 否则 expected=false（如"下料架无板"）会把"没采到数据"误当成"无料"，可能往实际有板的架子放料。
+            if (signals.TryGetValue(signal, out var v))
             {
-                return;
+                var value = v is bool b && b;
+                if (value == expected)
+                {
+                    return;
+                }
             }
 
             if (DateTime.UtcNow >= deadline)
