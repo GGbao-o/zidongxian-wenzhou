@@ -97,7 +97,19 @@ public partial class DeviceRowViewModel : ObservableObject
         Name = device.Name;
         TypeText = DisplayText.DeviceTypeText(device.Type);
         PositionX = device.PositionX;
-        StateText = DisplayText.ResourceStateText(device.ResourceState);
+
+        var signals = device.Signals;
+        var alarm = signals?.GetBool("Alarm") == true;
+        var reserved = _isReserved?.Invoke(device.Id) == true;
+
+        // 资源状态由事实派生（连接/报警/预约/在制）；DeviceBase.ResourceState 从不写入，已删除
+        var state =
+            !device.IsConnected ? ResourceState.Disconnected
+            : alarm ? ResourceState.Alarm
+            : reserved ? ResourceState.Reserved
+            : device.CurrentWorkpiece is not null ? ResourceState.Busy
+            : ResourceState.Available;
+        StateText = DisplayText.ResourceStateText(state);
 
         // 上料架的"当前工件"用队头（外部传入）；其余设备用内存的当前工件
         var info = (displayWorkpiece ?? device.CurrentWorkpiece)?.Info;
@@ -106,17 +118,15 @@ public partial class DeviceRowViewModel : ObservableObject
             ? "无工件"
             : $"版号：{info.PlateNo}  序号：{info.SerialNo}\n长度：{info.Length:0.###}  直径：{info.Diameter:0.###}";
 
-        // 加工状态：当前按"内存是否有工件 + 资源忙"判断；P3 接入调度后由状态机精确维护
-        var machining = device.ResourceState == ResourceState.Busy || device.CurrentWorkpiece is not null;
+        // 加工状态：在制（内存有工件或资源忙）
+        var machining = state == ResourceState.Busy || device.CurrentWorkpiece is not null;
         MachiningText = machining ? "加工中" : "空闲";
 
-        var signals = device.Signals;
         ConnectionText = device.IsConnected ? "已连接" : "未连接";
-        HasAlarm = signals?.GetBool("Alarm") == true;
+        HasAlarm = alarm;
         AlarmText = HasAlarm ? "报警" : "正常";
 
         // 边框颜色优先级：断开(红) > 已预约(黄) > 正常(绿)
-        var reserved = _isReserved?.Invoke(device.Id) ?? false;
         CardStatus = !device.IsConnected
             ? CardStatus.Faulted
             : reserved

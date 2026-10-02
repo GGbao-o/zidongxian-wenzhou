@@ -37,9 +37,6 @@ public abstract class DeviceBase
     /// <summary>是否启用。停用的设备不参与调度。</summary>
     public bool IsEnabled { get; set; } = true;
 
-    /// <summary>资源可用性。逻辑预约与物理阻塞是两回事（架构文档 §11）。</summary>
-    public ResourceState ResourceState { get; set; } = ResourceState.Available;
-
     /// <summary>
     /// 最近一次采集的信号快照。由 DeviceStateCollector 整体替换写入，业务层只读。
     /// 为 null 表示尚未采集过。
