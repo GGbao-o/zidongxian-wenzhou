@@ -91,4 +91,24 @@ public class ResourceReservationManagerTests
         Assert.True(manager.Release(task));
         Assert.False(manager.IsReserved(3));
     }
+
+    /// <summary>
+    /// 源已 ReleaseSource 后又被别的任务预约：中止本任务**不得**释放别人的源。
+    /// （状态机执行到 Transit 会释放源，之后源可能被别的天车预约。）
+    /// </summary>
+    [Fact]
+    public void Release_AfterSourceReReserved_DoesNotFreeOtherSource()
+    {
+        var manager = new ResourceReservationManager(new TestLogger());
+        var task = Guid.NewGuid();
+        manager.TryReserve(task, sourceId: 2, targetId: 3);
+        manager.ReleaseSource(task);                 // 源2 已释放、变空闲
+
+        var other = Guid.NewGuid();
+        Assert.True(manager.TryReserve(other, 2, 9)); // 别的任务预约了源2
+
+        manager.Release(task);                        // 中止本任务
+        Assert.True(manager.IsReserved(2));           // 源2 仍属别的任务
+        Assert.False(manager.IsReserved(3));          // 本任务目标已释放
+    }
 }

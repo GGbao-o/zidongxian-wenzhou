@@ -74,12 +74,18 @@ public sealed class ResourceReservationManager
             released = _byTask.Remove(taskId, out var devices);
             if (released)
             {
-                if (devices.Source is int sourceId)
+                // 只释放"确实仍属于本任务"的设备：源可能已在 Transit 里 ReleaseSource（记录为 null），
+                // 且该源可能已被别的任务重新预约——归属校验保证绝不误删别人的预约。
+                if (devices.Source is int sourceId
+                    && _byDevice.TryGetValue(sourceId, out var sourceOwner) && sourceOwner == taskId)
                 {
                     _byDevice.Remove(sourceId);
                 }
 
-                _byDevice.Remove(devices.Target);
+                if (_byDevice.TryGetValue(devices.Target, out var targetOwner) && targetOwner == taskId)
+                {
+                    _byDevice.Remove(devices.Target);
+                }
             }
         }
 
@@ -102,7 +108,8 @@ public sealed class ResourceReservationManager
         bool released = false;
         lock (_sync)
         {
-            if (_byTask.TryGetValue(taskId, out var devices) && devices.Source is int sourceId)
+            if (_byTask.TryGetValue(taskId, out var devices) && devices.Source is int sourceId
+                && _byDevice.TryGetValue(sourceId, out var owner) && owner == taskId)
             {
                 _byDevice.Remove(sourceId);
                 _byTask[taskId] = (null, devices.Target);
