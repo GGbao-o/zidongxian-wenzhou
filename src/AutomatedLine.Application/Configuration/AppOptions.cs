@@ -16,6 +16,9 @@ public sealed class AppOptions
     /// <summary>天车运动类参数（超时与容差）。</summary>
     public CraneOptions Crane { get; set; } = new();
 
+    /// <summary>搬运流程参数（斜床 Y 二次偏移等）。</summary>
+    public TransferOptions Transfer { get; set; } = new();
+
     /// <summary>状态机类参数。</summary>
     public StateMachineOptions StateMachine { get; set; } = new();
 
