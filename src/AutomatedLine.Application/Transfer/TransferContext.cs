@@ -92,13 +92,14 @@ public sealed class TransferContext
     }
 
     /// <summary>绝对移动并校验成功（失败抛业务异常，走二分中止）。</summary>
-    /// <param name="x">X</param>
-    /// <param name="y">Y</param>
-    /// <param name="z">Z</param>
+    /// <param name="x">X（内部四舍五入取整）</param>
+    /// <param name="y">Y（内部四舍五入取整）</param>
+    /// <param name="z">Z（内部四舍五入取整）</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public async Task MoveAbsoluteAsync(int x, int y, int z, CancellationToken cancellationToken)
+    public async Task MoveAbsoluteAsync(double x, double y, double z, CancellationToken cancellationToken)
     {
-        var result = await CraneDriver.MoveAbsoluteAsync(x, y, z, cancellationToken).ConfigureAwait(false);
+        var result = await CraneDriver.MoveAbsoluteAsync(
+            (int)Math.Round(x), (int)Math.Round(y), (int)Math.Round(z), cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException($"天车绝对移动失败：{result.Code} {result.Message}");
