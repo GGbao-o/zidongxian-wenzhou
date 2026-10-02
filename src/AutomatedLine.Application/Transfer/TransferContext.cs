@@ -120,6 +120,21 @@ public sealed class TransferContext
         }
     }
 
+    /// <summary>下发本车三轴速度/加速度/减速度（流程开始时设置一次）。</summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    public async Task SetCraneSpeedAsync(CancellationToken cancellationToken)
+    {
+        var result = await CraneDriver.SetAbsoluteSpeedAsync(
+            (int)Math.Round(Crane.SpeedX), (int)Math.Round(Crane.AccelX), (int)Math.Round(Crane.DecelX),
+            (int)Math.Round(Crane.SpeedY), (int)Math.Round(Crane.AccelY), (int)Math.Round(Crane.DecelY),
+            (int)Math.Round(Crane.SpeedZ), (int)Math.Round(Crane.AccelZ), (int)Math.Round(Crane.DecelZ),
+            cancellationToken).ConfigureAwait(false);
+        if (!result.IsSuccess)
+        {
+            throw new InvalidOperationException($"设置天车速度失败：{result.Code} {result.Message}");
+        }
+    }
+
     /// <summary>充磁（内部轮询 X6）并置不可回滚边界。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     public async Task MagnetOnAsync(CancellationToken cancellationToken)

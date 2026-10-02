@@ -46,6 +46,7 @@
 RunFlowAsync(编排，通用唯一一份)：
   AcquireResources    // 原子：路权 + 源/目标预约（+ 确认天车忙标志）；失败回滚
   AuditSource         // 再审核源（PLC 点位 + 内存工件一致）
+  SetSpeed            // 设置本车三轴 速度/加速度/减速度
   await PickAsync(source.Type)        // 一大串：通用取料前缀 + 【源特有段】
   await TransitAsync(target)          // 通用：XY→target、释放源预约、缩小路权
   await PlaceAsync(target.Type)       // 一大串：通用放料前缀 + 【目标特有段】 + 通用放料后缀
@@ -58,6 +59,7 @@ RunFlowAsync(编排，通用唯一一份)：
 |---|---|---|
 | 1 | 原子获取：路权 + 源/目标预约 +（确认）天车忙标志 | 编排 |
 | 2 | 再审核**源**：PLC 点位 + 内存工件一致 | 通用（判定信号随源类型，见 §3.2） |
+| 2.5 | **设置本车速度**（X/Y/Z 速度、加速度、减速度，`ICraneDriver.SetAbsoluteSpeedAsync`） | 编排 |
 | 3 | XY → source | 通用（**斜床源 Y 用二次偏移位置**，见 §3.2） |
 | 4 | Z 下降到取料位 | 通用 |
 | 5 | 感应有板（`X11`） | 通用 |

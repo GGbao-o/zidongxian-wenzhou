@@ -120,6 +120,9 @@ public sealed class CraneStateMachine
             // 2) 再审核源（内存一致；PLC 点位由 handler 首步等待）
             AuditSource(source, wp);
 
+            // 下发本车运动速度（每次执行前设置一次）
+            await ctx.SetCraneSpeedAsync(cancellationToken).ConfigureAwait(false);
+
             // 3) 取料
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
             source.CurrentWorkpiece = null;

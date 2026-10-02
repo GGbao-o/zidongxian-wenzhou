@@ -75,7 +75,10 @@ public sealed class FakeCraneDriver : ICraneDriver
 
     /// <inheritdoc />
     public Task<CraneCommandResult> SetAbsoluteSpeedAsync(int speedX, int accelX, int decelX, int speedY, int accelY, int decelY, int speedZ, int accelZ, int decelZ, CancellationToken ct = default)
-        => Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, "ok"));
+    {
+        Actions.Add("SET_SPEED");
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, "ok"));
+    }
 
     /// <inheritdoc />
     public Task<CraneCommandResult> DrainOpenAsync(CancellationToken ct = default)

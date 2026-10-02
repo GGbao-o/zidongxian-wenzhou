@@ -122,6 +122,7 @@ public class CraneStateMachineTests
         Assert.False(h.Row.IsHeld(task.TaskId));
         Assert.False(h.Reservations.IsReserved(h.Source.Id));
         Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.Contains("SET_SPEED", h.CraneDriver.Actions);   // 流程开始先设速度
     }
 
     /// <summary>acquire 失败：路权被占 → 回滚、任务仍 Waiting、未动设备。</summary>

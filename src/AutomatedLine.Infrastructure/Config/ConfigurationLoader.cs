@@ -118,6 +118,15 @@ public class ConfigurationLoader : IConfigurationLoader
                 OffsetX = config.OffsetX,
                 OffsetY = config.OffsetY,
                 OffsetZ = config.OffsetZ,
+                SpeedX = config.SpeedX,
+                SpeedY = config.SpeedY,
+                SpeedZ = config.SpeedZ,
+                AccelX = config.AccelX,
+                AccelY = config.AccelY,
+                AccelZ = config.AccelZ,
+                DecelX = config.DecelX,
+                DecelY = config.DecelY,
+                DecelZ = config.DecelZ,
                 IsEnabled = config.IsEnabled
             };
             _craneRegistry.Register(crane);

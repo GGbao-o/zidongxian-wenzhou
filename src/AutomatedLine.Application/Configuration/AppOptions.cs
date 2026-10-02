@@ -65,14 +65,10 @@ public sealed class CraneOptions
 /// <summary>状态机参数。用超时兜住"PLC 不回信号"的异常场景。</summary>
 public sealed class StateMachineOptions
 {
-    /// <summary>取料确认超时（毫秒）。</summary>
-    public int PickTimeoutMs { get; set; } = 15000;
-
-    /// <summary>放料确认超时（毫秒）。</summary>
-    public int PlaceTimeoutMs { get; set; } = 15000;
-
-    /// <summary>握手信号超时（毫秒）。</summary>
-    public int HandshakeTimeoutMs { get; set; } = 10000;
+    /// <summary>
+    /// 握手信号超时（毫秒）：给设备/天车下发信号后读反馈，超时即抛异常由程序处理。默认 60s。
+    /// </summary>
+    public int HandshakeTimeoutMs { get; set; } = 60000;
 
     /// <summary>天车状态机（Worker）推进周期（毫秒）。</summary>
     public int ExecuteIntervalMs { get; set; } = 500;

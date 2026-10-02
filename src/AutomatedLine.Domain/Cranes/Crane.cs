@@ -43,6 +43,33 @@ public sealed class Crane
     /// <summary>Z 轴偏移量。</summary>
     public double OffsetZ { get; set; }
 
+    /// <summary>X 轴速度。</summary>
+    public double SpeedX { get; set; }
+
+    /// <summary>Y 轴速度。</summary>
+    public double SpeedY { get; set; }
+
+    /// <summary>Z 轴速度。</summary>
+    public double SpeedZ { get; set; }
+
+    /// <summary>X 轴加速度。</summary>
+    public double AccelX { get; set; }
+
+    /// <summary>Y 轴加速度。</summary>
+    public double AccelY { get; set; }
+
+    /// <summary>Z 轴加速度。</summary>
+    public double AccelZ { get; set; }
+
+    /// <summary>X 轴减速度。</summary>
+    public double DecelX { get; set; }
+
+    /// <summary>Y 轴减速度。</summary>
+    public double DecelY { get; set; }
+
+    /// <summary>Z 轴减速度。</summary>
+    public double DecelZ { get; set; }
+
     /// <summary>是否启用。停用的天车不参与调度。</summary>
     public bool IsEnabled { get; set; } = true;
 
