@@ -80,7 +80,9 @@ public sealed class TaskAbortCoordinator
             // 释放锁与预约（幂等，即使前面步骤失败也不影响）
             if (task is not null)
             {
+                //路权释放
                 _rightOfWayManager.Release(task.TaskId);
+                //预约释放
                 _reservationManager.Release(task.TaskId);
             }
 

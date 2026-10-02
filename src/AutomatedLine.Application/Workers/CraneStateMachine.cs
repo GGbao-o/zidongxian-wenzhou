@@ -169,6 +169,7 @@ public sealed class CraneStateMachine
         }
         catch (Exception ex)
         {
+            //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
             _abortCoordinator.Abort(crane, detail);   // 统一：释放天车/路权/预约 + 清理任务 + 暂停 + 报警
