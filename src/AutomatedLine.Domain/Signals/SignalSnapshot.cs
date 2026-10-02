@@ -8,7 +8,7 @@ namespace AutomatedLine.Domain.Signals;
 /// <param name="Sequence">递增版本号，用于判断快照新旧</param>
 /// <param name="ConnectionState">连接状态</param>
 /// <param name="Quality">数据质量</param>
-/// <param name="Values">点名 → 值的只读字典</param>
+/// <param name="Values">点名 → 值的只读字典  这个是存信号点位的</param>
 public sealed record SignalSnapshot(
     DateTime CapturedAt,
     long Sequence,
