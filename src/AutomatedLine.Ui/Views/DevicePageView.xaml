@@ -50,6 +50,8 @@
                     <DataGridTextColumn Binding="{Binding Config.IpAddress}" Header="IP" />
                     <DataGridTextColumn Binding="{Binding Config.Port}" Header="端口" />
                     <DataGridTextColumn Binding="{Binding Config.PositionX}" Header="物理位置X" />
+                    <DataGridTextColumn Binding="{Binding Config.PositionY}" Header="物理位置Y" />
+                    <DataGridTextColumn Binding="{Binding Config.PositionZ}" Header="物理位置Z" />
                     <DataGridTextColumn Binding="{Binding Config.MinDiameter}" Header="最小直径" />
                     <DataGridTextColumn Binding="{Binding Config.MaxDiameter}" Header="最大直径" />
                     <DataGridTextColumn Binding="{Binding Config.MinLength}" Header="最小长度" />
