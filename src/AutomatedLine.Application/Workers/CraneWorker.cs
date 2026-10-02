@@ -1,4 +1,5 @@
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Cranes;
@@ -33,6 +34,9 @@ public sealed class CraneWorker : IHostedService
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
+    /// <summary>异常协调器（兜底释放资源）。</summary>
+    private readonly TaskAbortCoordinator _abortCoordinator;
+
     /// <summary>取消源。</summary>
     private CancellationTokenSource? _cts;
 
@@ -47,6 +51,7 @@ public sealed class CraneWorker : IHostedService
     /// <param name="stateMachine">状态机编排器</param>
     /// <param name="lineControl">线路控制</param>
     /// <param name="configService">配置服务</param>
+    /// <param name="abortCoordinator">异常协调器</param>
     /// <param name="logger">日志</param>
     public CraneWorker(
         CraneRegistry craneRegistry,
@@ -54,6 +59,7 @@ public sealed class CraneWorker : IHostedService
         CraneStateMachine stateMachine,
         LineControlService lineControl,
         IConfigService configService,
+        TaskAbortCoordinator abortCoordinator,
         IAppLogger logger)
     {
         _craneRegistry = craneRegistry;
@@ -61,6 +67,7 @@ public sealed class CraneWorker : IHostedService
         _stateMachine = stateMachine;
         _lineControl = lineControl;
         _configService = configService;
+        _abortCoordinator = abortCoordinator;
         _logger = logger;
     }
 
@@ -127,13 +134,15 @@ public sealed class CraneWorker : IHostedService
                 catch (OperationCanceledException)
                 {
                     //清空本车任务态
+                    FallbackAbort(crane, "任务被取消（兜底）");
                     ClearRuntime(crane);
                     throw;
                 }
                 catch (Exception ex)
                 {
-                    // 状态机内部已按二分处理；这里兜底，避免循环退出
-                    _logger.Error(LogCategory.StateMachine, $"{crane.Name} 流程异常", ex);
+                    // 状态机内部已处理；这里兜底（含释放资源），避免循环退出与资源泄漏
+                    _logger.Error(LogCategory.StateMachine, $"{crane.Name} 流程异常（兜底）", ex);
+                    FallbackAbort(crane, ex.Message);
                     ClearRuntime(crane);
                 }
             }
@@ -146,6 +155,17 @@ public sealed class CraneWorker : IHostedService
             {
                 break;
             }
+        }
+    }
+
+    /// <summary>异常兜底：若还挂着任务，走统一中止（释放路权/预约、清理任务、暂停线路）。</summary>
+    /// <param name="crane">天车</param>
+    /// <param name="reason">原因</param>
+    private void FallbackAbort(Crane crane, string reason)
+    {
+        if (crane.Runtime.CurrentTask is not null)
+        {
+            _abortCoordinator.Abort(crane, $"[{crane.Name}] 兜底异常：{reason}");
         }
     }
 

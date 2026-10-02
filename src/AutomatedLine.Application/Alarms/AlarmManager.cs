@@ -29,6 +29,11 @@ public sealed class AlarmManager
     public ActiveAlarmStore Store { get; }
 
     /// <summary>
+    /// 新增一条报警时触发（供界面弹窗提示）。**在后台线程触发**，订阅方需自行切到 UI 线程。
+    /// </summary>
+    public event EventHandler<ActiveAlarm>? Raised;
+
+    /// <summary>
     /// 触发一条报警。
     /// </summary>
     /// <param name="level">级别</param>
@@ -67,5 +72,8 @@ public sealed class AlarmManager
         {
             _logger.Warn(LogCategory.Alarm, text);
         }
+
+        // 通知订阅者（界面弹窗）
+        Raised?.Invoke(this, alarm);
     }
 }

@@ -7,7 +7,6 @@ using AutomatedLine.Domain.Alarms;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Domain.Tasks;
-using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Application.Alarms;
 
@@ -117,32 +116,6 @@ public sealed class TaskAbortCoordinator
                 crane.Id,
                 true);
         }
-    }
-
-    /// <summary>
-    /// 取料阶段异常/取消的回滚：释放路权/预约/天车锁，任务回 <see cref="WorkpieceState.Waiting"/>；
-    /// **不清内存、不弃板、不暂停线路**（此时板仍在源设备、未写设备）。
-    /// </summary>
-    /// <param name="crane">天车</param>
-    /// <param name="task">搬运任务</param>
-    /// <param name="reason">原因（日志）</param>
-    public void RollbackToSource(Crane crane, TransportTask task, string reason)
-    {
-        _rightOfWayManager.Release(task.TaskId);
-        _reservationManager.Release(task.TaskId);
-
-        crane.Runtime.CurrentTask = null;
-        crane.Runtime.State = CraneState.Idle;
-        crane.Runtime.Step = TransportStep.Idle;
-        crane.Runtime.LockedInterval = null;
-
-        var workpieceTask = _taskManager.Get(task.WorkpieceRuntimeId);
-        if (workpieceTask is not null)
-        {
-            workpieceTask.Runtime.TaskState = WorkpieceState.Waiting;
-        }
-
-        _logger.Warn(LogCategory.Task, $"{crane.Name} 取料阶段回滚任务 {task.TaskId:N}：{reason}");
     }
 
     /// <summary>

@@ -10,6 +10,7 @@ using AutomatedLine.Application.RightOfWay;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Application.Scheduling;
 using AutomatedLine.Application.Workers;
+using AutomatedLine.Domain.Alarms;
 using AutomatedLine.Infrastructure.Config;
 using AutomatedLine.Infrastructure.Logging;
 using AutomatedLine.Infrastructure.Persistence;
@@ -75,6 +76,28 @@ public partial class App : System.Windows.Application
         }
 
         await _host.StartAsync();
+
+        // 报警弹窗：Error 及以上弹出对话框（含天车/设备/工件/步骤/原因），线路此时已暂停
+        var alarmManager = _host.Services.GetRequiredService<AutomatedLine.Application.Alarms.AlarmManager>();
+        alarmManager.Raised += (_, alarm) =>
+        {
+            if (alarm.Level < AlarmLevel.Error)
+            {
+                return;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                var resource = alarm.ResourceId is null
+                    ? string.Empty
+                    : (alarm.ResourceIsCrane ? $"天车{alarm.ResourceId}" : $"设备{alarm.ResourceId}");
+                System.Windows.MessageBox.Show(
+                    $"{alarm.Message}\n\n来源：{alarm.Source}  {resource}\n系统动作：{alarm.SystemAction}\n时间：{alarm.LastAt:yyyy-MM-dd HH:mm:ss}",
+                    "线路异常（已暂停）",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+            });
+        };
 
         // 冷启动核对：等采集器跑一轮拿到信号后，检查现场是否有无法关联的内存在制品
         var coldStartChecker = _host.Services.GetRequiredService<IColdStartChecker>();

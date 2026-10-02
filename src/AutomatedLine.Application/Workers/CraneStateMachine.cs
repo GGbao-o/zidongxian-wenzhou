@@ -124,12 +124,13 @@ public sealed class CraneStateMachine
         {
             // 2) 再审核源（内存一致；PLC 点位由 handler 首步等待）
             phase = $"审核源({source.Name})";
-            //再审核源设备内存一致
             AuditSource(source, wp);
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 审核源通过：{source.Name}");
 
             // 下发本车运动速度（每次执行前设置一次）
             phase = "设置速度";
             await ctx.SetCraneSpeedAsync(cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 设置速度完成");
 
             // 3) 取料
             phase = $"取料({source.Name})";
@@ -137,10 +138,12 @@ public sealed class CraneStateMachine
             source.CurrentWorkpiece = null;
             crane.CurrentWorkpiece = wp;
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 取料完成：{source.Name}");
 
             // 4) 中转：XY→目标、释放源预约、缩小路权
             phase = $"中转({source.Name}→{target.Name})";
             await TransitAsync(ctx, crane, task, target, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 中转到达：{target.Name}（已释放源预约并缩小路权）");
 
             // 5) 放料
             phase = $"放料({target.Name})";
@@ -149,6 +152,7 @@ public sealed class CraneStateMachine
             crane.CurrentWorkpiece = null;
             wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(target.Id);
             wp.Runtime.CurrentProcess = task.TargetProcess;
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 放料完成：{target.Name}");
 
             // 6) 完成：回安全位、释放全部
             phase = "收尾";
@@ -158,16 +162,23 @@ public sealed class CraneStateMachine
         }
         catch (OperationCanceledException)
         {
-            _logger.Error(LogCategory.StateMachine, $"[{crane.Name}] 任务 {route} 步骤[{phase}] 被取消");
-            HandleAbnormal(crane, task, ctx, $"取消于步骤[{phase}]");
+            var detail = BuildFailure(crane, ctx, route, phase, "任务被取消");
+            _logger.Error(LogCategory.StateMachine, detail);
+            _abortCoordinator.Abort(crane, detail);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.Error(LogCategory.StateMachine, $"[{crane.Name}] 任务 {route} 步骤[{phase}] 异常：{ex.Message}", ex);
-            HandleAbnormal(crane, task, ctx, $"{phase}：{ex.Message}");
+            var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
+            _logger.Error(LogCategory.StateMachine, detail, ex);
+            _abortCoordinator.Abort(crane, detail);   // 统一：释放天车/路权/预约 + 清理任务 + 暂停 + 报警
         }
     }
+
+    /// <summary>构造异常详情（天车 / 工件 / 源→目标 / 步骤 / 原因 / 是否已充磁）。</summary>
+    private static string BuildFailure(Crane crane, TransferContext ctx, string route, string phase, string reason)
+        => $"[{crane.Name}] 任务 {route} 步骤[{phase}] 异常：{reason}"
+           + (ctx.HasPieceOnCrane ? "（已充磁：板可能在天车上）" : "（未充磁：板应在源设备）");
 
     /// <summary>原子获取路权 + 源/目标预约；失败回滚并让出天车。</summary>
     private bool Acquire(Crane crane, TransportTask task)
@@ -253,16 +264,4 @@ public sealed class CraneStateMachine
         _logger.Info(LogCategory.StateMachine, $"{crane.Name} 完成任务 {task.TaskId:N}");
     }
 
-    /// <summary>异常二分：充磁前回滚、充磁后全量清理 + 暂停。</summary>
-    private void HandleAbnormal(Crane crane, TransportTask task, TransferContext ctx, string reason)
-    {
-        if (ctx.HasPieceOnCrane)
-        {
-            _abortCoordinator.Abort(crane, reason);
-        }
-        else
-        {
-            _abortCoordinator.RollbackToSource(crane, task, reason);
-        }
-    }
 }

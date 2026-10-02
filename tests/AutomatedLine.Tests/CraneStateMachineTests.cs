@@ -141,21 +141,22 @@ public class CraneStateMachineTests
         Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
     }
 
-    /// <summary>充磁前异常（源未就绪）：RollbackToSource，不清内存、不暂停线路。</summary>
+    /// <summary>统一异常：源未就绪超时（充磁前）→ 释放资源 + 清理任务 + 暂停线路（不再区分充磁前后）。</summary>
     [Fact]
-    public async Task BeforeMagnet_Failure_RollsBack_NotDiscard()
+    public async Task SourceNotReady_Aborts_Releases_And_Pauses()
     {
         var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), handshakeTimeoutMs: 0);
-        // 上料架无板 → 取料等待超时（充磁之前）
+        // 上料架无板 → 取料等待超时
         var (wp, task) = h.NewTask();
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
 
-        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
-        Assert.NotNull(h.Tasks.Get(wp.Id));                    // 未弃板
-        Assert.NotEqual(LineState.PausedByFault, h.Line.State); // 未暂停
+        Assert.Null(h.Tasks.Get(wp.Id));                        // 任务已清理
+        Assert.Equal(LineState.PausedByFault, h.Line.State);    // 已暂停
         Assert.Null(h.Crane.Runtime.CurrentTask);
-        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Row.IsHeld(task.TaskId));                // 路权已释放
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));   // 源预约已释放
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));   // 目标预约已释放
     }
 
     /// <summary>充磁后异常（目标未就绪）：Abort 弃板 + 暂停线路 + 释放全部。</summary>
