@@ -1,4 +1,3 @@
-using AutomatedLine.Domain.Signals;
 using AutomatedLine.Domain.Tasks;
 using AutomatedLine.Domain.Workpieces;
 
@@ -81,18 +80,6 @@ public sealed class Crane
 
     /// <summary>运行态（当前任务、状态、步骤、持有区间）。</summary>
     public CraneRuntime Runtime { get; } = new();
-
-    /// <summary>
-    /// 最近一次采集的信号快照。由 DeviceStateCollector 整体替换写入，业务层只读。
-    /// 为 null 表示尚未采集过。
-    /// </summary>
-    public SignalSnapshot? Signals { get; internal set; }
-
-    /// <summary>是否已连接（依据最近快照）。</summary>
-    public bool IsConnected => Signals is not null && Signals.IsConnected;
-
-    /// <summary>天车信号点位（逻辑点名，地址待点位表补入）。</summary>
-    public IReadOnlyList<SignalPoint> SignalPoints => CraneSignalCatalog.Points;
 
     /// <summary>
     /// 构造函数。
