@@ -151,12 +151,14 @@ public class CraneStateMachineTests
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
 
-        Assert.Null(h.Tasks.Get(wp.Id));                        // 任务已清理
-        Assert.Equal(LineState.PausedByFault, h.Line.State);    // 已暂停
+        var discarded = h.Tasks.Get(wp.Id);
+        Assert.NotNull(discarded);                                      // 保留记录（标记丢弃，不删除）
+        Assert.Equal(WorkpieceState.Discarded, discarded!.Runtime.TaskState);
+        Assert.Equal(LineState.PausedByFault, h.Line.State);            // 已暂停
         Assert.Null(h.Crane.Runtime.CurrentTask);
-        Assert.False(h.Row.IsHeld(task.TaskId));                // 路权已释放
-        Assert.False(h.Reservations.IsReserved(h.Source.Id));   // 源预约已释放
-        Assert.False(h.Reservations.IsReserved(h.Target.Id));   // 目标预约已释放
+        Assert.False(h.Row.IsHeld(task.TaskId));                        // 路权已释放
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));           // 源预约已释放
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));           // 目标预约已释放
     }
 
     /// <summary>充磁后异常（目标未就绪）：Abort 弃板 + 暂停线路 + 释放全部。</summary>
@@ -170,8 +172,10 @@ public class CraneStateMachineTests
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
 
-        Assert.Null(h.Tasks.Get(wp.Id));                        // 已弃板
-        Assert.Equal(LineState.PausedByFault, h.Line.State);    // 已暂停
+        var discarded = h.Tasks.Get(wp.Id);
+        Assert.NotNull(discarded);                                      // 保留记录（标记丢弃，不删除）
+        Assert.Equal(WorkpieceState.Discarded, discarded!.Runtime.TaskState);
+        Assert.Equal(LineState.PausedByFault, h.Line.State);            // 已暂停
         Assert.Null(h.Crane.Runtime.CurrentTask);
         Assert.False(h.Reservations.IsReserved(h.Source.Id));
         Assert.False(h.Reservations.IsReserved(h.Target.Id));

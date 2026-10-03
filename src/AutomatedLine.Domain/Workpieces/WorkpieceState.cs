@@ -19,7 +19,10 @@ public enum WorkpieceState
     /// <summary>已完成。工件已按工艺走完全部工序并下线。</summary>
     Completed = 3,
 
-    /// <summary>已丢弃。因硬故障被 TaskAbortCoordinator 丢弃，内存身份随之丢失（刻意设计）。</summary>
+    /// <summary>
+    /// 已丢弃。因异常被 `TaskAbortCoordinator` 标记丢弃：**保留记录便于追溯**，
+    /// 但设备/天车对该工件的引用已清除、位置置 `Discarded`；不再参与生成，人工可将该任务从列表移除。
+    /// </summary>
     Discarded = 4,
 
     /// <summary>已创建/未启动。已录入内存，但人工尚未点"启动"，**不生成候选**。</summary>

@@ -7,6 +7,7 @@ using AutomatedLine.Domain.Alarms;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Domain.Tasks;
+using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Application.Alarms;
 
@@ -95,12 +96,17 @@ public sealed class TaskAbortCoordinator
 
             if (task is not null)
             {
-                // 清空相关设备内存引用
+                // 清空相关设备内存引用（源/目标设备若正持有该工件）
                 ClearDeviceWorkpiece(task.SourceDeviceId, task.WorkpieceRuntimeId);
                 ClearDeviceWorkpiece(task.TargetDeviceId, task.WorkpieceRuntimeId);
 
-                // 丢弃该工件任务（工件身份随之丢失，见 §3.5）
-                _taskManager.Remove(task.WorkpieceRuntimeId);
+                // 标记该工件为"已丢弃"（**保留记录**便于追溯；设备/天车引用已清、位置置 Discarded），不删除任务
+                var workpieceTask = _taskManager.Get(task.WorkpieceRuntimeId);
+                if (workpieceTask is not null)
+                {
+                    workpieceTask.Runtime.TaskState = WorkpieceState.Discarded;
+                    workpieceTask.Runtime.CurrentLocation = WorkpieceLocation.Discarded;
+                }
 
                 _logger.Error(LogCategory.Task,
                     $"任务中止：{crane.Name} 任务 {task.TaskId:N} 原因：{reason}");
@@ -114,7 +120,7 @@ public sealed class TaskAbortCoordinator
                 AlarmLevel.Error,
                 crane.Name,
                 reason,
-                "已释放路权/预约/锁并清空内存，线路暂停；现场残留实物取走后重新启动即可",
+                "已释放路权/预约/锁并标记该工件为已丢弃，线路暂停；现场残留实物取走后重新启动即可",
                 crane.Id,
                 true);
         }
