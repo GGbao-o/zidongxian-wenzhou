@@ -124,6 +124,7 @@
                         <DataGridTextColumn Header="圆角大小" Binding="{Binding FilletSize}" />
                         <DataGridTextColumn Header="是否动平衡" Binding="{Binding NeedBalancingText}" />
                         <DataGridTextColumn Header="打印内容" Binding="{Binding PrintContent}" />
+                        <DataGridTextColumn Header="斜床工艺" Binding="{Binding LatheMachiningModeText}" />
                         <DataGridTextColumn Header="当前工序" Binding="{Binding ProcessText}" />
                         <DataGridTextColumn Header="入线顺序" Binding="{Binding QueueOrderText}" />
                         <DataGridTextColumn Header="当前位置" Binding="{Binding LocationText}" />
@@ -134,6 +135,13 @@
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <StackPanel Orientation="Horizontal">
+                                        <ui:Button
+                                            Margin="0,0,6,0"
+                                            Padding="8,2"
+                                            Command="{Binding DataContext.EditTaskCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                            CommandParameter="{Binding}"
+                                            Content="编辑"
+                                            IsEnabled="{Binding CanEdit}" />
                                         <ui:Button
                                             Margin="0,0,6,0"
                                             Padding="8,2"

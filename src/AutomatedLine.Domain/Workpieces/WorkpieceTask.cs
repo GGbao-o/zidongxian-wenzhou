@@ -8,8 +8,12 @@ namespace AutomatedLine.Domain.Workpieces;
 /// </summary>
 public sealed class WorkpieceTask
 {
-    /// <summary>工件自身数据（不变）。</summary>
-    public WorkpieceInfo Info { get; }
+    /// <summary>
+    /// 工件自身数据。
+    /// 对外只读；**未入线时**可由 <see cref="ReplaceInfo"/> 整体替换（"编辑任务"功能），
+    /// 采用整体替换而不是逐字段改，避免出现"改到一半"的中间态被读到。
+    /// </summary>
+    public WorkpieceInfo Info { get; private set; }
 
     /// <summary>工件运行状态（可变）。</summary>
     public WorkpieceRuntime Runtime { get; }
@@ -29,4 +33,13 @@ public sealed class WorkpieceTask
         Info = info;
         Runtime = runtime ?? new WorkpieceRuntime();
     }
+
+    /// <summary>
+    /// 整体替换工件数据（"编辑任务"功能）。
+    /// **只允许未入线任务**，由 <c>IRuntimeTaskManager.TryUpdate</c> 统一把关。
+    /// 调用方必须保证 <paramref name="info"/> 的 <c>RuntimeId</c> 与原数据一致：
+    /// 任务身份由 <c>RuntimeId</c> 标识，换了它就等于换了一块板（任务表/设备预约/天车引用会全部对不上）。
+    /// </summary>
+    /// <param name="info">新的工件数据（RuntimeId 必须沿用）</param>
+    internal void ReplaceInfo(WorkpieceInfo info) => Info = info;
 }

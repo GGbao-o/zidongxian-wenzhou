@@ -58,6 +58,10 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private string _needBalancingText = string.Empty;
 
+    /// <summary>斜床工艺文本（写入斜床宏 #909，取值 1~10）。</summary>
+    [ObservableProperty]
+    private string _latheMachiningModeText = string.Empty;
+
     /// <summary>当前工序文本。</summary>
     [ObservableProperty]
     private string _processText = string.Empty;
@@ -95,13 +99,22 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     private bool _canPause;
 
     /// <summary>
+    /// 是否允许"编辑"：**只有 `Created`（添加后从未点过启动）可编辑**。
+    /// 一旦入线（Waiting/Paused/已派发/执行中…）就不再允许——工件可能已被取走或已按旧参数加工过，
+    /// 此时改数据会造成"设备按旧参数加工、后续工序按新参数加工"的错配。
+    /// 注意：这只是界面的软提示，最终由 <c>IRuntimeTaskManager.TryUpdate</c> 在服务端再判一次。
+    /// </summary>
+    [ObservableProperty]
+    private bool _canEdit;
+
+    /// <summary>
     /// 构造函数。
     /// </summary>
     /// <param name="task">底层工件任务</param>
     public WorkpieceTaskViewModel(WorkpieceTask task)
     {
-        _task = task;
-        Refresh();
+        _task = task;// ← 共享引用
+        Refresh(); // ← 这一刻把 Info/Runtime 的值抄进自己的可观察属性
     }
 
     /// <summary>底层任务标识，供命令定位。</summary>
@@ -131,6 +144,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         InnerHoleTaper = info.InnerHoleTaper;
         FilletSize = info.FilletSize;
         NeedBalancingText = info.NeedBalancing == 1 ? "需要" : "不需要";
+        LatheMachiningModeText = info.LatheMachiningMode.ToString();
         ProcessText = ProcessToText(runtime.CurrentProcess);
         // QueueOrderText（入线顺序=上料架队列排位）由主 ViewModel 按当前队列统一计算后写入，见 MainViewModel.RefreshTasks
         LocationText = runtime.CurrentLocation.ToString();
@@ -142,6 +156,8 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         CanPause = runtime.TaskState == WorkpieceState.Waiting;
         CanClear = runtime.TaskState is WorkpieceState.Created or WorkpieceState.Waiting or WorkpieceState.Paused
             or WorkpieceState.Discarded or WorkpieceState.Completed;
+        // 编辑只开放给"添加后从未启动"的任务：入线后一律不许改数据
+        CanEdit = runtime.TaskState == WorkpieceState.Created;
     }
 
     /// <summary>

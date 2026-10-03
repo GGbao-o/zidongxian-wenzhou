@@ -43,7 +43,8 @@ public sealed class LatheHandler : ITransferHandler
         await ctx.WriteDeviceAsync(target, "RollerLength", info.Length, cancellationToken).ConfigureAwait(false);
         await ctx.WriteDeviceAsync(target, "RollerDiameter", info.Diameter, cancellationToken).ConfigureAwait(false);
         await ctx.WriteDeviceAsync(target, "BorePlug", info.PlugHole, cancellationToken).ConfigureAwait(false);
-        await ctx.WriteDeviceAsync(target, "MachiningMode", 1, cancellationToken).ConfigureAwait(false);   // #909 先写死 1
+        // #909 加工模式：按工件录入的"斜床工艺"原样下发（1~10），不再写死
+        await ctx.WriteDeviceAsync(target, "MachiningMode", info.LatheMachiningMode, cancellationToken).ConfigureAwait(false);
         await ctx.WriteDeviceAsync(target, "DataSentDone", 1, cancellationToken).ConfigureAwait(false);
         await ctx.WaitDeviceAsync(target, "RequestLoad", true, cancellationToken).ConfigureAwait(false);
 

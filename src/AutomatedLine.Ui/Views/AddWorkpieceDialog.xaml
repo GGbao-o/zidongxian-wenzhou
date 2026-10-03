@@ -6,7 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
-    Title="添加工件"
+    Title="{Binding WindowTitle}"
     Width="440"
     d:DataContext="{d:DesignInstance Type=vm:AddWorkpieceViewModel}"
     ExtendsContentIntoTitleBar="True"
@@ -21,7 +21,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="添加工件" />
+        <ui:TitleBar Grid.Row="0" Title="{Binding WindowTitle}" />
 
         <StackPanel Grid.Row="1" Margin="24">
             <!-- 两列布局：左边标签，右边输入框 -->
@@ -42,8 +42,10 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
+                <!-- 版号：身份字段，编辑模式下只读 -->
                 <TextBlock
                     Grid.Row="0"
                     Grid.Column="0"
@@ -54,9 +56,11 @@
                     Grid.Row="0"
                     Grid.Column="1"
                     Margin="0,0,0,12"
+                    IsEnabled="{Binding IdentityEditable}"
                     PlaceholderText="必填"
                     Text="{Binding PlateNo, UpdateSourceTrigger=PropertyChanged}" />
 
+                <!-- 序号：身份字段，编辑模式下只读 -->
                 <TextBlock
                     Grid.Row="1"
                     Grid.Column="0"
@@ -67,6 +71,7 @@
                     Grid.Row="1"
                     Grid.Column="1"
                     Margin="0,0,0,12"
+                    IsEnabled="{Binding IdentityEditable}"
                     PlaceholderText="必填"
                     Text="{Binding SerialNo, UpdateSourceTrigger=PropertyChanged}" />
 
@@ -167,17 +172,33 @@
                     Margin="0,0,0,12"
                     Text="{Binding FilletSize, UpdateSourceTrigger=PropertyChanged}" />
 
+                <!-- 是否做动平衡：身份/工艺判定字段，编辑模式下只读 -->
                 <TextBlock
                     Grid.Row="10"
                     Grid.Column="0"
-                    Margin="0,0,12,0"
+                    Margin="0,0,12,12"
                     VerticalAlignment="Center"
                     Text="是否做动平衡" />
                 <ui:TextBox
                     Grid.Row="10"
                     Grid.Column="1"
+                    Margin="0,0,0,12"
+                    IsEnabled="{Binding IdentityEditable}"
                     PlaceholderText="0=不需要，1=需要"
                     Text="{Binding NeedBalancing, UpdateSourceTrigger=PropertyChanged}" />
+
+                <!-- 斜床工艺：写入斜床宏 #909 加工模式，1~10 -->
+                <TextBlock
+                    Grid.Row="11"
+                    Grid.Column="0"
+                    Margin="0,0,12,0"
+                    VerticalAlignment="Center"
+                    Text="斜床工艺" />
+                <ui:TextBox
+                    Grid.Row="11"
+                    Grid.Column="1"
+                    PlaceholderText="1~10"
+                    Text="{Binding LatheMachiningMode, UpdateSourceTrigger=PropertyChanged}" />
             </Grid>
 
             <StackPanel

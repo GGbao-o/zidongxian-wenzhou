@@ -1,3 +1,5 @@
+using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Domain.Diagnostics;
 using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Application.Runtime;
@@ -17,6 +19,18 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
 
     /// <summary>入线顺序号计数器（点"启动"时自增，作为入队尾的顺序）。</summary>
     private int _queueOrder;
+
+    /// <summary>日志。人工"编辑任务"要写 operation.txt，便于事后追溯"哪块板什么时候被谁改过"。</summary>
+    private readonly IAppLogger _logger;
+
+    /// <summary>
+    /// 构造函数。
+    /// </summary>
+    /// <param name="logger">日志</param>
+    public RuntimeTaskManager(IAppLogger logger)
+    {
+        _logger = logger;
+    }
 
     /// <inheritdoc />
     public event EventHandler? Changed;
@@ -99,6 +113,48 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         Changed?.Invoke(this, EventArgs.Empty);
         return true;
     }
+
+    /// <inheritdoc />
+    public bool TryUpdate(Guid taskId, WorkpieceInfo info)
+    {
+        WorkpieceTask? task;
+        string before;
+        lock (_sync)
+        {
+            task = _tasks.FirstOrDefault(t => t.Id == taskId);
+
+            // 【准入判据】只允许"添加后从未启动"（Created）的任务改数据。
+            // 一旦入线（Waiting/Paused/已派发/执行中…），工件可能已被取走、或已按旧参数加工过，
+            // 再改数据会让"设备按旧参数加工、后续工序按新参数加工"错配。
+            if (task is null || task.Runtime.TaskState != WorkpieceState.Created)
+            {
+                return false;
+            }
+
+            before = Describe(task.Info);
+
+            // 原子整体替换（不逐字段改），且 RuntimeId 已由调用方沿用 → 任务身份不变
+            task.ReplaceInfo(info);
+        }
+
+        // 锁外写日志与通知，避免持锁回调外部代码
+        _logger.Info(LogCategory.Operation, $"编辑任务 {Short(taskId)}：{before} → {Describe(info)}");
+        Changed?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    /// <summary>工件数据摘要（编辑日志用：只列可编辑字段，便于前后对比）。</summary>
+    /// <param name="info">工件数据</param>
+    /// <returns>摘要文本</returns>
+    private static string Describe(WorkpieceInfo info)
+        => $"直径={info.Diameter} 长度={info.Length} 左堵厚={info.LeftPlugThickness} 右堵厚={info.RightPlugThickness} " +
+           $"堵孔={info.PlugHole} 打印内容={info.PrintContent} 内孔锥度={info.InnerHoleTaper} " +
+           $"圆角={info.FilletSize} 斜床工艺={info.LatheMachiningMode}";
+
+    /// <summary>任务标识短文本，用于日志。</summary>
+    /// <param name="taskId">任务标识</param>
+    /// <returns>前 8 位</returns>
+    private static string Short(Guid taskId) => taskId.ToString("N")[..8];
 
     /// <inheritdoc />
     public WorkpieceTask? Get(Guid taskId)

@@ -43,6 +43,21 @@ public sealed class WorkpieceInfo
     /// <summary>是否做动平衡：**0=不需要、1=需要**。</summary>
     public int NeedBalancing { get; init; }
 
+    /// <summary>斜床工艺最小值。</summary>
+    public const int LatheMachiningModeMin = 1;
+
+    /// <summary>斜床工艺最大值。</summary>
+    public const int LatheMachiningModeMax = 10;
+
+    /// <summary>斜床工艺默认值（= 历史上"写死 1"的行为）。</summary>
+    public const int LatheMachiningModeDefault = 1;
+
+    /// <summary>
+    /// 斜床工艺（写入斜床宏 `#909 加工模式`）：**取值 1~10**，由操作员按现场工艺卡录入，
+    /// 斜床放料时**原样下发**（见 <c>LatheHandler</c>）。默认 1。
+    /// </summary>
+    public int LatheMachiningMode { get; init; } = LatheMachiningModeDefault;
+
     /// <summary>
     /// 便于日志/界面显示的简要描述。
     /// </summary>

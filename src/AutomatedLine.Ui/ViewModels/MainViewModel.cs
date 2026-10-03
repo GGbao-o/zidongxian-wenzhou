@@ -201,6 +201,47 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
+    /// 编辑任务命令：修改**未入线**任务的工件数据
+    /// （长度 / 直径 / 左堵厚 / 右堵厚 / 堵孔 / 打印内容 / 内孔锥度 / 圆角大小 / 斜床工艺）。
+    /// 版号、序号、是否做动平衡属于身份与工艺判定字段，编辑模式下只读。
+    /// 入线后一律不允许编辑：工件可能已被取走、或已按旧参数加工过。
+    /// </summary>
+    /// <param name="row">待编辑的任务行</param>
+    [RelayCommand]
+    private void EditTask(WorkpieceTaskViewModel? row)
+    {
+        if (row is null || !row.CanEdit)
+        {
+            return;
+        }
+
+        var task = _taskManager.Get(row.TaskId);
+        if (task is null)
+        {
+            return;
+        }
+
+        // 弹窗用当前数据预填；确定后返回新的工件数据（RuntimeId 沿用，任务身份不变）
+        var updated = _dialogService.ShowEditWorkpieceDialog(task.Info);
+        if (updated is null)
+        {
+            return;
+        }
+
+        // 【双保险】服务端再判一次状态：弹窗打开期间任务可能已被启动，此时必须拒绝
+        if (_taskManager.TryUpdate(row.TaskId, updated))
+        {
+            Console.WriteLine($"[MainViewModel] 已编辑任务 {updated.PlateNo}/{updated.SerialNo}");
+        }
+        else
+        {
+            _dialogService.ShowMessage(
+                "该任务已入线（已启动 / 已派发 / 执行中），不允许再修改工件数据。",
+                "无法编辑");
+        }
+    }
+
+    /// <summary>
     /// 入线按钮（启动/暂停共用一个按钮）：
     /// 未运行 → 先冷启动核对再启动线路（生成器等服务随之工作）；运行中 → 暂停线路（服务停止生成）。
     /// </summary>
@@ -262,15 +303,16 @@ public partial class MainViewModel : ObservableObject
     private void RefreshTasks()
     {
         var devices = _deviceRegistry.Snapshot();
-        var snapshot = _taskManager.Snapshot();
+        var snapshot = _taskManager.Snapshot();  // 列表是新的，但元素是【同一批 WorkpieceTask 实例】  拿到的是和 Application 层共用的同一批 WorkpieceTask 对象
 
         // 入线顺序 = 上料架待取板队列里的**排位**（1、2、3…连续），算法见 BuildQueuePositions
         var queuePositions = BuildQueuePositions(snapshot);
 
         Tasks.Clear();
+        //便利任务缓存 进行一个个添加到列表中 页面就会变
         foreach (var task in snapshot)
         {
-            var row = new WorkpieceTaskViewModel(task)
+            var row = new WorkpieceTaskViewModel(task)  // 行 VM 内部 _task = task ← 引用，不是拷贝
             {
                 QueueOrderText = queuePositions.TryGetValue(task.Id, out var pos) ? pos.ToString() : "-"
             };

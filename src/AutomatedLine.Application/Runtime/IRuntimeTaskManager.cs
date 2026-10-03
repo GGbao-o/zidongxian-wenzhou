@@ -41,6 +41,17 @@ public interface IRuntimeTaskManager
     bool Pause(Guid taskId);
 
     /// <summary>
+    /// 修改**未入线**任务的工件数据（"编辑任务"）。
+    /// **只有 `Created`（添加后从未点过启动）才允许**：一旦入线，工件可能已被取走或已按旧参数加工过，
+    /// 此时改数据会造成"设备按旧参数加工、后续工序按新参数加工"的错配。
+    /// 实现必须**原子整体替换**工件数据（不逐字段改），且沿用原 <c>RuntimeId</c>（任务身份不变）。
+    /// </summary>
+    /// <param name="taskId">任务标识</param>
+    /// <param name="info">新的工件数据（RuntimeId 沿用原值）</param>
+    /// <returns>成功返回 true；任务不存在或状态不允许（已入线）返回 false</returns>
+    bool TryUpdate(Guid taskId, WorkpieceInfo info);
+
+    /// <summary>
     /// 按任务标识查找任务。
     /// </summary>
     /// <param name="taskId">任务标识</param>
