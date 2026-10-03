@@ -29,7 +29,9 @@ public sealed class ProcessRoute
 
     /// <summary>
     /// 创建默认工艺路线（上料 → 双头镗 → 斜床 → 研磨 → 动平衡 → 打号 → 验点 → 下料）。
-    /// 打号机、验点机是否上线以现场为准，此处标记为可选。
+    /// **这里只固定"顺序"**：某道工序是否真的参与工艺，由 <see cref="GetNextAvailable"/> 按
+    /// "该设备类型有没有启用设备"现算——没有设备的工序（如未上线的动平衡/验点）自动跳过；
+    /// 有设备的工序（如打号机）就是必经工序，设备离线时工件会等它，不会绕过去。
     /// </summary>
     /// <returns>默认工艺路线</returns>
     public static ProcessRoute CreateDefault() => new(new[]
@@ -39,10 +41,20 @@ public sealed class ProcessRoute
         new ProcessNode { Process = ProcessType.Lathing,   DeviceType = DeviceType.LatheMachine },
         new ProcessNode { Process = ProcessType.Grinding,  DeviceType = DeviceType.GrinderMachine },
         new ProcessNode { Process = ProcessType.Balancing, DeviceType = DeviceType.BalancingMachine },
-        new ProcessNode { Process = ProcessType.Marking,   DeviceType = DeviceType.MarkerMachine,  IsOptional = true },
-        new ProcessNode { Process = ProcessType.Checking,  DeviceType = DeviceType.CheckMachine,   IsOptional = true },
+        new ProcessNode { Process = ProcessType.Marking,   DeviceType = DeviceType.MarkerMachine },
+        new ProcessNode { Process = ProcessType.Checking,  DeviceType = DeviceType.CheckMachine },
         new ProcessNode { Process = ProcessType.Unloading, DeviceType = DeviceType.UnloadRack }
     });
+
+    /// <summary>
+    /// 构造"某设备类型当前是否有启用设备"的判据——**工序是否参与工艺的唯一口径**。
+    /// 生成器、主页面"下一道工序"、工序展示页都从这里取，
+    /// 避免三处各写一遍导致"界面显示"与"实际调度"口径漂移。
+    /// </summary>
+    /// <param name="devices">设备注册表快照</param>
+    /// <returns>判据：该类型有启用设备返回 true</returns>
+    public static Func<DeviceType, bool> AvailableDeviceFilter(IReadOnlyList<DeviceBase> devices)
+        => type => devices.Any(d => d.Type == type && d.IsEnabled);
 
     /// <summary>
     /// 计算指定工序的下一道工序（架构文档 §6.5：现算，不持久化）。

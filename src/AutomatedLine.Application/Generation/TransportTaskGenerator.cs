@@ -162,6 +162,9 @@ public sealed class TransportTaskGenerator : IHostedService
     {
         var devices = _deviceRegistry.Snapshot();
 
+        // 工序是否参与工艺的唯一判据（与主页面"下一道工序"、工序展示页共用），本周期构造一次
+        var hasDevice = ProcessRoute.AvailableDeviceFilter(devices);
+
         // 内存任务表里**既有**"主页面添加但未启动"的任务，**也有**"已启动入线"的任务：
         //   · 添加（未启动 Created）→ 只是列表上展示，不入队、不生成任务；
         //   · 启动（Waiting）→ 才算"入线任务"，参与候选生成；
@@ -200,7 +203,7 @@ public sealed class TransportTaskGenerator : IHostedService
             // 队列中的新工件 CurrentProcess 还是 Unknown，等价于"处于上料工序"，从它往后找第一道可执行工序。
             var currentProcess = runtime.CurrentProcess == ProcessType.Unknown ? ProcessType.Loading : runtime.CurrentProcess;
             //GetNextAvailable 会跳过没有启用设备的工艺节点
-            var next = _route.GetNextAvailable(currentProcess, type => HasUsableDevice(devices, type));
+            var next = _route.GetNextAvailable(currentProcess, hasDevice);
             if (next is null)
             {
                 // 后面已无可执行工序：视为走完
@@ -324,12 +327,4 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <summary>工件日志短文本（版号/序号）。</summary>
     private static string Describe(WorkpieceTask task) => task.Info.ToString();
 
-    /// <summary>
-    /// 判断某设备类型当前是否存在启用设备，用于决定工序节点是否跳过。
-    /// </summary>
-    /// <param name="devices">设备快照</param>
-    /// <param name="type">设备类型</param>
-    /// <returns>存在启用设备返回 true</returns>
-    private static bool HasUsableDevice(IReadOnlyList<DeviceBase> devices, DeviceType type)
-        => devices.Any(d => d.Type == type && d.IsEnabled);
 }

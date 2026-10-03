@@ -363,7 +363,7 @@ public partial class MainViewModel : ObservableObject
     private static void FillNextProcess(WorkpieceTaskViewModel row, WorkpieceTask task, IReadOnlyList<DeviceBase> devices)
     {
         var current = task.Runtime.CurrentProcess == ProcessType.Unknown ? ProcessType.Loading : task.Runtime.CurrentProcess;
-        var next = Route.GetNextAvailable(current, type => devices.Any(d => d.Type == type && d.IsEnabled));
+        var next = Route.GetNextAvailable(current, ProcessRoute.AvailableDeviceFilter(devices));
         if (next is null)
         {
             row.NextProcessText = "已完成";
