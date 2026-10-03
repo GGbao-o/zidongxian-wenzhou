@@ -248,7 +248,7 @@ public sealed class CraneScheduler : IHostedService
                     AssignedCraneId = crane.Id
                 };
 
-                // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）
+                // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）   将这个任务已派发  
                 if (!task.Runtime.TryTransition(WorkpieceState.Waiting, WorkpieceState.Assigned))
                 {
                     blockReason = "任务已被其它周期派发";
