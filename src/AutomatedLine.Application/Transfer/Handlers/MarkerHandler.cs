@@ -31,7 +31,8 @@ public sealed class MarkerHandler : ITransferHandler
     /// <inheritdoc />
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
-        await ctx.WaitDeviceAsync(target, "Idle", true, cancellationToken).ConfigureAwait(false);
+        // 等"设备空闲"：0001 的 0 表示空闲，故期望 Busy=false（不要写成 Idle=true）
+        await ctx.WaitDeviceAsync(target, "Busy", false, cancellationToken).ConfigureAwait(false);
 
         // 下发打印内容（FC16）、外径（=工件直径）、内径（=堵孔 70/100）
         var info = ctx.Workpiece.Info;

@@ -15,8 +15,12 @@ public static class MarkerMachineAddress
     public const byte UnitId = 1;
 
     // ── 输入寄存器（读，FC04）──
-    /// <summary>设备空闲（0001，0=空闲、1=忙碌）。</summary>
-    public const int Idle = 0;
+    /// <summary>
+    /// 设备忙碌（0001）。**值语义：0=设备空闲、1=设备忙碌**——0 才是空闲。
+    /// 因此点名刻意叫 <c>Busy</c>：使用方一律按 <c>Busy == false</c> 判断"可放料"，
+    /// 避免点名写成 Idle 时被误读成"1=空闲"。
+    /// </summary>
+    public const int Busy = 0;
 
     /// <summary>设备运行（0002，0=停止、1=运行）。</summary>
     public const int Running = 1;

@@ -101,7 +101,7 @@ public static class DisplayText
         "RequestLoad" => "请求上料",
         "RequestUnload" => "请求下料",
         "ProcessDone" => "加工完成",
-        "Idle" => "空闲",
+        "Busy" => "忙碌",
         "Running" => "运行中",
         "NewPrintContent" => "有新打印内容",
         "Machining" => "加工中",

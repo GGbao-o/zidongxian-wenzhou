@@ -316,7 +316,7 @@ public sealed class TransportTaskGenerator : IHostedService
     private static string ReceiveHint(DeviceBase device) => device.Type switch
     {
         DeviceType.BoringMachine or DeviceType.LatheMachine or DeviceType.GrinderMachine => "RequestData=false",
-        DeviceType.MarkerMachine => "Idle=false",
+        DeviceType.MarkerMachine => "Busy=true（设备忙碌）",
         DeviceType.UnloadRack => "有板（不可放）或无采集数据",
         _ => "无放料规则"
     };

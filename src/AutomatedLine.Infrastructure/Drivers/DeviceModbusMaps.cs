@@ -61,7 +61,7 @@ public static class DeviceModbusMaps
     public static IReadOnlyList<ModbusPoint> Marker() => new List<ModbusPoint>
     {
         // 读：输入寄存器
-        new("Idle", ModbusArea.InputRegister, MarkerMachineAddress.Idle, false, true),
+        new("Busy", ModbusArea.InputRegister, MarkerMachineAddress.Busy, false, true),
         new("Running", ModbusArea.InputRegister, MarkerMachineAddress.Running, false, true),
         new("ProcessDone", ModbusArea.InputRegister, MarkerMachineAddress.ProcessDone, false, true),
         new("NewPrintContent", ModbusArea.InputRegister, MarkerMachineAddress.NewPrintContent, false, true),
