@@ -120,6 +120,7 @@ public sealed class CraneStateMachine
 
         // 记录当前步骤（异常日志用），覆盖各阶段   phase是阶段 只是用来输出日志
         var phase = "未知";
+        //已经拿路权 设备预约了 下面开始天车状态机了 天车开始执行任务
         try
         {
             // 2) 再审核源（内存一致；PLC 点位由 handler 首步等待）
@@ -172,6 +173,7 @@ public sealed class CraneStateMachine
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
+            //异常处理机制 状态机发生异常了 下面的方法处理   1.释放路权 2.释放预约 3.清空天车内存状态 4.清空相关设备内存引用 5.标记工件已丢弃Discarded
             _abortCoordinator.Abort(crane, detail);   // 统一：释放天车/路权/预约 + 清理任务 + 暂停 + 报警
         }
     }
@@ -188,6 +190,7 @@ public sealed class CraneStateMachine
 
         if (!_rightOfWayManager.TryAcquire(task.TaskId, interval))
         {
+            //获取失败回滚 这里会将工件设置位waiting
             Rollback(crane, task, "路权被占用");
             return false;//获取失败了
         }

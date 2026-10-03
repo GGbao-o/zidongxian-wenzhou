@@ -142,6 +142,7 @@ public sealed class CraneWorker : IHostedService
                 {
                     // 状态机内部已处理；这里兜底（含释放资源），避免循环退出与资源泄漏
                     _logger.Error(LogCategory.StateMachine, $"{crane.Name} 流程异常（兜底）", ex);
+                    //异常处理 兜底机制  Abort方法里面其实包含了ClearRuntime()
                     FallbackAbort(crane, ex.Message);
                     ClearRuntime(crane);
                 }

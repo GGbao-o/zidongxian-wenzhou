@@ -72,7 +72,7 @@ public sealed class TaskAbortCoordinator
     /// 中止天车当前任务并按 §10.4 自动清理。
     /// </summary>
     /// <param name="crane">发生异常的天车</param>
-    /// <param name="reason">异常原因（写报警）</param>
+    /// <param name="reason">异常原因（写报警） 这个参数是为了写日志弹窗的</param>
     public void Abort(Crane crane, string reason)
     {
         var task = crane.Runtime.CurrentTask;
