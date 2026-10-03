@@ -87,6 +87,7 @@ public partial class MainViewModel : ObservableObject
     /// <param name="dialogService">弹窗服务</param>
     /// <param name="coldStartChecker">冷启动核对</param>
     /// <param name="lineControl">线路控制服务</param>
+    /// <param name="ticker">界面节拍器（每 1s），用于就地刷新任务行进度</param>
     public MainViewModel(
         IConfigService configService,
         IRuntimeTaskManager taskManager,
@@ -94,7 +95,8 @@ public partial class MainViewModel : ObservableObject
         CraneRegistry craneRegistry,
         IDialogService dialogService,
         IColdStartChecker coldStartChecker,
-        LineControlService lineControl)
+        LineControlService lineControl,
+        IRuntimeTicker ticker)
     {
         _configService = configService;
         _taskManager = taskManager;
@@ -110,6 +112,12 @@ public partial class MainViewModel : ObservableObject
         // 线路状态以 LineControlService 为准，状态变化时刷新界面
         _lineControl.StateChanged += (_, _) => RefreshLineState();
         RefreshLineState();
+
+        // 任务列表刷新分两条路（架构文档 §13.1、《页面布局/主页面.md》§6）：
+        //  - 结构变化（增删任务、启动/暂停入队）→ _taskManager.Changed → 全量重建列表；
+        //  - 进度变化（状态/位置/工序）由应用层直接改领域对象、不发事件 → 用 1s 节拍就地刷新行文本。
+        // 就地刷新不重建集合，避免选中行与滚动位置每秒被清掉。
+        ticker.Tick += (_, _) => RefreshRowStates();
 
         GenerateIntervalMs = _configService.GetAppOptions().Scheduling.GenerateIntervalMs;
 
@@ -256,18 +264,8 @@ public partial class MainViewModel : ObservableObject
         var devices = _deviceRegistry.Snapshot();
         var snapshot = _taskManager.Snapshot();
 
-        // 入线顺序 = 上料架待取板队列里的**排位**（1、2、3…连续）。
-        // 只有"已启动、排队中、在队列"的任务占位；未启动/暂停不占位，后面的自动补位。
-        // 顺序依据入队时分配的入队序号（QueueOrder）：启动入队尾、暂停出队、再启动重新入队尾。
-        var queuePositions = new Dictionary<Guid, int>();
-        var rank = 0;
-        foreach (var t in snapshot
-                     .Where(t => t.Runtime.TaskState == WorkpieceState.Waiting
-                                 && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
-                     .OrderBy(t => t.Runtime.QueueOrder))
-        {
-            queuePositions[t.Id] = ++rank;
-        }
+        // 入线顺序 = 上料架待取板队列里的**排位**（1、2、3…连续），算法见 BuildQueuePositions
+        var queuePositions = BuildQueuePositions(snapshot);
 
         Tasks.Clear();
         foreach (var task in snapshot)
@@ -281,6 +279,75 @@ public partial class MainViewModel : ObservableObject
         }
 
         TaskCount = Tasks.Count;
+    }
+
+    /// <summary>
+    /// 就地刷新任务行的**进度类**文本（状态 / 当前位置 / 当前工序 / 入线顺序 / 下一道工序）。
+    /// 由界面节拍器每秒在 UI 线程调用；不重建集合，因此不会丢选中行与滚动位置。
+    /// 行数或任务标识发生变化时退化为全量重建（增删本就由 <see cref="_taskManager"/> 的事件驱动）。
+    /// </summary>
+    private void RefreshRowStates()
+    {
+        var devices = _deviceRegistry.Snapshot();
+        var snapshot = _taskManager.Snapshot();
+
+        // 数量变了：说明有增删，交给全量重建（与行内按钮可用性保持一致）
+        if (snapshot.Count != Tasks.Count)
+        {
+            RefreshTasks();
+            RefreshRegistries();
+            return;
+        }
+
+        var rows = new Dictionary<Guid, WorkpieceTaskViewModel>(Tasks.Count);
+        foreach (var row in Tasks)
+        {
+            rows[row.TaskId] = row;
+        }
+
+        var queuePositions = BuildQueuePositions(snapshot);
+
+        foreach (var task in snapshot)
+        {
+            if (!rows.TryGetValue(task.Id, out var row))
+            {
+                // 数量相同但标识对不上（集合被整体替换过）：同样退化为全量重建
+                RefreshTasks();
+                RefreshRegistries();
+                return;
+            }
+
+            // 行 VM 从领域对象重新派生状态/位置/工序等文本；
+            // 值未变化时 ObservableObject 不会触发通知，所以每秒调用没有额外界面开销
+            row.Refresh();
+            row.QueueOrderText = queuePositions.TryGetValue(task.Id, out var pos) ? pos.ToString() : "-";
+            FillNextProcess(row, task, devices);
+        }
+
+        // 概览卡的设备/天车数量随节拍一并刷新，配置重载后无需外部再调用 RefreshRegistries
+        RefreshRegistries();
+    }
+
+    /// <summary>
+    /// 计算入线顺序：上料架待取板队列里的**连续排位**（1、2、3…）。
+    /// 只有"已启动、排队中、在队列"的任务占位；未启动/暂停不占位，后面的自动补位。
+    /// 顺序依据入队时分配的 <c>QueueOrder</c>：启动入队尾、暂停出队、再启动重新入队尾。
+    /// </summary>
+    /// <param name="snapshot">任务快照</param>
+    /// <returns>任务标识 → 排位（从 1 起）</returns>
+    private static Dictionary<Guid, int> BuildQueuePositions(IReadOnlyList<WorkpieceTask> snapshot)
+    {
+        var queuePositions = new Dictionary<Guid, int>();
+        var rank = 0;
+        foreach (var t in snapshot
+                     .Where(t => t.Runtime.TaskState == WorkpieceState.Waiting
+                                 && t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
+                     .OrderBy(t => t.Runtime.QueueOrder))
+        {
+            queuePositions[t.Id] = ++rank;
+        }
+
+        return queuePositions;
     }
 
     /// <summary>工艺路线（只读，用于展示"下一道工序/位置"）。</summary>
