@@ -175,6 +175,7 @@ public sealed class TransportTaskGenerator : IHostedService
 
         // 上料架队头：在"入线任务"中取"在队列、入线顺序号最小"者
         // （顺序号在"启动"时分配，暂停清零、再启动重新入队尾）。
+        //找的是在等待队列（刚录入内存，尚未上线）。的任务
         var queueHead = lineTasks
             .Where(t => t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
             .OrderBy(t => t.Runtime.QueueOrder)
@@ -264,7 +265,7 @@ public sealed class TransportTaskGenerator : IHostedService
     {
         var location = task.Runtime.CurrentLocation;
 
-        if (location.IsOnDevice && location.ResourceId is int deviceId)
+        if (location.IsOnDevice && location.ResourceId is int deviceId)//工件在设备上
         {
             var device = devices.FirstOrDefault(d => d.Id == deviceId && d.IsEnabled);
             if (device is null) { reason = $"所在设备 {deviceId} 不存在或未启用"; return null; }
@@ -278,7 +279,7 @@ public sealed class TransportTaskGenerator : IHostedService
             return device;
         }
 
-        if (location.Kind == WorkpieceLocationKind.Queue)
+        if (location.Kind == WorkpieceLocationKind.Queue)//在等待队列（刚录入内存，尚未上线）。 工件在上料架
         {
             // 只有队头才生成上料候选；上料架唯一
             if (!ReferenceEquals(task, queueHead))
