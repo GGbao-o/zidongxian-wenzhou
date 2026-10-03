@@ -248,13 +248,13 @@ public sealed class CraneScheduler : IHostedService
                     AssignedCraneId = crane.Id
                 };
 
-                // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）   将这个任务已派发  
+                // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）   将这个任务已派发     仅当当前状态 == Waiting 时，才把它改成 Assigned，返回 true；否则返回 false，不改动。
                 if (!task.Runtime.TryTransition(WorkpieceState.Waiting, WorkpieceState.Assigned))
                 {
                     blockReason = "任务已被其它周期派发";
                     break;   // 本轮无需再处理该候选
                 }
-
+                //写入天车队列
                 if (!_channels.For(crane.Id).Writer.TryWrite(transportTask))
                 {
                     // 入队失败：回退状态，换下一台车

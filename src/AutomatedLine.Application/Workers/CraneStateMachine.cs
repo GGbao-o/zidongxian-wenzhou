@@ -189,7 +189,7 @@ public sealed class CraneStateMachine
         if (!_rightOfWayManager.TryAcquire(task.TaskId, interval))
         {
             Rollback(crane, task, "路权被占用");
-            return false;
+            return false;//获取失败了
         }
 
         if (!_reservationManager.TryReserve(task.TaskId, task.SourceDeviceId, task.TargetDeviceId))
@@ -210,9 +210,11 @@ public sealed class CraneStateMachine
         crane.Runtime.CurrentTask = null;
         crane.Runtime.State = CraneState.Idle;
         crane.Runtime.Step = TransportStep.Idle;
+        //获取当前工件任务
         var wp = _taskManager.Get(task.WorkpieceRuntimeId);
         if (wp is not null)
         {
+            //将工件任务重新设置为入线
             wp.Runtime.TaskState = WorkpieceState.Waiting;
         }
 
