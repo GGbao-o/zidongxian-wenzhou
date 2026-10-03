@@ -67,4 +67,22 @@ public sealed class DeviceRegistry
             return _devices.Values.ToList();
         }
     }
+
+    /// <summary>
+    /// 清除所有设备对指定工件的引用（人工删除任务时调用，避免悬挂引用把设备占死）。
+    /// </summary>
+    /// <param name="workpieceRuntimeId">工件运行期标识</param>
+    public void ClearWorkpiece(Guid workpieceRuntimeId)
+    {
+        lock (_sync)
+        {
+            foreach (var device in _devices.Values)
+            {
+                if (device.CurrentWorkpiece?.Id == workpieceRuntimeId)
+                {
+                    device.CurrentWorkpiece = null;
+                }
+            }
+        }
+    }
 }

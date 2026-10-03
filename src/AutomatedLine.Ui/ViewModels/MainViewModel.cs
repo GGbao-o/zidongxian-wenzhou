@@ -174,7 +174,8 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 清除任务命令：仅允许清除尚未派发的任务（未启动/排队/已暂停，架构文档 §13.1）。
+    /// 清除任务命令：清除未启动/排队/暂停/已丢弃/已完成的任务（架构文档 §13.1）。
+    /// 删除前先清掉设备/天车对该工件的引用，避免悬挂引用把设备占死。
     /// </summary>
     /// <param name="row">待清除的任务行</param>
     [RelayCommand]
@@ -185,6 +186,8 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
+        _deviceRegistry.ClearWorkpiece(row.TaskId);
+        _craneRegistry.ClearWorkpiece(row.TaskId);
         _taskManager.Remove(row.TaskId);
         Console.WriteLine($"[MainViewModel] 已清除任务 {row.PlateNo}/{row.SerialNo}");
     }

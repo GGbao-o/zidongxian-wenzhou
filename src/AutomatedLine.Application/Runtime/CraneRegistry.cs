@@ -66,4 +66,22 @@ public sealed class CraneRegistry
             return _cranes.Values.ToList();
         }
     }
+
+    /// <summary>
+    /// 清除所有天车对指定工件的引用（人工删除任务时调用，避免悬挂引用）。
+    /// </summary>
+    /// <param name="workpieceRuntimeId">工件运行期标识</param>
+    public void ClearWorkpiece(Guid workpieceRuntimeId)
+    {
+        lock (_sync)
+        {
+            foreach (var crane in _cranes.Values)
+            {
+                if (crane.CurrentWorkpiece?.Id == workpieceRuntimeId)
+                {
+                    crane.CurrentWorkpiece = null;
+                }
+            }
+        }
+    }
 }

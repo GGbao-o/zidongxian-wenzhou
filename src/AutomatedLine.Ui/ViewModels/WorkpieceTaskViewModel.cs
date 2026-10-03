@@ -136,10 +136,12 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         LocationText = runtime.CurrentLocation.ToString();
         StateText = StateToText(runtime.TaskState);
 
-        // 行内操作可用性：未派发前（未启动/排队/暂停）才可由人工启动/暂停/删除
+        // 行内操作可用性：未派发前（未启动/排队/暂停）可由人工启动/暂停；
+        // 删除额外允许"已丢弃/已完成"（清理列表用）。
         CanStart = runtime.TaskState is WorkpieceState.Created or WorkpieceState.Paused;
         CanPause = runtime.TaskState == WorkpieceState.Waiting;
-        CanClear = runtime.TaskState is WorkpieceState.Created or WorkpieceState.Waiting or WorkpieceState.Paused;
+        CanClear = runtime.TaskState is WorkpieceState.Created or WorkpieceState.Waiting or WorkpieceState.Paused
+            or WorkpieceState.Discarded or WorkpieceState.Completed;
     }
 
     /// <summary>
