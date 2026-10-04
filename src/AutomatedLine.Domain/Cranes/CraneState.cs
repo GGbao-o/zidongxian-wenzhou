@@ -2,30 +2,24 @@ namespace AutomatedLine.Domain.Cranes;
 
 /// <summary>
 /// 天车运行状态。
-/// 注意：路权在调度器派发时一次性获取（见架构文档 §8.4 / §8.7.2），
-/// 因此不存在"等待路权"状态——拿不到路权的任务根本不会被派发。
+/// 只保留实现中**真正会赋值**的三种：<see cref="Idle"/> / <see cref="Reserved"/> / <see cref="Running"/>。
+/// 说明：
+/// <list type="bullet">
+/// <item>不存在"等待路权"状态——路权由状态机在开始执行任务时**原子获取**，拿不到就回滚、任务回
+/// <c>Waiting</c>（架构文档 §8.4、§8.7.2）；</item>
+/// <item>异常不给天车单独的"故障"状态——统一由 <c>TaskAbortCoordinator.Abort</c> 清理天车状态并把
+/// **线路**置为故障暂停（§10.4、v2.51）。</item>
+/// </list>
 /// 对应架构文档 §11「CraneState」。
 /// </summary>
 public enum CraneState
 {
-    /// <summary>空闲。无任务，且已回到安全位。</summary>
+    /// <summary>空闲。无任务。</summary>
     Idle = 0,
 
-    /// <summary>已分配任务、尚未执行。调度器已派发并占用天车，Worker 即将启动。</summary>
+    /// <summary>已分配任务、该车 Worker 尚未出队执行。</summary>
     Reserved = 1,
 
     /// <summary>执行中。状态机正在推进搬运动作。</summary>
-    Running = 2,
-
-    /// <summary>等待设备。已到位但设备侧条件未满足（二次确认未通过等）。</summary>
-    WaitingDevice = 3,
-
-    /// <summary>暂停。随线路暂停，可在恢复后继续。</summary>
-    Paused = 4,
-
-    /// <summary>故障。状态机终止，任务交由 TaskAbortCoordinator 处理。</summary>
-    Faulted = 5,
-
-    /// <summary>不可用。未连接、未启用或被人工置为不可调度。</summary>
-    Unavailable = 6
+    Running = 2
 }

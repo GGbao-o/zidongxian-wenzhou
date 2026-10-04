@@ -68,10 +68,6 @@ public static class DisplayText
         CraneState.Idle => "空闲",
         CraneState.Reserved => "已分配",
         CraneState.Running => "执行中",
-        CraneState.WaitingDevice => "等待设备",
-        CraneState.Paused => "暂停",
-        CraneState.Faulted => "故障",
-        CraneState.Unavailable => "不可用",
         _ => "未知"
     };
 

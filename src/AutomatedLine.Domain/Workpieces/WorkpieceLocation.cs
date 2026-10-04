@@ -28,9 +28,6 @@ public readonly record struct WorkpieceLocation
     /// <summary>在等待队列。</summary>
     public static WorkpieceLocation Queue => new(WorkpieceLocationKind.Queue, null);
 
-    /// <summary>已完成下线。</summary>
-    public static WorkpieceLocation Finished => new(WorkpieceLocationKind.Finished, null);
-
     /// <summary>已丢弃。</summary>
     public static WorkpieceLocation Discarded => new(WorkpieceLocationKind.Discarded, null);
 
@@ -63,7 +60,6 @@ public readonly record struct WorkpieceLocation
         WorkpieceLocationKind.Device => $"设备({ResourceId})",
         WorkpieceLocationKind.Crane => $"天车({ResourceId})",
         WorkpieceLocationKind.Queue => "队列",
-        WorkpieceLocationKind.Finished => "已完成",
         WorkpieceLocationKind.Discarded => "已丢弃",
         _ => "未知"
     };

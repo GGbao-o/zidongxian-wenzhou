@@ -125,7 +125,6 @@ public sealed class CraneWorker : IHostedService
                 // 本车 Runtime 由本循环独占写（调度器不再碰它）
                 crane.Runtime.CurrentTask = task;//设置天车任务
                 crane.Runtime.State = CraneState.Reserved;//已分配任务  其实这时候 天车就不是空闲状态了   CraneScheduler集中式调度就不会再选择这个天车 
-                crane.Runtime.Step = TransportStep.AcquireResources;
                 try
                 {
                     //开始执行任务
@@ -176,7 +175,6 @@ public sealed class CraneWorker : IHostedService
     {
         crane.Runtime.CurrentTask = null;
         crane.Runtime.State = CraneState.Idle;
-        crane.Runtime.Step = TransportStep.Idle;
         crane.Runtime.LockedInterval = null;
     }
 }

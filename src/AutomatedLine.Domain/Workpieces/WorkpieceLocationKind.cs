@@ -16,9 +16,6 @@ public enum WorkpieceLocationKind
     /// <summary>位于某台天车上（ResourceId = 天车号）。</summary>
     Crane = 2,
 
-    /// <summary>已完成下线。</summary>
-    Finished = 3,
-
     /// <summary>已丢弃（异常）。</summary>
     Discarded = 4
 }

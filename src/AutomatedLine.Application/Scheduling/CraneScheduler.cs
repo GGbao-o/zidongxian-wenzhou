@@ -152,7 +152,7 @@ public sealed class CraneScheduler : IHostedService
     /// <para>
     /// **只判断、不加锁**：对每个候选列出可执行天车（范围覆盖 / 连接 / 无报警 / 空闲），
     /// 按"离源最近"排序后逐台尝试；用 <c>CanAcquire</c>（路权区间空闲）与 <c>IsReserved</c>（源/目标未被预约）
-    /// 做**只读判断**，通过即派发；真正的路权/预约获取由**状态机执行任务时**完成（见 <c>TransportStep.AcquireResources</c>）。
+    /// 做**只读判断**，通过即派发；真正的路权/预约获取由**状态机执行任务时**完成（见 <c>CraneStateMachine.Acquire</c>）。
     /// </para>
     /// <para>
     /// 竞态：判断通过后到状态机真正加锁之间有窗口，可能被别的车抢先；届时状态机 `TryAcquire` 失败会
@@ -243,9 +243,7 @@ public sealed class CraneScheduler : IHostedService
                     SourceX = candidate.Source.PositionX,
                     TargetX = candidate.Target.PositionX,
                     TargetProcess = candidate.TargetProcess,
-                    Priority = candidate.Priority,
-                    State = TransportTaskState.Assigned,
-                    AssignedCraneId = crane.Id
+                    Priority = candidate.Priority
                 };
 
                 // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）   将这个任务已派发     仅当当前状态 == Waiting 时，才把它改成 Assigned，返回 true；否则返回 false，不改动。

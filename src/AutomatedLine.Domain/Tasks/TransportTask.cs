@@ -34,12 +34,6 @@ public sealed class TransportTask
     /// <summary>优先级。数值越大越优先。</summary>
     public int Priority { get; init; }
 
-    /// <summary>任务状态。</summary>
-    public TransportTaskState State { get; set; } = TransportTaskState.Created;
-
-    /// <summary>被派发到的天车号；未派发时为 null。</summary>
-    public int? AssignedCraneId { get; set; }
-
     /// <summary>
     /// 计算本任务对应的路权区间。
     /// 抽成方法而不是存字段，保证"区间永远由当前源/目标坐标与车宽算出"，不会与配置漂移。

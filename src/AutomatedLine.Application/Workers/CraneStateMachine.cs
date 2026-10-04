@@ -212,7 +212,6 @@ public sealed class CraneStateMachine
         crane.Runtime.LockedInterval = null;
         crane.Runtime.CurrentTask = null;
         crane.Runtime.State = CraneState.Idle;
-        crane.Runtime.Step = TransportStep.Idle;
         //获取当前工件任务
         var wp = _taskManager.Get(task.WorkpieceRuntimeId);
         if (wp is not null)
@@ -260,7 +259,6 @@ public sealed class CraneStateMachine
 
         crane.Runtime.CurrentTask = null;
         crane.Runtime.State = CraneState.Idle;
-        crane.Runtime.Step = TransportStep.Idle;
         crane.Runtime.LockedInterval = null;
 
         wp.Runtime.TaskState = task.TargetProcess == ProcessType.Unloading

@@ -90,7 +90,6 @@ public sealed class TaskAbortCoordinator
             // 清空天车内存状态
             crane.Runtime.CurrentTask = null;
             crane.Runtime.State = CraneState.Idle;
-            crane.Runtime.Step = TransportStep.Idle;
             crane.Runtime.LockedInterval = null;
             crane.CurrentWorkpiece = null;
 
