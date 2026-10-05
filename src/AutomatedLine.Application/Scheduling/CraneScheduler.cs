@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
+using AutomatedLine.Application.Logging;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.RightOfWay;
 using AutomatedLine.Application.Runtime;
@@ -48,6 +49,9 @@ public sealed class CraneScheduler : IHostedService
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
+    /// <summary>"否决原因"变化日志：逐候选/逐天车的原因只在**变化**时落盘（避免 0.5s 一轮刷屏，又不漏"谁不行、为什么"）。</summary>
+    private readonly ReasonChangeLog _reasonLog;
+
     /// <summary>取消源。</summary>
     private CancellationTokenSource? _cts;
 
@@ -86,6 +90,8 @@ public sealed class CraneScheduler : IHostedService
         _lineControl = lineControl;
         _configService = configService;
         _logger = logger;
+        // 最小落盘间隔复用日志抽样间隔（默认 20s）：原因抖动时最多每 20s 一条，不会反过来刷屏
+        _reasonLog = new ReasonChangeLog(logger, LogCategory.Scheduling, configService.GetAppOptions().Logging.SampleSeconds);
     }
 
     /// <summary>启动调度循环。</summary>
@@ -131,6 +137,9 @@ public sealed class CraneScheduler : IHostedService
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            // 每轮开头结算一轮"否决原因"：上一轮有问题、本轮没再登记的 → 写一条"已恢复"
+            // （放在 IsRunning 判断之前，线路停了也照常结算）
+            _reasonLog.BeginCycle();
             try
             {
                 if (_lineControl.IsRunning)
@@ -177,7 +186,8 @@ public sealed class CraneScheduler : IHostedService
         var pool = _candidatePool.Snapshot();
         if (pool.Count == 0)
         {
-            _logger.Sample(LogCategory.Scheduling, "dispatch-empty", "候选池为空，本轮无任务可派");
+            // 登记"候选池为空"：空↔非空各出一条，现场据此区分"没活干"与"有活但派不出去"
+            _reasonLog.Report("sched-pool", "调度", "候选池为空", "候选池为空，本轮无任务可派");
             return;
         }
 
@@ -220,11 +230,18 @@ public sealed class CraneScheduler : IHostedService
                 .OrderBy(c => Math.Abs(statuses[c.Id]!.XDisplay - candidate.Source.PositionX))   // 离源最近
                 .ToList();
 
+            // 逐候选记录"为什么这些天车不行"：**只要本轮有天车被排除就报**（不再等"全都没资格"），
+            // 这样"2 台车里 1 台能干活"时，也能看到另一台被排除的原因（未启用/忙/范围不覆盖/读状态失败/报警）
+            var craneReasons = ExplainNoEligible(candidate, cranes, statuses);
+            if (eligible.Count < cranes.Count)
+            {
+                _reasonLog.Report($"sched-crane-{task.Id}", $"候选 {Describe(candidate)}", craneReasons,
+                    $"候选 {Describe(candidate)} 天车筛选：{craneReasons}"
+                    + (eligible.Count == 0 ? "（无可执行天车）" : $"（可执行 {eligible.Count} 台）"));
+            }
+
             if (eligible.Count == 0)
             {
-                // 逐候选抽样记录"为什么没有可执行天车"，便于现场排查（同一工件每抽样间隔最多一条）
-                _logger.Sample(LogCategory.Scheduling, $"dispatch-noeligible-{task.Id}",
-                    $"候选 {Describe(candidate)} 暂不可派：无可执行天车（{ExplainNoEligible(candidate, cranes, statuses)}）");
                 continue;
             }
 
@@ -287,8 +304,9 @@ public sealed class CraneScheduler : IHostedService
             if (!dispatched)
             {
                 // 有可执行天车，但路权/预约全冲突：本周期不派发，下轮用最新状态重算
-                _logger.Sample(LogCategory.Scheduling, $"dispatch-blocked-{task.Id}",
-                    $"候选 {Describe(candidate)} 暂未派发：{blockReason ?? "无可执行天车"}（{eligible.Count} 台可执行天车均冲突，下轮重试）");
+                var blockedReason = blockReason ?? "无可执行天车";
+                _reasonLog.Report($"sched-blocked-{task.Id}", $"候选 {Describe(candidate)}", blockedReason,
+                    $"候选 {Describe(candidate)} 暂未派发：{blockedReason}（{eligible.Count} 台可执行天车均冲突，下轮重试）");
             }
         }
 

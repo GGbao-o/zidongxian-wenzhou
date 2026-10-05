@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
+using AutomatedLine.Application.Logging;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Devices;
@@ -51,6 +52,9 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
+    /// <summary>"否决原因"变化日志：逐工件/逐设备的原因只在**变化**时落盘（避免 0.5s 一轮刷屏，又不漏"谁不行、为什么"）。</summary>
+    private readonly ReasonChangeLog _reasonLog;
+
     /// <summary>内置工艺路线。</summary>
     private readonly ProcessRoute _route = ProcessRoute.CreateDefault();
 
@@ -86,6 +90,8 @@ public sealed class TransportTaskGenerator : IHostedService
         _lineControl = lineControl;
         _configService = configService;
         _logger = logger;
+        // 最小落盘间隔复用日志抽样间隔（默认 20s）：原因抖动时最多每 20s 一条，不会反过来刷屏
+        _reasonLog = new ReasonChangeLog(logger, LogCategory.Generation, configService.GetAppOptions().Logging.SampleSeconds);
     }
 
     /// <summary>启动生成循环。</summary>
@@ -131,6 +137,9 @@ public sealed class TransportTaskGenerator : IHostedService
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            // 每轮开头结算一轮"否决原因"：上一轮有问题、本轮没再登记的 → 写一条"已恢复"
+            // （放在 IsRunning 判断之前，线路停了也照常结算）
+            _reasonLog.BeginCycle();
             try
             {
                 //生成候选任务就会判断 线路是否启动 如果未启动就不会生成 并且会清空候选池
@@ -211,8 +220,9 @@ public sealed class TransportTaskGenerator : IHostedService
             var source = ResolveSource(task, queueHead, devices, out var sourceReason);
             if (source is null)
             {
-                // 逐工件抽样记录"为什么没有候选"，便于现场排查（同一工件每抽样间隔最多一条）
-                _logger.Sample(LogCategory.Generation, $"gen-nosource-{task.Id}",
+                // 逐工件记录"为什么这个任务不行"：**变化时才落盘**（首次立即、恢复也报），不再按时间抽样——
+                // 否则"部分工件不行"时看不出到底卡在哪台设备/哪个信号（详见 ReasonChangeLog）
+                _reasonLog.Report($"gen-src-{task.Id}", $"工件 {Describe(task)}", sourceReason,
                     $"工件 {Describe(task)} 无候选：源不可用（{sourceReason}）");
                 continue;
             }
@@ -257,11 +267,16 @@ public sealed class TransportTaskGenerator : IHostedService
                 matched++;
             }
 
-            if (matched == 0)
+            // 逐目标记录"为什么这个设备不行"：**只要本轮有设备被跳过就报**（不再等"全军覆没"），
+            // 这样"3 个目标跳过 2 个"时也能看到被跳过那两台各自的原因（未连接/已被预约/报警/超范围/握手未就绪）
+            var skipReason = targetSkips.Count > 0
+                ? string.Join("，", targetSkips)
+                : matched == 0 ? $"无 {next.DeviceType} 类型设备" : null;
+            if (skipReason is not null)
             {
-                var detail = targetSkips.Count == 0 ? $"无 {next.DeviceType} 类型设备" : string.Join("，", targetSkips);
-                _logger.Sample(LogCategory.Generation, $"gen-notarget-{task.Id}",
-                    $"工件 {Describe(task)} 下一道 {next.Process}({next.DeviceType}) 无可用目标：{detail}");
+                _reasonLog.Report($"gen-tgt-{task.Id}", $"工件 {Describe(task)}", skipReason,
+                    $"工件 {Describe(task)} 下一道 {next.Process}({next.DeviceType}) 目标筛选：{skipReason}"
+                    + (matched == 0 ? "（本道无可用目标）" : $"（另有 {matched} 台可用，已生成候选）"));
             }
         }
 
