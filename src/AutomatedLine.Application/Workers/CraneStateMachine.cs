@@ -186,23 +186,28 @@ public sealed class CraneStateMachine
     /// <summary>原子获取路权 + 源/目标预约；失败回滚并让出天车。</summary>
     private bool Acquire(Crane crane, TransportTask task)
     {
+        _logger.Info(LogCategory.StateMachine,
+            $"[{crane.Name}] 获取资源：任务 {task.TaskId:N}（源设备 {task.SourceDeviceId} → 目标设备 {task.TargetDeviceId}）");
         var interval = task.GetRightOfWayInterval(crane.Width);
 
         if (!_rightOfWayManager.TryAcquire(task.TaskId, interval))
         {
             //获取失败回滚 这里会将工件设置位waiting
+            _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 获取资源失败：路权区间被占用，回滚让出天车");
             Rollback(crane, task, "路权被占用");
             return false;//获取失败了
         }
 
         if (!_reservationManager.TryReserve(task.TaskId, task.SourceDeviceId, task.TargetDeviceId))
         {
+            _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 获取资源失败：源/目标设备已被预约，释放已占路权后回滚");
             _rightOfWayManager.Release(task.TaskId);
             Rollback(crane, task, "设备预约失败");
             return false;
         }
 
         crane.Runtime.LockedInterval = interval;
+        _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 获取资源成功：路权 + 源/目标预约已锁定");
         return true;
     }
 
@@ -248,29 +253,39 @@ public sealed class CraneStateMachine
     /// </summary>
     private async Task TransitAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase source, DeviceBase target, CancellationToken cancellationToken)
     {
+        ctx.LogStep(target, $"中转：XY → 目标上方（安全高度 Z={crane.SafeZ}）");
         var (x, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         await ctx.MoveAbsoluteAsync(x, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        ctx.LogStep(target, "中转：已到达目标上方（Z 仍在安全高度）");
 
+        //释放源设备预约 缩小路权
+        ctx.LogStep(target, "中转：释放源设备预约 + 路权缩小到目标车体区间");
         _reservationManager.ReleaseSource(task.TaskId);
         _rightOfWayManager.Resize(task.TaskId, XInterval.FromTask(target.PositionX, target.PositionX, crane.Width));
 
         // 源设备这一轮彻底结束：把它"上位机写入的握手位"复位为 0（双头镗/斜床/研磨机有效，其余空操作）。
         // 内部逐点容错：清不掉只记警告、不影响本任务（最坏退回"残留 1"的旧行为）。
+        ctx.LogStep(source, "中转：复位源设备握手位（双头镗/斜床/研磨机有效，其余无操作；避免残留 1 让下一轮上料收不到上升沿）");
         if (_driverRegistry.GetDevice(source.Id) is { } sourceDriver)
         {
+            //清除上位机写入设备的信息
             await _handlers.Get(source.Type)
                 .ClearHandshakeAsync(sourceDriver, source.Name, _logger, cancellationToken)
                 .ConfigureAwait(false);
         }
+
+        ctx.LogStep(target, "中转：完成（已释放源预约、缩小路权、复位源握手位）");
     }
 
     /// <summary>完成：回安全位、释放天车/路权/目标预约、改进度。</summary>
     private async Task FinishAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase target, WorkpieceTask wp, CancellationToken cancellationToken)
     {
+        ctx.LogStep($"收尾：回本车安全位（X={crane.SafeX}、Z={crane.SafeZ}）");
         // 回到本车安全位 X（同一目标 Y、Z 取安全高度）
         var (_, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         await ctx.MoveAbsoluteAsync(crane.SafeX, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
+        ctx.LogStep("收尾：释放路权 + 目标设备预约 + 清空天车运行时状态");
         _rightOfWayManager.Release(task.TaskId);
         _reservationManager.Release(task.TaskId);
 
@@ -282,6 +297,7 @@ public sealed class CraneStateMachine
             ? WorkpieceState.Completed
             : WorkpieceState.Waiting;
 
+        ctx.LogStep($"收尾：工件状态置 {wp.Runtime.TaskState}（目标工序={task.TargetProcess}）");
         _logger.Info(LogCategory.StateMachine, $"{crane.Name} 完成任务 {task.TaskId:N}");
     }
 

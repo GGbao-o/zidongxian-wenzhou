@@ -23,14 +23,20 @@ public sealed class UnloadRackHandler : ITransferHandler
     /// <inheritdoc />
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
+        ctx.LogStep(target, "放料：开始（等下料架无板 HasMaterial=0）");
         // 审核目标：无板
         await ctx.WaitDeviceAsync(target, "HasMaterial", false, cancellationToken).ConfigureAwait(false);
 
         var (x, y, z) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         var zTarget = z - CraneCoordinate.ZDrop(target.Type, ctx.Workpiece.Info.Diameter);
+        ctx.LogStep(target, $"放料：Z 下降到放料位（X={x} Y={y} Z={zTarget}）");
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
 
+        ctx.LogStep(target, "放料：放磁");
         await ctx.MagnetOffAsync(cancellationToken).ConfigureAwait(false);
+
+        ctx.LogStep(target, "放料：Z 回升到安全高度");
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        ctx.LogStep(target, "放料：完成（下料架无上料完成脉冲）");
     }
 }

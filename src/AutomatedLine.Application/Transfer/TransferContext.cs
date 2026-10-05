@@ -247,4 +247,19 @@ public sealed class TransferContext
         _logger.Info(LogCategory.StateMachine, $"{Tag} 写 {device.Name}.{signal}={value}");
         return DeviceDriver(device.Id).WriteSignalAsync(signal, value, cancellationToken);
     }
+
+    /// <summary>
+    /// 写一条**流程步骤**日志：自动带 **天车 + 工件**，并标注**设备**与当前走到哪一步。
+    /// 与各原语（运动/等待/读写）的日志配合，可在 `statemachine.txt` 里按"天车 / 工件 / 设备 / 步骤"
+    /// 串起一次完整搬运，便于现场排查卡在哪一步。
+    /// </summary>
+    /// <param name="device">当前操作的设备</param>
+    /// <param name="action">步骤说明（如"取料：Z 下降到取料位"）</param>
+    public void LogStep(DeviceBase device, string action)
+        => _logger.Info(LogCategory.StateMachine, $"{Tag} [{device.Name}] {action}");
+
+    /// <summary>写一条**流程步骤**日志（不针对具体设备，如收尾阶段）。</summary>
+    /// <param name="action">步骤说明</param>
+    public void LogStep(string action)
+        => _logger.Info(LogCategory.StateMachine, $"{Tag} {action}");
 }
