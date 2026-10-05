@@ -274,12 +274,35 @@ public sealed class TransportTaskGenerator : IHostedService
         if (location.IsOnDevice && location.ResourceId is int deviceId)//工件在设备上
         {
             var device = devices.FirstOrDefault(d => d.Id == deviceId && d.IsEnabled);
-            if (device is null) { reason = $"所在设备 {deviceId} 不存在或未启用"; return null; }
-            if (device.CurrentWorkpiece != task) { reason = $"设备 {device.Name} 上工件与任务不一致"; return null; }   // 内存一致
-            if (!device.IsConnected) { reason = $"设备 {device.Name} 未连接"; return null; }
-            if (_reservationManager.IsReserved(device.Id)) { reason = $"设备 {device.Name} 已被预约"; return null; }
-            if (DeviceHandshakeRules.IsAlarm(device)) { reason = $"设备 {device.Name} 报警"; return null; }
-            if (!DeviceHandshakeRules.CanProvide(device)) { reason = $"设备 {device.Name} 未就绪（{ProvideHint(device)}）"; return null; }
+            if (device is null)
+            {
+                reason = $"所在设备 {deviceId} 不存在或未启用"; return null;
+            }
+            //判断设备当前任务是否是这个任务
+            if (device.CurrentWorkpiece != task)
+            {
+                reason = $"设备 {device.Name} 上工件与任务不一致"; return null;
+            }   
+            //判断设备是否连接
+            if (!device.IsConnected)
+            {
+                reason = $"设备 {device.Name} 未连接"; return null;
+            }
+            //判断设备是否预约
+            if (_reservationManager.IsReserved(device.Id))
+            {
+                reason = $"设备 {device.Name} 已被预约"; return null;
+            }
+            //判断设备是否报警 (这个是只有研磨机)
+            if (DeviceHandshakeRules.IsAlarm(device))
+            {
+                reason = $"设备 {device.Name} 报警"; return null;
+            }
+            //判断源设备是否可取料
+            if (!DeviceHandshakeRules.CanProvide(device))
+            {
+                reason = $"设备 {device.Name} 未就绪（{ProvideHint(device)}）"; return null;
+            }
 
             reason = string.Empty;
             return device;

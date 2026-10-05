@@ -36,7 +36,7 @@ public abstract class DeviceBase
 
     /// <summary>是否启用。停用的设备不参与调度。</summary>
     public bool IsEnabled { get; set; } = true;
-
+//------------------------------------------------------------------------上面的都是数据库设备表的配置
     /// <summary>
     /// 最近一次采集的信号快照。由 DeviceStateCollector 整体替换写入，业务层只读。
     /// 为 null 表示尚未采集过。

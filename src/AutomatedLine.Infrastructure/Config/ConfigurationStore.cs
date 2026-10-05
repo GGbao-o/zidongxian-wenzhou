@@ -81,7 +81,7 @@ public class ConfigurationStore : IConfigurationStore
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
+        //ToListAsync() 会立即执行 LINQ 查询，把 DeviceConfigs 表的数据真正从数据库拉取到内存里
         var entities = await db.DeviceConfigs.AsNoTracking()
             .OrderBy(d => d.Id)
             .ToListAsync(cancellationToken).ConfigureAwait(false);

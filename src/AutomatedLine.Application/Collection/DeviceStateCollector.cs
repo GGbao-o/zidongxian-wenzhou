@@ -183,7 +183,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
             var device = _deviceRegistry.Get(driver.DeviceId);
             if (device is not null)
             {
-                device.Signals = snapshot;
+                device.Signals = snapshot;//如果查不到 赋值是空值 Signals.Values 为空、IsConnected == false 
             }
         }
 
