@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Devices;
 
 namespace AutomatedLine.Application.Transfer.Handlers;
@@ -8,8 +9,20 @@ namespace AutomatedLine.Application.Transfer.Handlers;
 /// </summary>
 public sealed class GrinderHandler : ITransferHandler
 {
+    /// <summary>
+    /// 本机"上位机写入的握手位"（电平信号，下一次上料前必须复位为 0）：
+    /// `DataTransDone`(R7311/14623)、`LoadInPlace`(R7312/14625)、`LoadDone`(R7313/14627)、
+    /// `UnloadInPlace`(R7314/14629)、`UnloadDone`(R7315/14631)。
+    /// </summary>
+    private static readonly string[] WrittenHandshakePoints =
+        { "DataTransDone", "LoadInPlace", "LoadDone", "UnloadInPlace", "UnloadDone" };
+
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.GrinderMachine;
+
+    /// <inheritdoc />
+    public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
+        => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
     /// <inheritdoc />
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)

@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Devices;
 
 namespace AutomatedLine.Application.Transfer.Handlers;
@@ -8,10 +9,20 @@ namespace AutomatedLine.Application.Transfer.Handlers;
 /// </summary>
 public sealed class BoringHandler : ITransferHandler
 {
+    /// <summary>
+    /// 本机"上位机写入的握手位"（电平信号，下一次上料前必须复位为 0）：
+    /// `DataSentDone`(R6102/12205)、`LoadDone`(R6104/12209)、`UnloadDone`(R6108/12217)。
+    /// </summary>
+    private static readonly string[] WrittenHandshakePoints = { "DataSentDone", "LoadDone", "UnloadDone" };
+
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.BoringMachine;
 
-    /// <inheritdoc /> 上料架->双头镗
+    /// <inheritdoc />
+    public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
+        => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
+
+    /// <inheritdoc /> 上料架->双头镗 取料操作
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         // 轮询设备输入信号直到等于期望值
@@ -27,11 +38,13 @@ public sealed class BoringHandler : ITransferHandler
         await ctx.MagnetOnAsync(cancellationToken).ConfigureAwait(false);
 
         // 源特有：Z 升 → 下料完成
+        //safez没有+偏移
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        //发下料完成
         await ctx.WriteDeviceAsync(source, "UnloadDone", 1, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />放料操作 上料架->双头镗
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
         await ctx.WaitDeviceAsync(target, "RequestData", true, cancellationToken).ConfigureAwait(false);
@@ -44,7 +57,9 @@ public sealed class BoringHandler : ITransferHandler
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
 
         await ctx.MagnetOffAsync(cancellationToken).ConfigureAwait(false);
+        //回安全位置 
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        //发下料完成
         await ctx.WriteDeviceAsync(target, "LoadDone", 1, cancellationToken).ConfigureAwait(false);
     }
 

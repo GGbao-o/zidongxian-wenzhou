@@ -1,5 +1,6 @@
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Application.Transfer;
 using AutomatedLine.Domain.Diagnostics;
 
 namespace AutomatedLine.Infrastructure.Manual;
@@ -8,12 +9,19 @@ namespace AutomatedLine.Infrastructure.Manual;
 /// 手动操作服务实现（基于真实汇川天车驱动）。
 /// 通过 <see cref="DriverRegistry"/> 取到对应天车的 <see cref="ICraneDriver"/>，再执行读取与下发。
 /// 与自动线路状态机**共用同一个 <see cref="ICraneDriver"/> 契约**，命令/读取方法完全一致。
+/// 另提供设备"握手位复位"，与自动线取料后自动复位共用 <see cref="ITransferHandler.ClearHandshakeAsync"/>。
 /// 所有命令写操作日志到 operation（手动页操作日志）。
 /// </summary>
 public sealed class ManualOperationService : IManualOperationService
 {
     /// <summary>驱动注册表。</summary>
     private readonly DriverRegistry _driverRegistry;
+
+    /// <summary>设备注册表（按设备号取名与类型）。</summary>
+    private readonly DeviceRegistry _deviceRegistry;
+
+    /// <summary>取放料策略注册表（按设备类型取"要复位哪些握手位"）。</summary>
+    private readonly TransferHandlerRegistry _handlers;
 
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
@@ -22,10 +30,18 @@ public sealed class ManualOperationService : IManualOperationService
     /// 构造函数。
     /// </summary>
     /// <param name="driverRegistry">驱动注册表</param>
+    /// <param name="deviceRegistry">设备注册表</param>
+    /// <param name="handlers">取放料策略注册表</param>
     /// <param name="logger">日志</param>
-    public ManualOperationService(DriverRegistry driverRegistry, IAppLogger logger)
+    public ManualOperationService(
+        DriverRegistry driverRegistry,
+        DeviceRegistry deviceRegistry,
+        TransferHandlerRegistry handlers,
+        IAppLogger logger)
     {
         _driverRegistry = driverRegistry;
+        _deviceRegistry = deviceRegistry;
+        _handlers = handlers;
         _logger = logger;
     }
 
@@ -97,6 +113,46 @@ public sealed class ManualOperationService : IManualOperationService
     /// <inheritdoc />
     public Task<ManualOperationResult> DrainCloseAsync(int craneId, CancellationToken cancellationToken = default)
         => RunAsync(craneId, crane => crane.DrainCloseAsync(cancellationToken), "关闭接液盘", cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<ManualOperationResult> ClearHandshakeAsync(int deviceId, CancellationToken cancellationToken = default)
+    {
+        var device = _deviceRegistry.Get(deviceId);
+        if (device is null)
+        {
+            return ManualOperationResult.Fail($"设备[{deviceId}] 未装载，无法复位");
+        }
+
+        var driver = _driverRegistry.GetDevice(deviceId);
+        if (driver is null)
+        {
+            return ManualOperationResult.Fail($"设备[{deviceId}] 无驱动，无法复位");
+        }
+
+        try
+        {
+            // 与自动线取料后自动复位**共用同一实现**（含"只清握手位、不清参数"与逐点容错）
+            var cleared = await _handlers.Get(device.Type)
+                .ClearHandshakeAsync(driver, device.Name, _logger, cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.Info(LogCategory.Operation,
+                $"手动操作 设备[{deviceId}]（{device.Name}）清握手位 {cleared} 个");
+
+            return cleared > 0
+                ? ManualOperationResult.Ok($"已复位 {cleared} 个握手位")
+                : ManualOperationResult.Fail($"{device.Name}（{device.Type}）没有需要复位的握手位");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.Operation, $"手动操作 设备[{deviceId}] 清握手位异常：{ex.Message}");
+            return ManualOperationResult.Fail($"清握手位失败：{ex.Message}");
+        }
+    }
 
     /// <summary>
     /// 通用命令执行：解析天车、执行、把 <see cref="CraneCommandResult"/> 映射为页面结果。

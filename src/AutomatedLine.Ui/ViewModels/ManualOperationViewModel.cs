@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.Windows.Media;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Configuration;
+using AutomatedLine.Domain.Devices;
 using AutomatedLine.Ui.Helpers;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -44,6 +46,13 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>当前选中的天车。</summary>
     [ObservableProperty]
     private CraneConfigRowViewModel? _selectedCrane;
+
+    /// <summary>需复位握手位的设备列表（双头镗 / 斜床 / 研磨机，仅启用）。</summary>
+    public ObservableCollection<DeviceConfigDto> Devices { get; } = new();
+
+    /// <summary>当前选中的设备（用于"清握手位"）。</summary>
+    [ObservableProperty]
+    private DeviceConfigDto? _selectedHandshakeDevice;
 
     /// <summary>连接状态文本。</summary>
     [ObservableProperty]
@@ -173,6 +182,7 @@ public partial class ManualOperationViewModel : ObservableObject
         _configurationStore = configurationStore;
         _manualOperationService = manualOperationService;
         _ = LoadCranesAsync();
+        _ = LoadHandshakeDevicesAsync();
     }
 
     /// <summary>加载天车列表（数据库，仅启用天车）。</summary>
@@ -191,6 +201,52 @@ public partial class ManualOperationViewModel : ObservableObject
         {
             Console.WriteLine($"[ManualOperationViewModel] 加载天车列表失败：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 加载"需要复位握手位"的设备（双头镗 / 斜床 / 研磨机，仅启用）。
+    /// 其余类型（上料架/下料架/打号机等）没有上位机写入位，不列出。
+    /// </summary>
+    private async Task LoadHandshakeDevicesAsync()
+    {
+        try
+        {
+            var configs = await _configurationStore.GetDeviceConfigsAsync();
+            Devices.Clear();
+            foreach (var dto in configs
+                         .Where(d => d.IsEnabled
+                                     && d.DeviceType is DeviceType.BoringMachine
+                                         or DeviceType.LatheMachine
+                                         or DeviceType.GrinderMachine)
+                         .OrderBy(d => d.Id))
+            {
+                Devices.Add(dto);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ManualOperationViewModel] 加载设备列表失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 复位选中设备"上位机写入的握手位"（写 0，尽力清）。
+    /// 与自动线取料后自动复位**共用同一实现**，用于异常中止后人工补清：
+    /// 这些位残留 1 会让该设备下一次上料收不到上升沿。
+    /// </summary>
+    [RelayCommand]
+    private async Task ClearHandshakeAsync()
+    {
+        if (SelectedHandshakeDevice is null)
+        {
+            Message = "请先选择设备（双头镗 / 斜床 / 研磨机）";
+            return;
+        }
+
+        var result = await _manualOperationService.ClearHandshakeAsync(SelectedHandshakeDevice.Id);
+        Message = result.Success
+            ? $"✅ {SelectedHandshakeDevice.Name}：{result.Message}"
+            : $"❌ {SelectedHandshakeDevice.Name}：{result.Message}";
     }
 
     /// <summary>刷新选中天车状态。</summary>

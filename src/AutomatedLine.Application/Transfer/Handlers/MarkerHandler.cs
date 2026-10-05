@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Devices;
 
 namespace AutomatedLine.Application.Transfer.Handlers;
@@ -9,6 +10,11 @@ public sealed class MarkerHandler : ITransferHandler
 {
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.MarkerMachine;
+
+    /// <inheritdoc />
+    /// <remarks>按现场确认：打号机的握手位（`LoadDone` / `UnloadDone`）**无需复位**，故为空操作。</remarks>
+    public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
+        => Task.FromResult(0);
 
     /// <inheritdoc />
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)

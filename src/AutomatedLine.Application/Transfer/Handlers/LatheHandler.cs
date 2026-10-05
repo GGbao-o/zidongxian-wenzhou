@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Devices;
 
 namespace AutomatedLine.Application.Transfer.Handlers;
@@ -7,8 +8,20 @@ namespace AutomatedLine.Application.Transfer.Handlers;
 /// </summary>
 public sealed class LatheHandler : ITransferHandler
 {
+    /// <summary>
+    /// 本机"上位机写入的握手位"（宏变量电平信号，下一次上料前必须复位为 0）：
+    /// `DataSentDone`(#1101)、`CraneLoadInPlace`(#1102)、`CraneLoadDone`(#1103)、
+    /// `CraneUnloadInPlace`(#1104)、`CraneUnloadDone`(#1105)。
+    /// </summary>
+    private static readonly string[] WrittenHandshakePoints =
+        { "DataSentDone", "CraneLoadInPlace", "CraneLoadDone", "CraneUnloadInPlace", "CraneUnloadDone" };
+
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.LatheMachine;
+
+    /// <inheritdoc />
+    public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
+        => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
     /// <inheritdoc />
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)

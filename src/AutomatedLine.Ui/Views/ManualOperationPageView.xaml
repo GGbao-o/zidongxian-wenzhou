@@ -291,6 +291,35 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
+
+                <!--  握手位复位：异常中止后人工清理双头镗/斜床/研磨机残留的「上位机写入位」  -->
+                <Border
+                    Width="330"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="握手位复位" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            Style="{StaticResource CaptionText}"
+                            Text="异常中止后，双头镗 / 斜床 / 研磨机上「上位机写入的握手位」可能残留 1，会让下一次上料收不到上升沿。自动线在取料后会自动复位，此处供人工补清。"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            Margin="0,12,0,0"
+                            FontWeight="SemiBold"
+                            Text="选择设备" />
+                        <ComboBox
+                            Margin="0,6,0,0"
+                            DisplayMemberPath="Name"
+                            ItemsSource="{Binding Devices}"
+                            SelectedItem="{Binding SelectedHandshakeDevice, Mode=TwoWay}" />
+                        <ui:Button
+                            Margin="0,10,0,0"
+                            HorizontalAlignment="Left"
+                            Command="{Binding ClearHandshakeCommand}"
+                            Content="清握手位" />
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </ScrollViewer>
 

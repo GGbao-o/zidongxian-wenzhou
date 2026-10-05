@@ -233,4 +233,17 @@ public interface IManualOperationService
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>结果</returns>
     Task<ManualOperationResult> DrainCloseAsync(int craneId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 尽力复位指定设备"上位机写入的握手位"（写 0）。
+    /// 只有双头镗 / 斜床 / 研磨机需要（其余类型返回失败提示）。
+    /// <para>
+    /// 用途：异常中止后人工补清——这些位残留 1 会让该设备**下一次上料收不到上升沿**。
+    /// 自动线在"取料后中转到目标"时也会自动复位同一批点（共用 <c>ITransferHandler.ClearHandshakeAsync</c>）。
+    /// </para>
+    /// </summary>
+    /// <param name="deviceId">设备号</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>结果；成功时 Message 含复位点数</returns>
+    Task<ManualOperationResult> ClearHandshakeAsync(int deviceId, CancellationToken cancellationToken = default);
 }

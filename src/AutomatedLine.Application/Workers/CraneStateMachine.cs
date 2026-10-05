@@ -100,7 +100,7 @@ public sealed class CraneStateMachine
                      ?? throw new InvalidOperationException($"源设备 {task.SourceDeviceId} 不存在");
         var target = _deviceRegistry.Get(task.TargetDeviceId)
                      ?? throw new InvalidOperationException($"目标设备 {task.TargetDeviceId} 不存在");
-
+        //一次搬运流程的上下文
         var ctx = new TransferContext(crane, wp, _driverRegistry, _configStore, _configService.GetAppOptions(), _logger);
         var route = $"{wp.Info} {source.Name}→{target.Name}";
 
@@ -133,7 +133,7 @@ public sealed class CraneStateMachine
             await ctx.SetCraneSpeedAsync(cancellationToken).ConfigureAwait(false);
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 设置速度完成");
 
-            // 3) 取料
+            // 3) 取料：  已经z回升->发下料完成了
             phase = $"取料({source.Name})";
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
             source.CurrentWorkpiece = null;
@@ -141,12 +141,12 @@ public sealed class CraneStateMachine
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 取料完成：{source.Name}");
 
-            // 4) 中转：XY→目标、释放源预约、缩小路权
+            // 4) 中转：XY→目标、释放源预约、缩小路权、复位源设备握手位
             phase = $"中转({source.Name}→{target.Name})";
-            await TransitAsync(ctx, crane, task, target, cancellationToken).ConfigureAwait(false);
-            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 中转到达：{target.Name}（已释放源预约并缩小路权）");
+            await TransitAsync(ctx, crane, task, source, target, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 中转到达：{target.Name}（已释放源预约、缩小路权、复位源握手位）");
 
-            // 5) 放料
+            // 5) 放料：结果：也是z回升了发过下料完成的
             phase = $"放料({target.Name})";
             await _handlers.Get(target.Type).PlaceAsync(ctx, target, cancellationToken).ConfigureAwait(false);
             target.CurrentWorkpiece = wp;
@@ -173,7 +173,7 @@ public sealed class CraneStateMachine
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
-            //异常处理机制 状态机发生异常了 下面的方法处理   1.释放路权 2.释放预约 3.清空天车内存状态 4.清空相关设备内存引用 5.标记工件已丢弃Discarded
+            //异常处理机制 状态机发生异常了 下面的方法处理   1.释放路权 2.释放预约 3.清空天车内存状态 4.清空相关设备内存引用(ClearDeviceWorkpiece方法 是把device.CurrentWorkpiece=null) 5.标记工件已丢弃Discarded
             _abortCoordinator.Abort(crane, detail);   // 统一：释放天车/路权/预约 + 清理任务 + 暂停 + 报警
         }
     }
@@ -237,14 +237,31 @@ public sealed class CraneStateMachine
         }
     }
 
-    /// <summary>中转：XY→目标上方、释放源预约、路权缩小到车体+目标。</summary>
-    private async Task TransitAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase target, CancellationToken cancellationToken)
+    /// <summary>
+    /// 中转：XY→目标上方、释放源预约、路权缩小到车体+目标，并**尽力复位源设备的握手位**。
+    /// <para>
+    /// 清握手位放在这里（而不是取料末尾）的理由：
+    /// ① 此刻距"写下 下料完成=1"已隔整段 XY 移动（通常 1~3s），PLC 必然已采到那个 1，**无需额外等待或延时**；
+    /// ② 语义对齐——正好是"与源设备的业务关系结束"（源预约也在同一处释放）。
+    /// </para>
+    /// **只清源、绝不碰目标**：目标马上要上料，它的握手位正要被写 1。
+    /// </summary>
+    private async Task TransitAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase source, DeviceBase target, CancellationToken cancellationToken)
     {
         var (x, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         await ctx.MoveAbsoluteAsync(x, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
         _reservationManager.ReleaseSource(task.TaskId);
         _rightOfWayManager.Resize(task.TaskId, XInterval.FromTask(target.PositionX, target.PositionX, crane.Width));
+
+        // 源设备这一轮彻底结束：把它"上位机写入的握手位"复位为 0（双头镗/斜床/研磨机有效，其余空操作）。
+        // 内部逐点容错：清不掉只记警告、不影响本任务（最坏退回"残留 1"的旧行为）。
+        if (_driverRegistry.GetDevice(source.Id) is { } sourceDriver)
+        {
+            await _handlers.Get(source.Type)
+                .ClearHandshakeAsync(sourceDriver, source.Name, _logger, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>完成：回安全位、释放天车/路权/目标预约、改进度。</summary>

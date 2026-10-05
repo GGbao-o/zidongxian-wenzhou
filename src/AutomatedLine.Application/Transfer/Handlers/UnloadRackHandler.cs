@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Devices;
 
 namespace AutomatedLine.Application.Transfer.Handlers;
@@ -9,6 +10,11 @@ public sealed class UnloadRackHandler : ITransferHandler
 {
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.UnloadRack;
+
+    /// <inheritdoc />
+    /// <remarks>下料架只作目标、没有"上位机写入位"，无需复位。</remarks>
+    public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
+        => Task.FromResult(0);
 
     /// <inheritdoc />
     public Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
