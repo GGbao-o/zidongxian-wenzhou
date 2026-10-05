@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Reservations;
@@ -122,13 +123,19 @@ public sealed class CraneScheduler : IHostedService
     {
         //集中式调度周期
         var interval = Math.Max(50, _configService.GetAppOptions().Scheduling.ScheduleIntervalMs);
+
+        // 周期级"开始/完成"日志节流：约每 10s 打一对（轮数按实际周期换算，改配置也不会把日志刷爆）。
+        // 空转轮次（候选池为空）不打这一对，仍由下面的 dispatch-empty 抽样日志代表。
+        var verboseEvery = Math.Max(1, 10_000 / interval);
+        var cycle = 0;
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
                 if (_lineControl.IsRunning)
                 {
-                    await DispatchOnceAsync(cancellationToken).ConfigureAwait(false);
+                    await DispatchOnceAsync(cycle++ % verboseEvery == 0, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -159,9 +166,11 @@ public sealed class CraneScheduler : IHostedService
     /// **回滚**（释放天车锁、任务回 Waiting），下一轮重新派发。
     /// </para>
     /// </summary>
+    /// <param name="verbose">是否输出本轮"开始/完成"日志（按周期节流，见 <see cref="RunAsync"/>）</param>
     /// <param name="cancellationToken">取消令牌</param>
-    private async Task DispatchOnceAsync(CancellationToken cancellationToken)
+    private async Task DispatchOnceAsync(bool verbose, CancellationToken cancellationToken)
     {
+        var startedTimestamp = Stopwatch.GetTimestamp();
         var cranes = _craneRegistry.Snapshot();
 
         // 先看候选池：空则本轮无事可做，省掉一次天车状态读取
@@ -170,6 +179,12 @@ public sealed class CraneScheduler : IHostedService
         {
             _logger.Sample(LogCategory.Scheduling, "dispatch-empty", "候选池为空，本轮无任务可派");
             return;
+        }
+
+        if (verbose)
+        {
+            _logger.Info(LogCategory.Scheduling,
+                $"调度开始：候选池 {pool.Count} 个，启用天车 {cranes.Count(c => c.IsEnabled)} 台");
         }
 
         // 只对"启用且空闲"的天车按需读一次状态（连接/报警/位置），供本轮选车使用。天车不做后台采集。
@@ -181,6 +196,7 @@ public sealed class CraneScheduler : IHostedService
             .ThenBy(c => NearestCraneDistance(c, cranes, statuses))
             .ToList();
         //遍历候选任务
+        var dispatchedCount = 0;
         foreach (var candidate in candidates)
         {
             var task = candidate.Workpiece;
@@ -264,6 +280,7 @@ public sealed class CraneScheduler : IHostedService
                 _logger.Info(LogCategory.Scheduling,
                     $"派发：工件 {task.Info}（任务 {Short(task.Id)}）{candidate.Source.Name}→{candidate.Target.Name} 给 {crane.Name}（区间 {interval}，已入队待执行）");
                 dispatched = true;
+                dispatchedCount++;
                 break;   // 该候选已派人，处理下一个候选
             }
 
@@ -273,6 +290,13 @@ public sealed class CraneScheduler : IHostedService
                 _logger.Sample(LogCategory.Scheduling, $"dispatch-blocked-{task.Id}",
                     $"候选 {Describe(candidate)} 暂未派发：{blockReason ?? "无可执行天车"}（{eligible.Count} 台可执行天车均冲突，下轮重试）");
             }
+        }
+
+        if (verbose)
+        {
+            // 耗时用 Stopwatch 取：Windows 上 DateTime 精度约 15ms，测不出毫秒级周期
+            _logger.Info(LogCategory.Scheduling,
+                $"调度完成：候选 {candidates.Count} 个，本轮派发 {dispatchedCount} 个，耗时 {(long)Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds}ms");
         }
     }
 

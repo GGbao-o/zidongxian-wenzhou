@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Reservations;
@@ -122,6 +123,12 @@ public sealed class TransportTaskGenerator : IHostedService
     {
         //从配置中拿候选任务生成周期 500ms
         var interval = Math.Max(50, _configService.GetAppOptions().Scheduling.GenerateIntervalMs);
+
+        // 周期级"开始/完成"日志节流：约每 10s 打一对（轮数按实际周期换算，改配置也不会把日志刷爆）。
+        // 线路未运行的轮次不打这一对，仍由下面的 generate-idle 抽样日志代表。
+        var verboseEvery = Math.Max(1, 10_000 / interval);
+        var cycle = 0;
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -130,7 +137,7 @@ public sealed class TransportTaskGenerator : IHostedService
                 if (_lineControl.IsRunning)
                 {
                     //生成候选任务
-                    GenerateOnce();
+                    GenerateOnce(cycle++ % verboseEvery == 0);
                 }
                 else if (!_candidatePool.IsEmpty)
                 {
@@ -158,8 +165,10 @@ public sealed class TransportTaskGenerator : IHostedService
     }
 
     /// <summary>执行一次候选任务重建。</summary>
-    private void GenerateOnce()
+    /// <param name="verbose">是否输出本轮"开始/完成"日志（按周期节流，见 <see cref="RunAsync"/>）</param>
+    private void GenerateOnce(bool verbose)
     {
+        var startedTimestamp = Stopwatch.GetTimestamp();
         var devices = _deviceRegistry.Snapshot();
 
         // 工序是否参与工艺的唯一判据（与主页面"下一道工序"、工序展示页共用），本周期构造一次
@@ -183,6 +192,15 @@ public sealed class TransportTaskGenerator : IHostedService
             .Where(t => t.Runtime.CurrentLocation.Kind == WorkpieceLocationKind.Queue)
             .OrderBy(t => t.Runtime.QueueOrder)
             .FirstOrDefault();
+
+        // 上料队头描述：开始/完成两条日志共用，避免两处各算一次
+        var headText = queueHead is null ? "无" : Describe(queueHead);
+
+        if (verbose)
+        {
+            _logger.Info(LogCategory.Generation,
+                $"生成开始：入线任务 {lineTasks.Count} 个，上料队头 {headText}");
+        }
 
         // 只遍历入线任务（已过滤掉未启动/暂停/派发/完成等）
         foreach (var task in lineTasks)
@@ -249,10 +267,12 @@ public sealed class TransportTaskGenerator : IHostedService
 
         _candidatePool.Replace(candidates);
 
-        // 高频循环，成功日志按抽样间隔落盘（含入线任务数、上料队头、候选数）
-        var headText = queueHead is null ? "无" : Describe(queueHead);
-        _logger.Sample(LogCategory.Generation, "generate-cycle",
-            $"候选重建：入线任务 {lineTasks.Count}，上料队头 {headText}，候选 {candidates.Count} 个");
+        if (verbose)
+        {
+            // 耗时用 Stopwatch 取：Windows 上 DateTime 精度约 15ms，测不出毫秒级周期
+            _logger.Info(LogCategory.Generation,
+                $"生成完成：候选 {candidates.Count} 个（入线任务 {lineTasks.Count}，上料队头 {headText}，耗时 {(long)Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds}ms）");
+        }
     }
 
     /// <summary>
