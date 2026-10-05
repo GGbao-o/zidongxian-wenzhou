@@ -134,7 +134,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
             catch (Exception ex)
             {
                 // 采集循环本身绝不能因单次异常而退出
-                _logger.Error(LogCategory.Communication, "采集循环发生未预期异常", ex);
+                _logger.Error(LogCategory.Collection, "采集循环发生未预期异常", ex);
             }
 
             try
@@ -215,7 +215,11 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
         }
         catch (Exception ex)
         {
-            _logger.Warn(LogCategory.Communication, $"设备[{driver.DeviceId}] 采集失败（本周期放弃）：{ex.Message}");
+            // 归到 Collection（采集语义）而非 Communication（通信语义）：这里记录的是"采集循环本轮放弃某台设备"，
+            // 与上面的采集心跳同属一个文件，看 collection.txt 即可判断"哪台设备没采到、什么时候开始的"。
+            // 用 Sample 按设备号节流：设备离线时采集循环每 500ms 就会失败一次，不节流会把文件刷爆（20s 一条足够定位）。
+            _logger.Sample(LogCategory.Collection, $"collection-fail-{driver.DeviceId}",
+                $"设备[{driver.DeviceId}] 采集失败（本周期放弃，IsConnected 置 false、Signals 置空快照）：{ex.Message}");
             return (driver, new SignalSnapshot(
                 DateTime.Now, sequence, ConnectionState.Disconnected, SignalQuality.Bad,
                 new Dictionary<string, object?>()));

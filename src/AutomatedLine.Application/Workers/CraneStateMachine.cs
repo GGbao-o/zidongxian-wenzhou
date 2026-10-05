@@ -298,6 +298,14 @@ public sealed class CraneStateMachine
             : WorkpieceState.Waiting;
 
         ctx.LogStep($"收尾：工件状态置 {wp.Runtime.TaskState}（目标工序={task.TargetProcess}）");
+
+        // task.txt：任务生命周期**终点**。只有"送到下料架"这一趟才是真正完成；
+        // 其余工序搬完只是回 Waiting（等下一段搬运），不算完成、不写 task.txt。
+        if (wp.Runtime.TaskState == WorkpieceState.Completed)
+        {
+            _logger.Info(LogCategory.Task, $"任务完成：工件 {wp.Info}（已送到下料架）");
+        }
+
         _logger.Info(LogCategory.StateMachine, $"{crane.Name} 完成任务 {task.TaskId:N}");
     }
 

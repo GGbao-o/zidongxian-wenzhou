@@ -209,6 +209,9 @@ public sealed class TransportTaskGenerator : IHostedService
                 // 后面已无可执行工序：视为走完
                 runtime.TaskState = WorkpieceState.Completed;
                 _logger.Info(LogCategory.Generation, $"工件 {Describe(task)} 已无可执行工序，标记完成");
+                // task.txt：另一条完成路径（线上已无该工件的下一道可执行工序）。
+                // Generation 记"为什么判完成"，Task 记"生命周期终点"，两者互补不重复。
+                _logger.Info(LogCategory.Task, $"任务完成：工件 {Describe(task)}（后续已无可执行工序）");
                 continue;
             }
 

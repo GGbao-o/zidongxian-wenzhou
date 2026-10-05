@@ -40,12 +40,18 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
     {
         var task = new WorkpieceTask(info);
 
+        int count;
         lock (_sync)
         {
             _tasks.Add(task);
+            count = _tasks.Count;
         }
 
-        Console.WriteLine($"[RuntimeTaskManager] 新增任务 {task.Info}，当前共 {_tasks.Count} 个");
+        Console.WriteLine($"[RuntimeTaskManager] 新增任务 {task.Info}，当前共 {count} 个");
+
+        // task.txt：任务生命周期**起点**。与"开始/暂停/完成/丢弃"合成一条时间线，
+        // 排查某块板只需看 task.txt，不必在 operation / scheduling / statemachine 之间来回找。
+        _logger.Info(LogCategory.Task, $"任务创建：工件 {task.Info}（{Describe(info)}），当前共 {count} 个");
 
         // 先更新数据再通知，保证订阅者读到的快照已包含本次变更
         Changed?.Invoke(this, EventArgs.Empty);
@@ -88,6 +94,8 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         }
 
         Console.WriteLine($"[RuntimeTaskManager] 启动任务 {taskId}，入线顺序 {task.Runtime.QueueOrder}");
+        // task.txt：任务入线（Created/Paused → Waiting），并记录入线顺序，便于对照 scheduling.txt 的派发顺序
+        _logger.Info(LogCategory.Task, $"任务开始：工件 {task.Info}，入线顺序 {task.Runtime.QueueOrder}（状态 → Waiting）");
         Changed?.Invoke(this, EventArgs.Empty);
         return true;
     }
@@ -110,6 +118,8 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         }
 
         Console.WriteLine($"[RuntimeTaskManager] 暂停任务 {taskId}");
+        // task.txt：任务出队暂停（Waiting → Paused，顺序号已清空，再次启动会重新入队尾）
+        _logger.Info(LogCategory.Task, $"任务暂停：工件 {task.Info}（状态 → Paused，已出队）");
         Changed?.Invoke(this, EventArgs.Empty);
         return true;
     }

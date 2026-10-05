@@ -107,8 +107,11 @@ public sealed class TaskAbortCoordinator
                     workpieceTask.Runtime.CurrentLocation = WorkpieceLocation.Discarded;
                 }
 
+                // task.txt：任务生命周期终点（异常路径）。带上工件标识，便于只用 task.txt 追一块板。
+                // 注意日志在 if 之外（与原来一致：任务在表里已被移除时也要留痕），故这里必须空安全取工件文本
+                var workpieceText = workpieceTask is null ? "工件任务已不在内存表" : $"工件 {workpieceTask.Info}";
                 _logger.Error(LogCategory.Task,
-                    $"任务中止：{crane.Name} 任务 {task.TaskId:N} 原因：{reason}");
+                    $"任务丢弃：{workpieceText}（任务 {task.TaskId:N}），天车 {crane.Name}，原因：{reason}");
             }
         }
         finally
