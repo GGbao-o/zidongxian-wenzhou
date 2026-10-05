@@ -108,7 +108,7 @@ public sealed class CraneStateMachine
         crane.Runtime.CurrentTask = task;
 
         // 1) 原子获取路权 + 预约；失败回滚、任务回 Waiting
-        if (!Acquire(crane, task))
+        if (!Acquire(ctx, crane, task))
         {
             return;
         }
@@ -126,12 +126,12 @@ public sealed class CraneStateMachine
             // 2) 再审核源（内存一致；PLC 点位由 handler 首步等待）
             phase = $"审核源({source.Name})";
             AuditSource(source, wp);
-            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 审核源通过：{source.Name}");
+            ctx.LogStep($"审核源通过：{source.Name}");
 
             // 下发本车运动速度（每次执行前设置一次）
             phase = "设置速度";
             await ctx.SetCraneSpeedAsync(cancellationToken).ConfigureAwait(false);
-            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 设置速度完成");
+            ctx.LogStep("设置速度完成");
 
             // 3) 取料：  已经z回升->发下料完成了
             phase = $"取料({source.Name})";
@@ -139,12 +139,12 @@ public sealed class CraneStateMachine
             source.CurrentWorkpiece = null;
             crane.CurrentWorkpiece = wp;
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
-            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 取料完成：{source.Name}");
+            ctx.LogStep($"取料完成：{source.Name}（板已在天车 {crane.Name} 上）");
 
             // 4) 中转：XY→目标、释放源预约、缩小路权、复位源设备握手位
             phase = $"中转({source.Name}→{target.Name})";
             await TransitAsync(ctx, crane, task, source, target, cancellationToken).ConfigureAwait(false);
-            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 中转到达：{target.Name}（已释放源预约、缩小路权、复位源握手位）");
+            ctx.LogStep($"中转到达：{target.Name}（已释放源预约、缩小路权、复位源握手位）");
 
             // 5) 放料：结果：也是z回升了发过下料完成的
             phase = $"放料({target.Name})";
@@ -153,7 +153,7 @@ public sealed class CraneStateMachine
             crane.CurrentWorkpiece = null;
             wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(target.Id);
             wp.Runtime.CurrentProcess = task.TargetProcess;
-            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 放料完成：{target.Name}");
+            ctx.LogStep($"放料完成：{target.Name}（板已交给目标设备）");
 
             // 6) 完成：回安全位、释放全部
             phase = "收尾";
@@ -178,36 +178,40 @@ public sealed class CraneStateMachine
         }
     }
 
+    /// <summary>任务标识短文本（前 8 位）。日志用：完整 GUID 有 32 位且人读不出信息。</summary>
+    /// <param name="taskId">任务标识</param>
+    /// <returns>8 位短号</returns>
+    private static string ShortId(Guid taskId) => taskId.ToString("N")[..8];
+
     /// <summary>构造异常详情（天车 / 工件 / 源→目标 / 步骤 / 原因 / 是否已充磁）。</summary>
     private static string BuildFailure(Crane crane, TransferContext ctx, string route, string phase, string reason)
         => $"[{crane.Name}] 任务 {route} 步骤[{phase}] 异常：{reason}"
            + (ctx.HasPieceOnCrane ? "（已充磁：板可能在天车上）" : "（未充磁：板应在源设备）");
 
     /// <summary>原子获取路权 + 源/目标预约；失败回滚并让出天车。</summary>
-    private bool Acquire(Crane crane, TransportTask task)
+    private bool Acquire(TransferContext ctx, Crane crane, TransportTask task)
     {
-        _logger.Info(LogCategory.StateMachine,
-            $"[{crane.Name}] 获取资源：任务 {task.TaskId:N}（源设备 {task.SourceDeviceId} → 目标设备 {task.TargetDeviceId}）");
+        ctx.LogStep($"获取资源：任务 {ShortId(task.TaskId)}（源设备 {task.SourceDeviceId} → 目标设备 {task.TargetDeviceId}）");
         var interval = task.GetRightOfWayInterval(crane.Width);
 
         if (!_rightOfWayManager.TryAcquire(task.TaskId, interval))
         {
             //获取失败回滚 这里会将工件设置位waiting
-            _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 获取资源失败：路权区间被占用，回滚让出天车");
+            ctx.LogStepWarn("获取资源失败：路权区间被占用，回滚让出天车");
             Rollback(crane, task, "路权被占用");
             return false;//获取失败了
         }
 
         if (!_reservationManager.TryReserve(task.TaskId, task.SourceDeviceId, task.TargetDeviceId))
         {
-            _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 获取资源失败：源/目标设备已被预约，释放已占路权后回滚");
+            ctx.LogStepWarn("获取资源失败：源/目标设备已被预约，释放已占路权后回滚");
             _rightOfWayManager.Release(task.TaskId);
             Rollback(crane, task, "设备预约失败");
             return false;
         }
 
         crane.Runtime.LockedInterval = interval;
-        _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 获取资源成功：路权 + 源/目标预约已锁定");
+        ctx.LogStep("获取资源成功：路权 + 源/目标预约已锁定");
         return true;
     }
 
@@ -225,7 +229,9 @@ public sealed class CraneStateMachine
             wp.Runtime.TaskState = WorkpieceState.Waiting;
         }
 
-        _logger.Warn(LogCategory.StateMachine, $"{crane.Name} 获取资源失败（{reason}），回滚待重派");
+        // 带工件标识；与上面 Acquire 的"获取资源失败（成因）"配对：一行说成因、一行说回滚结果
+        _logger.Warn(LogCategory.StateMachine,
+            $"[{crane.Name}] 工件 {(wp is null ? "(已不在内存表)" : wp.Info.ToString())} 已回滚（{reason}）：任务回 Waiting、天车让出待下轮重派");
     }
 
     /// <summary>再审核源设备内存一致（上料架队列除外）。</summary>
@@ -306,7 +312,7 @@ public sealed class CraneStateMachine
             _logger.Info(LogCategory.Task, $"任务完成：工件 {wp.Info}（已送到下料架）");
         }
 
-        _logger.Info(LogCategory.StateMachine, $"{crane.Name} 完成任务 {task.TaskId:N}");
+        ctx.LogStep($"完成任务（任务 {ShortId(task.TaskId)}）");
     }
 
 }

@@ -262,4 +262,12 @@ public sealed class TransferContext
     /// <param name="action">步骤说明</param>
     public void LogStep(string action)
         => _logger.Info(LogCategory.StateMachine, $"{Tag} {action}");
+
+    /// <summary>
+    /// 写一条**流程步骤警告**日志（同样自动带 天车 + 工件）——
+    /// 用于"本步失败但仍会继续或回滚"的场景，保留 WARN 级别便于现场按级别筛选。
+    /// </summary>
+    /// <param name="action">步骤说明</param>
+    public void LogStepWarn(string action)
+        => _logger.Warn(LogCategory.StateMachine, $"{Tag} {action}");
 }
