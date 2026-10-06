@@ -124,6 +124,41 @@ public class CraneStateMachineTests
         Assert.Contains("SET_SPEED", h.CraneDriver.Actions);   // 流程开始先设速度
     }
 
+    /// <summary>
+    /// 中转要复位**源与目标两侧**的握手位，且顺序正确：
+    /// 源侧 = 取料时写 1、中转再清 0（下料完成已发出，PLC 已采到）；
+    /// 目标侧 = 中转先清 0、放料再写 1（保证设备收到干净的 0→1 上升沿，否则会白等到握手超时）。
+    /// 用斜床作源、双头镗作目标，两侧都是"有上位机写入位"的设备，一次覆盖两条约定。
+    /// </summary>
+    [Fact]
+    public async Task Transit_ClearsBothSides_SourceAfterItsWrite_TargetBeforePlaceWrite()
+    {
+        var h = new Harness(new LatheMachine(3, "斜床1", 1000), new BoringMachine(2, "双头镗", 2000), handshakeTimeoutMs: 10000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("TailstockOpened", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (_, task) = h.NewTask();
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        // 源侧（斜床）：取料写 1 → 中转清 0
+        var sourceWrites = h.SourceDriver.Writes;
+        var sourceSetAt = sourceWrites.IndexOf("CraneUnloadDone=1");
+        var sourceClearAt = sourceWrites.IndexOf("CraneUnloadDone=0");
+        Assert.True(sourceSetAt >= 0, "取料应写 天车下料完成=1");
+        Assert.True(sourceClearAt >= 0, "中转应复位源设备握手位（写 0）");
+        Assert.True(sourceSetAt < sourceClearAt, "源侧应先写 1、中转再清 0");
+
+        // 目标侧（双头镗）：中转清 0 → 放料写 1；且"上位机写入位"全部清零（含目标阶段用不到的残留位）
+        var targetWrites = h.TargetDriver.Writes;
+        var targetClearAt = targetWrites.IndexOf("DataSentDone=0");
+        var targetSetAt = targetWrites.IndexOf("DataSentDone=1");
+        Assert.True(targetClearAt >= 0, "中转应复位目标设备握手位（写 0）");
+        Assert.True(targetSetAt >= 0, "放料应写 数据下发完成=1");
+        Assert.True(targetClearAt < targetSetAt, "目标侧必须先清 0、放料再写 1");
+        Assert.Contains("LoadDone=0", targetWrites);
+        Assert.Contains("UnloadDone=0", targetWrites);
+    }
+
     /// <summary>acquire 失败：路权被占 → 回滚、任务仍 Waiting、未动设备。</summary>
     [Fact]
     public async Task AcquireFails_RollsBack_ToWaiting()

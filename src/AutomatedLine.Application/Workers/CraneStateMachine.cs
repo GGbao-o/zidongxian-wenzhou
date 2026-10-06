@@ -249,13 +249,16 @@ public sealed class CraneStateMachine
     }
 
     /// <summary>
-    /// 中转：XY→目标上方、释放源预约、路权缩小到车体+目标，并**尽力复位源设备的握手位**。
+    /// 中转：XY→目标上方、释放源预约、路权缩小到车体+目标，并**尽力复位源与目标两侧的握手位**。
     /// <para>
     /// 清握手位放在这里（而不是取料末尾）的理由：
     /// ① 此刻距"写下 下料完成=1"已隔整段 XY 移动（通常 1~3s），PLC 必然已采到那个 1，**无需额外等待或延时**；
     /// ② 语义对齐——正好是"与源设备的业务关系结束"（源预约也在同一处释放）。
     /// </para>
-    /// **只清源、绝不碰目标**：目标马上要上料，它的握手位正要被写 1。
+    /// **源与目标两侧都清，顺序先源后目标**：
+    /// 源侧清掉刚写出的"下料完成"等位；目标侧清掉**上一轮残留**，
+    /// 保证放料阶段每次写 1 都是干净的 **0→1 上升沿**——残留 1 会让机器收不到这次下发，
+    /// 白等到握手超时（60s）后统一中止，冷启动、上一轮失败中止后尤其常见。
     /// </summary>
     private async Task TransitAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase source, DeviceBase target, CancellationToken cancellationToken)
     {
@@ -272,6 +275,7 @@ public sealed class CraneStateMachine
         // 源设备这一轮彻底结束：把它"上位机写入的握手位"复位为 0（双头镗/斜床/研磨机有效，其余空操作）。
         // 内部逐点容错：清不掉只记警告、不影响本任务（最坏退回"残留 1"的旧行为）。
         ctx.LogStep(source, "中转：复位源设备握手位（双头镗/斜床/研磨机有效，其余无操作；避免残留 1 让下一轮上料收不到上升沿）");
+        //
         if (_driverRegistry.GetDevice(source.Id) is { } sourceDriver)
         {
             //清除上位机写入设备的信息
@@ -280,7 +284,18 @@ public sealed class CraneStateMachine
                 .ConfigureAwait(false);
         }
 
-        ctx.LogStep(target, "中转：完成（已释放源预约、缩小路权、复位源握手位）");
+        // 目标设备：放料前把它"上位机写入的握手位"清零，保证放料阶段每次写 1 都是干净的上升沿
+        // （同样只对双头镗/斜床/研磨机有效；打号机、下料架为空操作）。
+        // 顺序：先清源（下料完成已发出、PLC 已采到）→ 再清目标（清上一轮残留，为即将到来的上料做准备）。
+        ctx.LogStep(target, "中转：复位目标设备握手位（清上一轮残留，保证上料写 1 是干净上升沿）");
+        if (_driverRegistry.GetDevice(target.Id) is { } targetDriver)
+        {
+            await _handlers.Get(target.Type)
+                .ClearHandshakeAsync(targetDriver, target.Name, _logger, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        ctx.LogStep(target, "中转：完成（已释放源预约、缩小路权、复位源与目标握手位）");
     }
 
     /// <summary>完成：回安全位、释放天车/路权/目标预约、改进度。</summary>
