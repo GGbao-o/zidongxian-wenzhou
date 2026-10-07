@@ -28,7 +28,7 @@ public class DialogService : IDialogService
     public WorkpieceInfo? ShowEditWorkpieceDialog(WorkpieceInfo current)
     {
         var viewModel = new AddWorkpieceViewModel();
-        // 预填现有数据并进入编辑模式：版号/序号/是否做动平衡在编辑模式下只读
+        // 预填现有数据并进入编辑模式：版号/序号在编辑模式下只读
         viewModel.LoadFrom(current);
 
         var dialog = new AddWorkpieceDialog(viewModel)

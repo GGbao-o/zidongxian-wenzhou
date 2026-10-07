@@ -40,9 +40,6 @@ public sealed class WorkpieceInfo
     /// <summary>圆角大小。</summary>
     public double FilletSize { get; init; }
 
-    /// <summary>是否做动平衡：**0=不需要、1=需要**。</summary>
-    public int NeedBalancing { get; init; }
-
     /// <summary>斜床工艺最小值。</summary>
     public const int LatheMachiningModeMin = 1;
 

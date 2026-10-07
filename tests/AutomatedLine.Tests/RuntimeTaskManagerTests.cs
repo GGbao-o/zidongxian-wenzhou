@@ -45,7 +45,6 @@ public class RuntimeTaskManagerTests
             FilletSize = 2.5,
             LeftPlugThickness = 3,
             RightPlugThickness = 4,
-            NeedBalancing = 1,
             LatheMachiningMode = 7
         };
 

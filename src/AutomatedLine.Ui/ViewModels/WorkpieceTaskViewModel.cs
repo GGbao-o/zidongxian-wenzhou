@@ -54,10 +54,6 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private double _filletSize;
 
-    /// <summary>是否做动平衡文本（需要/不需要）。</summary>
-    [ObservableProperty]
-    private string _needBalancingText = string.Empty;
-
     /// <summary>斜床工艺文本（写入斜床宏 #909，取值 1~10）。</summary>
     [ObservableProperty]
     private string _latheMachiningModeText = string.Empty;
@@ -143,7 +139,6 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         PrintContent = info.PrintContent;
         InnerHoleTaper = info.InnerHoleTaper;
         FilletSize = info.FilletSize;
-        NeedBalancingText = info.NeedBalancing == 1 ? "需要" : "不需要";
         LatheMachiningModeText = info.LatheMachiningMode.ToString();
         ProcessText = ProcessToText(runtime.CurrentProcess);
         // QueueOrderText（入线顺序=上料架队列排位）由主 ViewModel 按当前队列统一计算后写入，见 MainViewModel.RefreshTasks

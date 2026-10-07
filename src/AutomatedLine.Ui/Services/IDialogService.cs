@@ -17,7 +17,7 @@ public interface IDialogService
 
     /// <summary>
     /// 弹出"编辑工件"对话框：用现有数据预填，进入编辑模式
-    /// （版号 / 序号 / 是否做动平衡只读，其余字段可改）。
+    /// （版号 / 序号只读，其余字段可改）。
     /// </summary>
     /// <param name="current">当前工件数据（用于预填；<c>RuntimeId</c> 会被沿用）</param>
     /// <returns>用户确定返回新的工件数据；取消返回 null</returns>

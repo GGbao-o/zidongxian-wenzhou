@@ -6,7 +6,7 @@ namespace AutomatedLine.Ui.ViewModels;
 /// <summary>
 /// 工件数据录入弹窗的 ViewModel（**新增**与**编辑**共用）。
 /// 只负责收集工件数据并组装成 <see cref="WorkpieceInfo"/>，不直接操作任务表（由主 ViewModel 决定是否写入）。
-/// 编辑模式下：**版号 / 序号 / 是否做动平衡 不可改**（只读展示），其余字段与新增一致。
+/// 编辑模式下：**版号 / 序号 不可改**（只读展示），其余字段与新增一致。
 /// </summary>
 public partial class AddWorkpieceViewModel : ObservableObject
 {
@@ -57,10 +57,6 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [ObservableProperty]
     private double _filletSize;
 
-    /// <summary>是否做动平衡：0=不需要、1=需要。**编辑模式下不可改**。</summary>
-    [ObservableProperty]
-    private int _needBalancing;
-
     /// <summary>斜床工艺（写入斜床宏 #909）：1~10。</summary>
     [ObservableProperty]
     private int _latheMachiningMode = WorkpieceInfo.LatheMachiningModeDefault;
@@ -71,7 +67,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(WindowTitle))]
     private bool _isEditMode;
 
-    /// <summary>身份类字段（版号 / 序号 / 是否做动平衡）是否可改：**仅新增模式可改**。</summary>
+    /// <summary>身份类字段（版号 / 序号）是否可改：**仅新增模式可改**。</summary>
     public bool IdentityEditable => !IsEditMode;
 
     /// <summary>弹窗标题：新增「添加工件」/ 编辑「编辑工件」。</summary>
@@ -97,7 +93,6 @@ public partial class AddWorkpieceViewModel : ObservableObject
         PrintContent = info.PrintContent;
         InnerHoleTaper = info.InnerHoleTaper;
         FilletSize = info.FilletSize;
-        NeedBalancing = info.NeedBalancing;
         LatheMachiningMode = info.LatheMachiningMode;
     }
 
@@ -119,13 +114,11 @@ public partial class AddWorkpieceViewModel : ObservableObject
         PrintContent = PrintContent.Trim(),
         InnerHoleTaper = InnerHoleTaper,
         FilletSize = FilletSize,
-        NeedBalancing = NeedBalancing,
         LatheMachiningMode = LatheMachiningMode
     };
 
     /// <summary>
-    /// 校验输入是否合法：版号非空、序号为正整数、直径/长度为正、堵孔只能 70/100、
-    /// 动平衡 0/1、**斜床工艺 1~10**。
+    /// 校验输入是否合法：版号非空、序号为正整数、直径/长度为正、堵孔只能 70/100、**斜床工艺 1~10**。
     /// </summary>
     /// <returns>合法返回 true</returns>
     public bool Validate()
@@ -135,7 +128,6 @@ public partial class AddWorkpieceViewModel : ObservableObject
                && Diameter > 0
                && Length > 0
                && (PlugHole == 70 || PlugHole == 100)
-               && (NeedBalancing == 0 || NeedBalancing == 1)
                && LatheMachiningMode >= WorkpieceInfo.LatheMachiningModeMin
                && LatheMachiningMode <= WorkpieceInfo.LatheMachiningModeMax;
     }
