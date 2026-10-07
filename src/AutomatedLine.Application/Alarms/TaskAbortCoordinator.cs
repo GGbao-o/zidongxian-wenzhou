@@ -136,6 +136,7 @@ public sealed class TaskAbortCoordinator
     private void ClearDeviceWorkpiece(int deviceId, Guid workpieceRuntimeId)
     {
         var device = _deviceRegistry.Get(deviceId);
+        //判断是不是同一个工件 不是无脑清理
         if (device?.CurrentWorkpiece?.Id == workpieceRuntimeId)
         {
             device.CurrentWorkpiece = null;

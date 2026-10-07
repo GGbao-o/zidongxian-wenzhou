@@ -23,17 +23,18 @@ public sealed class LatheHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
-    /// <inheritdoc />
+    /// <inheritdoc />  斜床取料
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         ctx.LogStep(source, "取料：开始（等设备请求下料 RequestUnload=1）");
         await ctx.WaitDeviceAsync(source, "RequestUnload", true, cancellationToken).ConfigureAwait(false);
-
+        //获取设备xyz坐标并且➕天车偏移
         var (x, y, z) = await ctx.BaseOfAsync(source, cancellationToken).ConfigureAwait(false);
         var yOffset = OffsetOf(ctx, source.Id);
         var pickY = y - yOffset;   // 二次偏移位置
 
         ctx.LogStep(source, $"取料：XY → 设备上方并做 Y 二次偏移（X={x} Y={pickY}，Y偏移={yOffset}）");
+        //y到偏移位置
         await ctx.MoveAbsoluteAsync(x, pickY, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
@@ -63,7 +64,7 @@ public sealed class LatheHandler : ITransferHandler
         ctx.LogStep(source, "取料：完成（可离开源设备）");
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc /> 斜床放料
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
         ctx.LogStep(target, "放料：开始（等设备请求数据 RequestData=1）");
@@ -92,6 +93,7 @@ public sealed class LatheHandler : ITransferHandler
 
         // 目标特有：Y 二次偏移 → 发天车上料到位(#1102) → 尾座夹紧
         ctx.LogStep(target, $"放料：Y 二次偏移进入顶尖（相对 −{yOffset}）");
+        //相对移动 
         await ctx.MoveRelativeAsync(0, -yOffset, 0, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(target, "放料：写 天车上料到位=1（CraneLoadInPlace）");

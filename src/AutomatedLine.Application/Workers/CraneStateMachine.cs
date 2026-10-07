@@ -133,7 +133,7 @@ public sealed class CraneStateMachine
             await ctx.SetCraneSpeedAsync(cancellationToken).ConfigureAwait(false);
             ctx.LogStep("设置速度完成");
 
-            // 3) 取料：  已经z回升->发下料完成了
+            // 3) 去源设备取料阶段：  已经z回升->发下料完成了
             phase = $"取料({source.Name})";
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
             source.CurrentWorkpiece = null;
@@ -141,12 +141,12 @@ public sealed class CraneStateMachine
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
             ctx.LogStep($"取料完成：{source.Name}（板已在天车 {crane.Name} 上）");
 
-            // 4) 中转：XY→目标、释放源预约、缩小路权、复位源设备握手位
+            // 4) 中转：XY→目标、释放源预约、缩小路权、清除源设备 目标设备的握手信号(源设备是下料 目标设备上料)
             phase = $"中转({source.Name}→{target.Name})";
             await TransitAsync(ctx, crane, task, source, target, cancellationToken).ConfigureAwait(false);
             ctx.LogStep($"中转到达：{target.Name}（已释放源预约、缩小路权、复位源握手位）");
 
-            // 5) 放料：结果：也是z回升了发过下料完成的
+            // 5) 去目标设备放料阶段：结果：也是z回升了发过下料完成的
             phase = $"放料({target.Name})";
             await _handlers.Get(target.Type).PlaceAsync(ctx, target, cancellationToken).ConfigureAwait(false);
             target.CurrentWorkpiece = wp;
@@ -173,7 +173,7 @@ public sealed class CraneStateMachine
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
-            //异常处理机制 状态机发生异常了 下面的方法处理   1.释放路权 2.释放预约 3.清空天车内存状态 4.清空相关设备内存引用(ClearDeviceWorkpiece方法 是把device.CurrentWorkpiece=null) 5.标记工件已丢弃Discarded
+            //异常处理机制 状态机发生异常了 下面的方法处理   1.释放路权 2.释放预约 3.清空天车内存状态 4.清空相关设备内存引用(ClearDeviceWorkpiece方法 是把device.CurrentWorkpiece=null)  这个不是无脑清理 5.标记工件已丢弃Discarded
             _abortCoordinator.Abort(crane, detail);   // 统一：释放天车/路权/预约 + 清理任务 + 暂停 + 报警
         }
     }

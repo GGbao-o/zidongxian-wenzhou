@@ -450,7 +450,7 @@ public sealed class CraneService : ICraneDriver
                 // Z 下降：先 XY（并行）后 Z    对应的轴 寄存器地址写2 延迟 写0
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
                 var xyResult = await PollAxesAsync(targetX, targetY, -1, pollEncoder, false, cancellationToken).ConfigureAwait(false);
-                if (!xyResult.IsSuccess) return xyResult;
+                if (!xyResult.IsSuccess) return xyResult;//这个就是xy没有运动成功
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
             }
             else if (zDirection == 2)

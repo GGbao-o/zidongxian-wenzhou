@@ -24,7 +24,7 @@ public sealed class GrinderHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
-    /// <inheritdoc />
+    /// <inheritdoc /> 研磨机取料
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         ctx.LogStep(source, "取料：开始（等设备请求下料 RequestUnload=1）");
@@ -58,7 +58,7 @@ public sealed class GrinderHandler : ITransferHandler
         ctx.LogStep(source, "取料：完成（可离开源设备）");
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc /> 研磨机放料
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
         ctx.LogStep(target, "放料：开始（等设备请求数据 RequestData=1）");
