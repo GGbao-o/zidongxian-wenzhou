@@ -271,7 +271,12 @@ public sealed class CraneStateMachine
         //释放源设备预约 缩小路权
         ctx.LogStep(target, "中转：释放源设备预约 + 路权缩小到目标车体区间");
         _reservationManager.ReleaseSource(task.TaskId);
-        _rightOfWayManager.Resize(task.TaskId, XInterval.FromTask(target.PositionX, target.PositionX, crane.Width));
+        var targetInterval = XInterval.FromTask(target.PositionX, target.PositionX, crane.Width);
+        if (_rightOfWayManager.Resize(task.TaskId, targetInterval))
+        {
+            // 大屏读取天车运行态；仅在调整成功后同步，避免显示未实际取得的区间。
+            crane.Runtime.LockedInterval = targetInterval;
+        }
 
         // 源设备这一轮彻底结束：把它"上位机写入的握手位"复位为 0（双头镗/斜床/研磨机有效，其余空操作）。
         // 内部逐点容错：清不掉只记警告、不影响本任务（最坏退回"残留 1"的旧行为）。

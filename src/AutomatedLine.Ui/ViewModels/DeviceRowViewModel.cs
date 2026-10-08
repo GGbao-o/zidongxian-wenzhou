@@ -1,5 +1,6 @@
 using System.Text;
 using AutomatedLine.Domain.Devices;
+using AutomatedLine.Domain.Workpieces;
 using AutomatedLine.Ui.Helpers;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -138,7 +139,8 @@ public partial class DeviceRowViewModel : ObservableObject
             : $"有料={Bool(signals.GetBool("HasMaterial"))} 请求上料={Bool(signals.GetBool("RequestLoad"))} 请求下料={Bool(signals.GetBool("RequestUnload"))} 完成={Bool(signals.GetBool("ProcessDone"))}";
 
         SignalText = BuildSignalText(device, signals);
-        TooltipText = BuildTooltip(device, machining, signals);
+        // 列表与悬浮详情使用同一份工件信息，确保上料架显示外部传入的队头。
+        TooltipText = BuildTooltip(device, machining, signals, info);
     }
 
     /// <summary>
@@ -165,8 +167,9 @@ public partial class DeviceRowViewModel : ObservableObject
     /// <param name="device">设备对象</param>
     /// <param name="machining">是否加工中</param>
     /// <param name="signals">信号快照</param>
+    /// <param name="info">已选定的展示工件信息；上料架使用队头，其余设备使用内存工件</param>
     /// <returns>详情文本</returns>
-    private static string BuildTooltip(DeviceBase device, bool machining, Domain.Signals.SignalSnapshot? signals)
+    private static string BuildTooltip(DeviceBase device, bool machining, Domain.Signals.SignalSnapshot? signals, WorkpieceInfo? info)
     {
         var builder = new StringBuilder();
         builder.Append(device.Name).Append("（").Append(DisplayText.DeviceTypeText(device.Type)).Append('）');
@@ -174,7 +177,6 @@ public partial class DeviceRowViewModel : ObservableObject
         builder.Append("连接：").Append(device.IsConnected ? "已连接" : "未连接")
             .Append("    状态：").Append(machining ? "加工中" : "空闲");
 
-        var info = device.CurrentWorkpiece?.Info;
         builder.AppendLine();
         builder.Append("当前工件：");
         if (info is null)
