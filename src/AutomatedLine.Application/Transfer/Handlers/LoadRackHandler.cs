@@ -33,7 +33,7 @@ public sealed class LoadRackHandler : ITransferHandler
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
 
         // 有板 → 充磁（边界）→ Z 回安全
-        await ctx.WaitCraneAsync(dto => dto.HasPlate == true, "X11 有板", cancellationToken).ConfigureAwait(false);
+        await ctx.CheckPlateBeforeMagnetAsync(cancellationToken).ConfigureAwait(false);
         ctx.LogStep(source, "取料：X11 有板 → 充磁");
         // 取料充磁调用失败也按充磁后弃板，标记不依赖反馈是否成功。
         ctx.MagnetCommandStarted = true;

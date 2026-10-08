@@ -30,7 +30,7 @@ public sealed class MarkerHandler : ITransferHandler
         ctx.LogStep(source, $"取料：Z 下降到取料位（Z={zTarget}，工件直径 {ctx.Workpiece.Info.Diameter}）");
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
 
-        await ctx.WaitCraneAsync(dto => dto.HasPlate == true, "X11 有板", cancellationToken).ConfigureAwait(false);
+        await ctx.CheckPlateBeforeMagnetAsync(cancellationToken).ConfigureAwait(false);
         ctx.LogStep(source, "取料：X11 有板 → 充磁");
         // 取料充磁调用失败也按充磁后弃板，标记不依赖反馈是否成功。
         ctx.MagnetCommandStarted = true;

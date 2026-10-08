@@ -17,6 +17,12 @@ public sealed class FakeCraneDriver : ICraneDriver
     /// <summary>充磁指令开始下发后的异常，用于验证通信异常与宿主取消的分支。</summary>
     public Exception? MagnetException { get; set; }
 
+    /// <summary>单次 X11 读取异常，用于验证充磁前通信失败。</summary>
+    public Exception? HasPlateException { get; set; }
+
+    /// <summary>观察有板读取的时序和次数，不干扰运动动作记录。</summary>
+    public Action? OnReadHasPlate { get; set; }
+
     /// <summary>指定绝对运动 X 目标的超时，用于验证去源设备和放料后收尾的异常。</summary>
     public int? FailAbsoluteMoveX { get; set; }
 
@@ -41,6 +47,16 @@ public sealed class FakeCraneDriver : ICraneDriver
 
     /// <inheritdoc />
     public Task<CraneStatusDto?> ReadStatusAsync(CancellationToken ct = default) => Task.FromResult(Status);
+
+    /// <inheritdoc />
+    public Task<bool> ReadHasPlateAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        OnReadHasPlate?.Invoke();
+        return HasPlateException is null
+            ? Task.FromResult(Status?.HasPlate ?? false)
+            : Task.FromException<bool>(HasPlateException);
+    }
 
     /// <inheritdoc />
     public Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken ct = default)

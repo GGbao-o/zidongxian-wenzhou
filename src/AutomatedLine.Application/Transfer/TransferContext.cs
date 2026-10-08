@@ -174,6 +174,20 @@ public sealed class TransferContext
         }
     }
 
+    /// <summary>取料 Z 到位后等待 500ms，再只读一次 X11；无板或读取失败抛异常，供充磁前恢复。</summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>有板时完成；无板、通信失败或取消时抛异常</returns>
+    public async Task CheckPlateBeforeMagnetAsync(CancellationToken cancellationToken)
+    {
+        _logger.Info(LogCategory.StateMachine, $"{Tag} 取料：Z 到位后等待 500ms，单次检查 X11 有板");
+        // 先等待接触信号稳定；不重试，无板时尚未充磁，工件仍留在源设备。
+        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+        if (!await CraneDriver.ReadHasPlateAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException($"{Tag} 取料有板检查失败：X11=0，无板，尚未充磁");
+        }
+    }
+
     /// <summary>轮询天车状态直到满足条件；超时/报警抛异常。</summary>
     /// <param name="predicate">条件（如 dto =&gt; dto.HasPlate == true）</param>
     /// <param name="description">条件描述（日志/异常）</param>

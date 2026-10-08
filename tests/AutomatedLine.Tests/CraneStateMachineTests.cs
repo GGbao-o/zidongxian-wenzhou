@@ -235,6 +235,51 @@ public class CraneStateMachineTests
         Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
     }
 
+    /// <summary>X11 无板或读取失败时保留源设备上的同一工件，恢复线路后仍可执行。</summary>
+    /// <param name="communicationFailure">是否模拟 X11 通信失败，否则模拟无板</param>
+    /// <returns>异步验证任务</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PlateCheckFailure_PreservesSourceAndCanRetry(bool communicationFailure)
+    {
+        var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.CraneDriver.Status = new() { HasPlate = false };
+        h.CraneDriver.HasPlateException = communicationFailure ? new TimeoutException("X11 读取超时") : null;
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        wp.Runtime.CurrentProcess = ProcessType.Boring;
+        wp.Runtime.QueueOrder = 7;
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Same(wp, h.Source.CurrentWorkpiece);
+        Assert.Same(wp, h.Tasks.Get(wp.Id));
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Source.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(ProcessType.Boring, wp.Runtime.CurrentProcess);
+        Assert.Equal(7, wp.Runtime.QueueOrder);
+        Assert.DoesNotContain("MAGNET_ON", h.CraneDriver.Actions);
+        Assert.Empty(h.SourceDriver.Writes);
+        Assert.Null(h.Crane.Runtime.CurrentTask);
+        Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
+
+        h.CraneDriver.Status = new() { HasPlate = true };
+        h.CraneDriver.HasPlateException = null;
+        h.Line.Start();
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+        Assert.Null(h.Source.CurrentWorkpiece);
+        Assert.Same(wp, h.Target.CurrentWorkpiece);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Target.Id), wp.Runtime.CurrentLocation);
+    }
+
     /// <summary>取料已开始调用充磁时，命令失败、触发写入或反馈失败均必须弃板。</summary>
     /// <param name="failure">命令失败、反馈超时、触发写入异常或内部取消</param>
     /// <returns>异步验证任务</returns>

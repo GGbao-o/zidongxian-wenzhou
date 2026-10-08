@@ -15,6 +15,11 @@ public interface ICraneDriver : IPlcDriver
     /// <summary>天车号，与 CraneConfig.Id 对应。</summary>
     int CraneId { get; }
 
+    /// <summary>直接读取一次 X11 有板线圈；读取失败抛异常，不轮询、不读取其他状态。</summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>X11=1 返回 true，X11=0 返回 false</returns>
+    Task<bool> ReadHasPlateAsync(CancellationToken cancellationToken = default);
+
     /// <summary>
     /// 执行绝对/相对运动：写目标 → 按 Z 方向脉冲触发 → 轮询到位。
     /// 采用 <paramref name="pollEncoder"/> 指定用绝对编码器还是显示值判定到位。

@@ -38,8 +38,8 @@ public sealed class BoringHandler : ITransferHandler
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
         ctx.LogStep(source, $"取料：Z 下降到取料位（Z={zTarget}，工件直径 {ctx.Workpiece.Info.Diameter}）");
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
-        //等待有板信号   一直循环读；读不到就一直等到超时，然后抛异常 超时时间是60s
-        await ctx.WaitCraneAsync(dto => dto.HasPlate == true, "X11 有板", cancellationToken).ConfigureAwait(false);
+        // Z 到位后等待信号稳定，再单次确认有板；失败仍属于充磁前。
+        await ctx.CheckPlateBeforeMagnetAsync(cancellationToken).ConfigureAwait(false);
         ctx.LogStep(source, "取料：X11 有板 → 充磁");
         //冲磁
         // 从取料充磁开始就可能与设备交接，调用失败也沿用弃板，不能等反馈成功再标记。

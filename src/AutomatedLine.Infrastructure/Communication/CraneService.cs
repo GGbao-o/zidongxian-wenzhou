@@ -204,6 +204,10 @@ public sealed class CraneService : ICraneDriver
         => _client.ReadCoilAsync(coilAddress, cancellationToken);
 
     /// <inheritdoc />
+    public Task<bool> ReadHasPlateAsync(CancellationToken cancellationToken = default)
+        => ReadCoilAsync(CraneAddress.X11_HasPlate, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<CraneStatusDto?> ReadStatusAsync(CancellationToken cancellationToken = default)
     {
         // 第一段：批量读状态与速度区。拿不到就没有坐标可显示，返回 null（不抛）。
