@@ -13,6 +13,7 @@ namespace AutomatedLine.Application.Workers;
 /// 天车执行 Worker：**每台启用天车一个独立后台循环**，各自推进自己的任务（真正并行）。
 /// 任务经 <see cref="CraneTaskChannels"/> 交接：Worker 出队后**独占**写本车 <see cref="Crane.Runtime"/>，
 /// 一次跑完整条线性流程（见 <see cref="CraneStateMachine.RunFlowAsync"/>）。
+/// 普通故障只中止当前搬运；人工恢复线路后继续消费新任务，宿主取消才退出循环。
 /// </summary>
 public sealed class CraneWorker : IHostedService
 {
@@ -130,9 +131,9 @@ public sealed class CraneWorker : IHostedService
                     //开始执行任务
                     await _stateMachine.RunFlowAsync(crane, task, cancellationToken).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    //清空本车任务态
+                    // 只有执行器真的被取消才退出；驱动内部取消按普通故障兜底，避免丢失后续任务的消费者。
                     FallbackAbort(crane, "任务被取消（兜底）");
                     ClearRuntime(crane);
                     throw;

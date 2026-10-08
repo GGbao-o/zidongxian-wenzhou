@@ -314,11 +314,14 @@ public sealed class ModbusTcpClient : IDisposable
     }
 
     /// <summary>
-    /// 发送一次请求并读取响应（自动连接、超时后断开以便下次重连）。
+    /// 发送一次请求并读取响应（自动连接、失败后断开以便下次重连）。
+    /// 内部期限到达抛出超时异常，只有调用者主动取消才传播取消异常。
     /// </summary>
     /// <param name="pdu">PDU 数据</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>响应 PDU（不含 MBAP 头）</returns>
+    /// <exception cref="TimeoutException">连接、发送或读取超过单次请求期限。</exception>
+    /// <exception cref="OperationCanceledException">调用者取消请求。</exception>
     private async Task<byte[]> ExchangeAsync(byte[] pdu, CancellationToken cancellationToken)
     {
         await _ioLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -327,27 +330,28 @@ public sealed class ModbusTcpClient : IDisposable
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             linked.CancelAfter(_timeoutMs);
 
-            if (!IsConnected)
-            {
-                await ConnectAsync(linked.Token).ConfigureAwait(false);
-            }
-
-            var stream = _stream!;
-            var txId = unchecked((ushort)Interlocked.Increment(ref _transactionId));
-
-            var frame = new byte[7 + pdu.Length];
-            frame[0] = (byte)(txId >> 8);
-            frame[1] = (byte)(txId & 0xFF);
-            frame[2] = 0x00; // 协议标识
-            frame[3] = 0x00;
-            var length = 1 + pdu.Length;
-            frame[4] = (byte)(length >> 8);
-            frame[5] = (byte)(length & 0xFF);
-            frame[6] = _unitId;
-            Array.Copy(pdu, 0, frame, 7, pdu.Length);
-
             try
             {
+                // 自动连接也使用请求期限，必须纳入同一异常边界，避免嵌套令牌把超时误报为外部取消。
+                if (!IsConnected)
+                {
+                    await ConnectAsync(linked.Token).ConfigureAwait(false);
+                }
+
+                var stream = _stream!;
+                var txId = unchecked((ushort)Interlocked.Increment(ref _transactionId));
+
+                var frame = new byte[7 + pdu.Length];
+                frame[0] = (byte)(txId >> 8);
+                frame[1] = (byte)(txId & 0xFF);
+                frame[2] = 0x00; // 协议标识
+                frame[3] = 0x00;
+                var length = 1 + pdu.Length;
+                frame[4] = (byte)(length >> 8);
+                frame[5] = (byte)(length & 0xFF);
+                frame[6] = _unitId;
+                Array.Copy(pdu, 0, frame, 7, pdu.Length);
+
                 await stream.WriteAsync(frame, 0, frame.Length, linked.Token).ConfigureAwait(false);
                 await stream.FlushAsync(linked.Token).ConfigureAwait(false);
 
@@ -363,6 +367,12 @@ public sealed class ModbusTcpClient : IDisposable
 
                 var body = await ReadExactAsync(stream, bodyLength, linked.Token).ConfigureAwait(false);
                 return body;
+            }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                // 内部期限只终止当前请求，不能让上层把它当作停止天车执行器的命令。
+                await DisconnectAsync().ConfigureAwait(false);
+                throw new TimeoutException($"Modbus 请求 {_ip}:{_port} 超时（{_timeoutMs}ms）", ex);
             }
             catch
             {

@@ -21,6 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 直接编译真实客户端，验证通信边界且不加载 MySQL 或 FOCAS 原生依赖。 -->
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\ModbusTcpClient.cs" Link="Infrastructure\ModbusTcpClient.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\AutomatedLine.Domain\AutomatedLine.Domain.csproj" />
     <ProjectReference Include="..\..\src\AutomatedLine.Application\AutomatedLine.Application.csproj" />
   </ItemGroup>

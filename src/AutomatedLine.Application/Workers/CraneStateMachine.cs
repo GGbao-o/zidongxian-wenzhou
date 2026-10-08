@@ -161,8 +161,9 @@ public sealed class CraneStateMachine
 
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // 宿主取消需要向 Worker 传播；未取消的执行器遇到内部取消则走普通故障，保留真实原因。
             var detail = BuildFailure(crane, ctx, route, phase, "任务被取消");
             _logger.Error(LogCategory.StateMachine, detail);
             _abortCoordinator.Abort(crane, detail);
