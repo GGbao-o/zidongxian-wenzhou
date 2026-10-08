@@ -52,6 +52,7 @@ public class TransferFlowTests
         // 料架属"其他设备"，Z 下压 = Round((50/0.9537)+(50/0.866)) = 110 → 500-110 = 390
         Assert.Equal(new[] { "MOVE(1000,0,500)", "MOVE(1000,0,390)", "MAGNET_ON", "MOVE(1000,0,500)" }, craneDriver.Actions);
         Assert.True(ctx.HasPieceOnCrane);
+        Assert.True(ctx.MagnetCommandStarted);
     }
 
     /// <summary>双头镗放料：请求数据 → 参数 → 数据下发完成 → 请求上料 → Z 降 → 放磁 → Z 升 → 上料完成。</summary>
@@ -69,6 +70,7 @@ public class TransferFlowTests
         Assert.Contains("DataSentDone=1", targetDriver.Writes);
         Assert.Contains("LoadDone=1", targetDriver.Writes);
         Assert.Equal("MAGNET_OFF", craneDriver.Actions[^2]);
+        Assert.False(ctx.MagnetCommandStarted); // 单独执行放料不会标记取料充磁。
     }
 
     /// <summary>斜床放料：Z 降后相对 -YOffset，再放磁。</summary>

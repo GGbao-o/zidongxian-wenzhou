@@ -42,6 +42,8 @@ public sealed class BoringHandler : ITransferHandler
         await ctx.WaitCraneAsync(dto => dto.HasPlate == true, "X11 有板", cancellationToken).ConfigureAwait(false);
         ctx.LogStep(source, "取料：X11 有板 → 充磁");
         //冲磁
+        // 从取料充磁开始就可能与设备交接，调用失败也沿用弃板，不能等反馈成功再标记。
+        ctx.MagnetCommandStarted = true;
         await ctx.MagnetOnAsync(cancellationToken).ConfigureAwait(false);
         ctx.LogStep(source, "取料：充磁完成（板已吸住，此后异常不可回滚）");
 

@@ -63,8 +63,8 @@ public sealed class TransferContext
     /// <summary>充磁反馈已成功，用于记录取料动作的结果；异常分支以指令开始下发为界。</summary>
     public bool HasPieceOnCrane { get; set; }
 
-    /// <summary>充磁指令已开始下发；即使写入或反馈失败，也不再保留工件重派，放磁后不复位。</summary>
-    public bool MagnetCommandStarted { get; private set; }
+    /// <summary>取料阶段已开始调用充磁；仅在 PickAsync 充磁前置位，此后失败弃板，放磁后不复位。</summary>
+    public bool MagnetCommandStarted { get; set; }
 
     /// <summary>天车驱动。</summary>
     public ICraneDriver CraneDriver
@@ -146,13 +146,13 @@ public sealed class TransferContext
         }
     }
 
-    /// <summary>充磁（内部轮询 X6），在驱动首次下发触发指令时记录弃板边界。</summary>
+    /// <summary>充磁（内部轮询 X6）并校验命令成功；取料异常边界由 PickAsync 在调用前标记。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>异步命令任务，失败抛异常；指令已开始下发的标记不会因失败或退磁而复位</returns>
+    /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOnAsync(CancellationToken cancellationToken)
     {
         _logger.Info(LogCategory.StateMachine, $"{Tag} 充磁");
-        var result = await CraneDriver.MagnetOnAsync(cancellationToken, () => MagnetCommandStarted = true).ConfigureAwait(false);
+        var result = await CraneDriver.MagnetOnAsync(cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException($"{Tag} 充磁失败：{result.Code} {result.Message}");

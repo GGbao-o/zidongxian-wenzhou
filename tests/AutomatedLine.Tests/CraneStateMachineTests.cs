@@ -235,15 +235,15 @@ public class CraneStateMachineTests
         Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
     }
 
-    /// <summary>充磁准备失败保留工件；触发写入或反馈失败时，即使尚未取料完成也必须弃板。</summary>
-    /// <param name="failure">准备失败、反馈超时、触发写入异常或内部取消</param>
+    /// <summary>取料已开始调用充磁时，命令失败、触发写入或反馈失败均必须弃板。</summary>
+    /// <param name="failure">命令失败、反馈超时、触发写入异常或内部取消</param>
     /// <returns>异步验证任务</returns>
     [Theory]
-    [InlineData("preparation")]
+    [InlineData("command")]
     [InlineData("feedback")]
     [InlineData("write")]
     [InlineData("internal-cancel")]
-    public async Task MagnetFailure_UsesCommandStartingBoundary(string failure)
+    public async Task PickMagnetFailure_DiscardsAfterCallingMagnet(string failure)
     {
         var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
         h.Source.Signals = TestSignals.Of(("RequestUnload", true));
@@ -252,8 +252,8 @@ public class CraneStateMachineTests
         wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
         switch (failure)
         {
-            case "preparation":
-                h.CraneDriver.MagnetPreparationFailure = CraneCommandResult.Fail(CraneCommandCode.Communication, "切手动失败");
+            case "command":
+                h.CraneDriver.MagnetResult = CraneCommandResult.Fail(CraneCommandCode.Communication, "充磁命令失败");
                 break;
             case "feedback":
                 h.CraneDriver.MagnetResult = CraneCommandResult.Fail(CraneCommandCode.FeedbackTimeout, "充磁反馈超时");
@@ -268,17 +268,9 @@ public class CraneStateMachineTests
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
 
-        var beforeMagnet = failure == "preparation";
-        Assert.Equal(beforeMagnet ? WorkpieceState.Waiting : WorkpieceState.Discarded, wp.Runtime.TaskState);
-        Assert.Equal(beforeMagnet ? WorkpieceLocation.AtDevice(h.Source.Id) : WorkpieceLocation.Discarded, wp.Runtime.CurrentLocation);
-        if (beforeMagnet)
-        {
-            Assert.Same(wp, h.Source.CurrentWorkpiece);
-        }
-        else
-        {
-            Assert.Null(h.Source.CurrentWorkpiece);
-        }
+        Assert.Equal(WorkpieceState.Discarded, wp.Runtime.TaskState);
+        Assert.Equal(WorkpieceLocation.Discarded, wp.Runtime.CurrentLocation);
+        Assert.Null(h.Source.CurrentWorkpiece);
         Assert.Null(h.Crane.Runtime.CurrentTask);
         Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
         Assert.False(h.Row.IsHeld(task.TaskId));

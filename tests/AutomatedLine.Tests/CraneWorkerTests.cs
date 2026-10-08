@@ -340,6 +340,7 @@ public class CraneWorkerTests
         {
             if (MagnetizeBeforePick)
             {
+                ctx.MagnetCommandStarted = true;
                 await ctx.MagnetOnAsync(cancellationToken);
             }
             await OnPick(cancellationToken);

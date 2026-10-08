@@ -11,9 +11,6 @@ public sealed class FakeCraneDriver : ICraneDriver
     /// <summary>当前状态（测试可改）。</summary>
     public CraneStatusDto? Status { get; set; } = new() { HasPlate = true };
 
-    /// <summary>充磁准备阶段的失败，可验证尚未开始写触发指令的异常。</summary>
-    public CraneCommandResult? MagnetPreparationFailure { get; set; }
-
     /// <summary>充磁指令开始下发后的结果，默认成功；可模拟反馈超时。</summary>
     public CraneCommandResult MagnetResult { get; set; } = CraneCommandResult.Ok(CraneCommandCode.Completed, "ok");
 
@@ -64,14 +61,9 @@ public sealed class FakeCraneDriver : ICraneDriver
     }
 
     /// <inheritdoc />
-    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken ct = default, Action? onCommandStarting = null)
+    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (MagnetPreparationFailure is { } preparationFailure)
-        {
-            return Task.FromResult(preparationFailure);
-        }
-        onCommandStarting?.Invoke();
         Actions.Add("MAGNET_ON");
         return MagnetException is null ? Task.FromResult(MagnetResult) : Task.FromException<CraneCommandResult>(MagnetException);
     }

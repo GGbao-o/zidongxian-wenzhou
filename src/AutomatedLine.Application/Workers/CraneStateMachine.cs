@@ -173,12 +173,12 @@ public sealed class CraneStateMachine
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
-            // 充磁指令开始下发前保留工件；开始下发后（含反馈失败）沿用弃板处理。
+            // PickAsync 开始调用充磁前保留工件；开始调用后（含命令或反馈失败）沿用弃板处理。
             HandleFailure(crane, ctx, detail);
         }
     }
 
-    /// <summary>按指令下发边界选择异常清理，初始化失败时尚未充磁，也必须保留工件。</summary>
+    /// <summary>按 PickAsync 的充磁标记选择异常清理，初始化失败时尚未充磁，也必须保留工件。</summary>
     private void HandleFailure(Crane crane, TransferContext? ctx, string detail)
     {
         if (ctx?.MagnetCommandStarted == true)
@@ -196,10 +196,10 @@ public sealed class CraneStateMachine
     /// <returns>8 位短号</returns>
     private static string ShortId(Guid taskId) => taskId.ToString("N")[..8];
 
-    /// <summary>构造异常详情，标明充磁指令是否已开始下发，避免把反馈超时误报为充磁前。</summary>
+    /// <summary>构造异常详情，标明取料是否已开始调用充磁，避免把反馈超时误报为充磁前。</summary>
     private static string BuildFailure(Crane crane, TransferContext? ctx, string route, string phase, string reason)
         => $"[{crane.Name}] 任务 {route} 步骤[{phase}] 异常：{reason}"
-           + (ctx?.MagnetCommandStarted == true ? "（充磁指令已开始下发：板可能在天车上）" : "（充磁指令未下发：工件保留在原位置）");
+           + (ctx?.MagnetCommandStarted == true ? "（取料充磁已开始：板可能在天车上）" : "（取料充磁未开始：工件保留在原位置）");
 
     /// <summary>原子获取路权 + 源/目标预约；失败回滚并让出天车。</summary>
     private bool Acquire(TransferContext ctx, Crane crane, TransportTask task)
