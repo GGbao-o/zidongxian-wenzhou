@@ -146,7 +146,7 @@ public sealed class TransferContext
         }
     }
 
-    /// <summary>充磁（内部轮询 X6）并校验命令成功；取料异常边界由 PickAsync 在调用前标记。</summary>
+    /// <summary>充磁（200ms 脉冲后读取一次 X6）并校验命令成功；取料异常边界由 PickAsync 在调用前标记。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOnAsync(CancellationToken cancellationToken)
@@ -161,8 +161,9 @@ public sealed class TransferContext
         HasPieceOnCrane = true;
     }
 
-    /// <summary>放磁（内部轮询 X7）并校验成功。</summary>
+    /// <summary>放磁（200ms 脉冲后读取一次 X7）并校验成功。</summary>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOffAsync(CancellationToken cancellationToken)
     {
         _logger.Info(LogCategory.StateMachine, $"{Tag} 放磁");

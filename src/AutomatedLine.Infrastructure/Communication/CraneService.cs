@@ -554,25 +554,17 @@ public sealed class CraneService : ICraneDriver
         });
     }
 
-    /// <summary>充磁：D4510=2 → 轮询 X6=1 → 复位。最多 3 次、单次 3s。</summary>
+    /// <summary>充磁：D4510=2 → 200ms → D4510=0 → 读取一次 X6，直接返回结果。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>结果</returns>
+    /// <returns>X6=1 返回成功；X6=0 或通信失败返回失败结果</returns>
     public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default)
-        => ExecuteAsync("充磁", async () =>
-        {
-            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-            await PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, false, "充磁", cancellationToken).ConfigureAwait(false);
-        }, feedbackTimeout: true);
+        => PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, "X6", "充磁", cancellationToken);
 
-    /// <summary>退磁：D4511=2 → 轮询 X7=1（且 X6=0）→ 复位。最多 3 次。</summary>
+    /// <summary>退磁：D4511=2 → 200ms → D4511=0 → 读取一次 X7，直接返回结果。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>结果</returns>
+    /// <returns>X7=1 返回成功；X7=0 或通信失败返回失败结果</returns>
     public Task<CraneCommandResult> MagnetOffAsync(CancellationToken cancellationToken = default)
-        => ExecuteAsync("退磁", async () =>
-        {
-            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-            await PulseMagnetAsync(CraneAddress.ManualMagnetOff, CraneAddress.X7_DemagnetizeOk, true, "退磁", cancellationToken).ConfigureAwait(false);
-        }, feedbackTimeout: true);
+        => PulseMagnetAsync(CraneAddress.ManualMagnetOff, CraneAddress.X7_DemagnetizeOk, "X7", "退磁", cancellationToken);
 
     /// <summary>清除报警：D4514=2 → 200ms → 0。</summary>
     /// <param name="cancellationToken">取消令牌</param>
@@ -650,9 +642,8 @@ public sealed class CraneService : ICraneDriver
     /// </summary>
     /// <param name="label">动作名（日志/提示）</param>
     /// <param name="body">命令体</param>
-    /// <param name="feedbackTimeout">true=超时视为反馈超时（充放磁）；false=超时按通信处理</param>
     /// <returns>结果</returns>
-    private async Task<CraneCommandResult> ExecuteAsync(string label, Func<Task> body, bool feedbackTimeout = false)
+    private async Task<CraneCommandResult> ExecuteAsync(string label, Func<Task> body)
     {
         try
         {
@@ -663,14 +654,6 @@ public sealed class CraneService : ICraneDriver
         catch (OperationCanceledException)
         {
             throw;
-        }
-        catch (TimeoutException ex)
-        {
-            // 充放磁的 TimeoutException 来自反馈轮询；其余命令的 TimeoutException 来自连接超时，按通信处理
-            var code = feedbackTimeout
-                ? CraneCommandCode.FeedbackTimeout
-                : _client.IsConnected ? CraneCommandCode.Communication : CraneCommandCode.NotConnected;
-            return CraneCommandResult.Fail(code, $"天车[{_name}] {label}失败：{ex.Message}");
         }
         catch (Exception ex)
         {
@@ -740,47 +723,31 @@ public sealed class CraneService : ICraneDriver
         }
     }
 
-    /// <summary>磁铁脉冲：写 2 → 轮询反馈 → 复位；最多 3 次、单次 3s。</summary>
+    /// <summary>磁铁单次脉冲：写 2 → 200ms → 写 0，再读一次反馈，失败交给上层处理。</summary>
     /// <param name="trigger">触发寄存器</param>
     /// <param name="feedbackCoil">反馈线圈</param>
-    /// <param name="requireX6Off">是否要求 X6=0（退磁）</param>
+    /// <param name="feedbackName">反馈信号名，用于失败提示</param>
     /// <param name="label">动作名</param>
     /// <param name="cancellationToken">取消令牌</param>
-    private async Task PulseMagnetAsync(int trigger, int feedbackCoil, bool requireX6Off, string label, CancellationToken cancellationToken)
+    /// <returns>反馈为 1 返回 Completed；为 0 返回 Rejected；通信失败沿用通用命令结果</returns>
+    private async Task<CraneCommandResult> PulseMagnetAsync(int trigger, int feedbackCoil, string feedbackName, string label, CancellationToken cancellationToken)
     {
-        const int maxAttempts = 3;
-        const int timeoutMs = 3000;
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        var feedback = false;
+        var result = await ExecuteAsync(label, async () =>
         {
-            await _client.WriteRegisterAsync(trigger, 2, cancellationToken).ConfigureAwait(false);
-            try
-            {
-                var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-                while (DateTime.UtcNow < deadline)
-                {
-                    await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-                    if (await _client.ReadCoilAsync(feedbackCoil, cancellationToken).ConfigureAwait(false))
-                    {
-                        if (requireX6Off && await _client.ReadCoilAsync(CraneAddress.X6_MagnetizeOk, cancellationToken).ConfigureAwait(false))
-                        {
-                            continue; // 退磁要求 X6=0
-                        }
-
-                        _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}成功（第{attempt}次）");
-                        return;
-                    }
-                }
-            }
-            finally
-            {
-                await _client.WriteRegisterAsync(trigger, 0, cancellationToken).ConfigureAwait(false);
-            }
-
-            _logger.Warn(LogCategory.Operation, $"天车[{_name}] {label}反馈未到位 第{attempt}/{maxAttempts} 次");
+            await EnterManualAsync(cancellationToken).ConfigureAwait(false);
+            // 与其他手动脉冲共用写入封装，先完整复位再检查对应反馈，不轮询、不重试。
+            await PulseAsync(trigger, true, 200, cancellationToken).ConfigureAwait(false);
+            feedback = await _client.ReadCoilAsync(feedbackCoil, cancellationToken).ConfigureAwait(false);
+        }).ConfigureAwait(false);
+        if (!result.IsSuccess || feedback)
+        {
+            return result;
         }
 
-        throw new TimeoutException($"天车[{_name}] {label}反馈未确认，已尝试 {maxAttempts} 次");
+        var message = $"天车[{_name}] {label}失败：{feedbackName}=0，反馈未确认";
+        _logger.Warn(LogCategory.Operation, message);
+        return CraneCommandResult.Fail(CraneCommandCode.Rejected, message);
     }
 
     /// <summary>轮询指定轴到位（-1 表示跳过该轴）。不抛超时异常，超时以结果码返回。</summary>

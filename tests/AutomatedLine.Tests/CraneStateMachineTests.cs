@@ -253,7 +253,7 @@ public class CraneStateMachineTests
         switch (failure)
         {
             case "command":
-                h.CraneDriver.MagnetResult = CraneCommandResult.Fail(CraneCommandCode.Communication, "充磁命令失败");
+                h.CraneDriver.MagnetResult = CraneCommandResult.Fail(CraneCommandCode.Rejected, "X6=0，充磁反馈未确认");
                 break;
             case "feedback":
                 h.CraneDriver.MagnetResult = CraneCommandResult.Fail(CraneCommandCode.FeedbackTimeout, "充磁反馈超时");

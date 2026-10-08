@@ -26,7 +26,7 @@ public enum CraneCommandCode
     /// <summary>下压限位触发，但 Z 与目标差超出下压容差（压到了却没到目标）。</summary>
     PressureOutOfRange,
 
-    /// <summary>充放磁反馈超时（多为重试次数用尽）。</summary>
+    /// <summary>反馈等待超时。当前充退磁只读一次反馈，不使用此码。</summary>
     FeedbackTimeout,
 
     /// <summary>未连接。</summary>
@@ -38,7 +38,7 @@ public enum CraneCommandCode
     /// <summary>通信失败（底层协议异常在此层转码）。</summary>
     Communication,
 
-    /// <summary>前置条件不满足（如相对值全为 0、轴名非法）。</summary>
+    /// <summary>前置条件或命令反馈不满足（如相对值全为 0、轴名非法、充退磁反馈为 0）。</summary>
     Rejected
 }
 
