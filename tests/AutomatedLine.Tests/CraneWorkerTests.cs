@@ -1,10 +1,12 @@
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Configuration;
+using AutomatedLine.Application.Generation;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.RightOfWay;
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Application.Scheduling;
 using AutomatedLine.Application.Transfer;
 using AutomatedLine.Application.Workers;
 using AutomatedLine.Domain.Cranes;
@@ -24,13 +26,15 @@ public class CraneWorkerTests
 {
     private static readonly TimeSpan GuardTimeout = TimeSpan.FromSeconds(5);
 
-    /// <summary>流程内及流程入口发生内部取消异常时，弃板后恢复线路仍可完成下一单。</summary>
-    /// <param name="failBeforeFlow">是否在状态机进入流程保护块之前注入异常</param>
+    /// <summary>流程内及初始化发生内部取消异常时，按充磁边界处理工件，Worker 恢复后仍可完成下一单。</summary>
+    /// <param name="failBeforeFlow">是否在状态机初始化时注入异常</param>
+    /// <param name="afterMagnet">是否在充磁指令开始下发之后注入异常</param>
     /// <returns>异步验证任务</returns>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task UnexpectedCancellation_AbortsCurrentTask_AndWorkerExecutesNext(bool failBeforeFlow)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task UnexpectedCancellation_EndsCurrentTransport_AndWorkerExecutesNext(bool failBeforeFlow, bool afterMagnet)
     {
         var h = new Harness();
         await h.Worker.StartAsync(CancellationToken.None);
@@ -39,11 +43,12 @@ public class CraneWorkerTests
             await h.Config.Ready.Task.WaitAsync(GuardTimeout);
             if (failBeforeFlow)
             {
-                // 配置读取位于 RunFlowAsync 的 try 之前，单独覆盖 Worker 的异常兜底。
+                // 初始化尚未创建上下文也必须保留工件，不能落入弃板兜底。
                 h.Config.FailNextRead();
             }
             else
             {
+                h.Handler.MagnetizeBeforePick = afterMagnet;
                 h.Handler.OnPick = _ => Task.FromException(new OperationCanceledException("驱动内部超时"));
             }
 
@@ -52,7 +57,8 @@ public class CraneWorkerTests
             h.Line.Start();
             await h.FaultRaised.Task.WaitAsync(GuardTimeout);
 
-            Assert.Equal(WorkpieceState.Discarded, first.Runtime.TaskState);
+            var expected = afterMagnet ? WorkpieceState.Discarded : WorkpieceState.Waiting;
+            Assert.Equal(expected, first.Runtime.TaskState);
             Assert.Equal(LineState.PausedByFault, h.Line.State);
             Assert.Null(h.Crane.Runtime.CurrentTask);
             Assert.False(h.Row.IsHeld(firstTransport.TaskId));
@@ -65,7 +71,7 @@ public class CraneWorkerTests
             h.Line.Start();
             await WaitForStateAsync(second, WorkpieceState.Completed);
 
-            Assert.Equal(WorkpieceState.Discarded, first.Runtime.TaskState);
+            Assert.Equal(expected, first.Runtime.TaskState);
             Assert.Equal(h.Target.Id, second.Runtime.CurrentLocation.ResourceId);
             Assert.Null(h.Crane.Runtime.CurrentTask);
             Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
@@ -79,7 +85,7 @@ public class CraneWorkerTests
         }
     }
 
-    /// <summary>未取消的调用者遇到内部取消异常时，状态机按故障弃板并记录真实原因。</summary>
+    /// <summary>未取消的调用者遇到充磁前内部取消异常时，状态机保留工件并记录真实原因。</summary>
     /// <returns>异步验证任务</returns>
     [Fact]
     public async Task StateMachine_InternalCancellation_IsHandledAsFailure()
@@ -90,27 +96,34 @@ public class CraneWorkerTests
 
         await h.Machine.RunFlowAsync(h.Crane, transport, CancellationToken.None);
 
-        Assert.Equal(WorkpieceState.Discarded, workpiece.Runtime.TaskState);
+        Assert.Equal(WorkpieceState.Waiting, workpiece.Runtime.TaskState);
         Assert.Equal(LineState.PausedByFault, h.Line.State);
         Assert.Contains(h.Logger.Messages, message => message.Contains("步骤[取料(上料架)] 异常：驱动内部超时"));
         Assert.False(h.Row.IsHeld(transport.TaskId));
     }
 
     /// <summary>执行器令牌确实取消时，状态机清理资源后仍向调用者传播取消。</summary>
+    /// <param name="afterMagnet">是否已开始下发充磁指令</param>
     /// <returns>异步验证任务</returns>
-    [Fact]
-    public async Task StateMachine_CallerCancellation_PropagatesAfterCleanup()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StateMachine_CallerCancellation_PropagatesAfterCleanup(bool afterMagnet)
     {
         var h = new Harness();
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-        h.Handler.OnPick = token => Task.FromCanceled(token);
+        h.Handler.MagnetizeBeforePick = afterMagnet;
+        h.Handler.OnPick = token =>
+        {
+            cancellation.Cancel();
+            return Task.FromCanceled(token);
+        };
         var (workpiece, transport) = h.NewTask();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => h.Machine.RunFlowAsync(h.Crane, transport, cancellation.Token));
 
-        Assert.Equal(WorkpieceState.Discarded, workpiece.Runtime.TaskState);
+        Assert.Equal(afterMagnet ? WorkpieceState.Discarded : WorkpieceState.Waiting, workpiece.Runtime.TaskState);
         Assert.Null(h.Crane.Runtime.CurrentTask);
         Assert.False(h.Row.IsHeld(transport.TaskId));
         Assert.False(h.Reservations.IsReserved(h.Source.Id));
@@ -118,11 +131,15 @@ public class CraneWorkerTests
     }
 
     /// <summary>停止 Worker 会取消正在等待的搬运并释放资源，不把真实停机当作可恢复通信故障。</summary>
+    /// <param name="afterMagnet">是否已开始下发充磁指令</param>
     /// <returns>异步验证任务</returns>
-    [Fact]
-    public async Task StopAsync_CancelsInFlightTask_AndReleasesResources()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopAsync_CancelsInFlightTask_AndReleasesResources(bool afterMagnet)
     {
         var h = new Harness();
+        h.Handler.MagnetizeBeforePick = afterMagnet;
         var enteredPick = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         h.Handler.OnPick = token =>
         {
@@ -139,7 +156,7 @@ public class CraneWorkerTests
             using var stopDeadline = new CancellationTokenSource(GuardTimeout);
             await h.Worker.StopAsync(stopDeadline.Token);
 
-            Assert.Equal(WorkpieceState.Discarded, workpiece.Runtime.TaskState);
+            Assert.Equal(afterMagnet ? WorkpieceState.Discarded : WorkpieceState.Waiting, workpiece.Runtime.TaskState);
             Assert.Equal(LineState.PausedByFault, h.Line.State);
             Assert.Null(h.Crane.Runtime.CurrentTask);
             Assert.False(h.Row.IsHeld(transport.TaskId));
@@ -149,6 +166,52 @@ public class CraneWorkerTests
         finally
         {
             using var stopDeadline = new CancellationTokenSource(GuardTimeout);
+            await h.Worker.StopAsync(stopDeadline.Token);
+        }
+    }
+
+    /// <summary>充磁前失败后，真实生成器和调度器重新派发同一工件，后台消费者仍能完成。</summary>
+    /// <returns>异步验证任务</returns>
+    [Fact]
+    public async Task BeforeMagnetFailure_WorkerExecutesSameWorkpieceAfterResume()
+    {
+        var h = new Harness();
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true));
+        h.Target.Signals = TestSignals.Of(("HasMaterial", false));
+        h.Target.MaxDiameter = 1000;
+        h.Target.MaxLength = 5000;
+        var pool = new CandidateTaskPool();
+        var generator = new TransportTaskGenerator(h.Tasks, h.Devices, pool, h.Reservations, h.Line, h.Config, h.Logger);
+        var scheduler = new CraneScheduler(pool, h.Channels, h.Cranes, h.Drivers, h.Row, h.Reservations, h.Line, h.Config, h.Logger);
+        h.Handler.OnPick = _ => Task.FromException(new TimeoutException("去源设备运动超时"));
+        var (workpiece, first) = h.NewTask();
+        workpiece.Runtime.QueueOrder = 9;
+        Assert.True(h.Channels.For(h.Crane.Id).Writer.TryWrite(first));
+        h.Line.Start();
+        await h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await h.FaultRaised.Task.WaitAsync(GuardTimeout);
+            Assert.Equal(WorkpieceState.Waiting, workpiece.Runtime.TaskState);
+            Assert.Equal(WorkpieceLocation.Queue, workpiece.Runtime.CurrentLocation);
+            Assert.Equal(9, workpiece.Runtime.QueueOrder);
+            Assert.Same(workpiece, h.Tasks.Get(workpiece.Id));
+
+            h.Handler.OnPick = _ => Task.CompletedTask;
+            await generator.StartAsync(CancellationToken.None);
+            await scheduler.StartAsync(CancellationToken.None);
+            h.Line.Start();
+            await WaitForStateAsync(workpiece, WorkpieceState.Completed);
+            Assert.Equal(h.Target.Id, workpiece.Runtime.CurrentLocation.ResourceId);
+            Assert.Null(h.Crane.Runtime.CurrentTask);
+            Assert.False(h.Row.IsHeld(first.TaskId));
+            Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        }
+        finally
+        {
+            using var stopDeadline = new CancellationTokenSource(GuardTimeout);
+            await scheduler.StopAsync(stopDeadline.Token);
+            await generator.StopAsync(stopDeadline.Token);
             await h.Worker.StopAsync(stopDeadline.Token);
         }
     }
@@ -266,12 +329,21 @@ public class CraneWorkerTests
         /// <summary>取料行为，可返回成功、内部取消或等待真正的执行器取消。</summary>
         public Func<CancellationToken, Task> OnPick { get; set; } = _ => Task.CompletedTask;
 
+        /// <summary>先通过真实上下文开始充磁，再执行脚本，以覆盖两侧异常边界。</summary>
+        public bool MagnetizeBeforePick { get; set; }
+
         /// <inheritdoc />
         public bool CanHandle(DeviceType type) => type is DeviceType.LoadRack or DeviceType.UnloadRack;
 
         /// <inheritdoc />
-        public Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
-            => OnPick(cancellationToken);
+        public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
+        {
+            if (MagnetizeBeforePick)
+            {
+                await ctx.MagnetOnAsync(cancellationToken);
+            }
+            await OnPick(cancellationToken);
+        }
 
         /// <inheritdoc />
         public Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)

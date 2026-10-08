@@ -556,12 +556,13 @@ public sealed class CraneService : ICraneDriver
 
     /// <summary>充磁：D4510=2 → 轮询 X6=1 → 复位。最多 3 次、单次 3s。</summary>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <param name="onCommandStarting">首次开始写 D4510 前执行的通知，供自动流程区分保留工件与弃板，可为空</param>
     /// <returns>结果</returns>
-    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default)
+    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default, Action? onCommandStarting = null)
         => ExecuteAsync("充磁", async () =>
         {
             await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-            await PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, false, "充磁", cancellationToken).ConfigureAwait(false);
+            await PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, false, "充磁", cancellationToken, onCommandStarting).ConfigureAwait(false);
         }, feedbackTimeout: true);
 
     /// <summary>退磁：D4511=2 → 轮询 X7=1（且 X6=0）→ 复位。最多 3 次。</summary>
@@ -746,13 +747,20 @@ public sealed class CraneService : ICraneDriver
     /// <param name="requireX6Off">是否要求 X6=0（退磁）</param>
     /// <param name="label">动作名</param>
     /// <param name="cancellationToken">取消令牌</param>
-    private async Task PulseMagnetAsync(int trigger, int feedbackCoil, bool requireX6Off, string label, CancellationToken cancellationToken)
+    /// <param name="onCommandStarting">首次触发写入前的通知；准备动作失败或调用前已取消时不调用</param>
+    private async Task PulseMagnetAsync(int trigger, int feedbackCoil, bool requireX6Off, string label, CancellationToken cancellationToken, Action? onCommandStarting = null)
     {
         const int maxAttempts = 3;
         const int timeoutMs = 3000;
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (attempt == 1)
+            {
+                // 写入可能已送达 PLC 但响应丢失，必须在开始写入前记录边界，不能等反馈成功。
+                onCommandStarting?.Invoke();
+            }
             await _client.WriteRegisterAsync(trigger, 2, cancellationToken).ConfigureAwait(false);
             try
             {

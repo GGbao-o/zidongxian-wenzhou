@@ -6,15 +6,16 @@ using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Alarms;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Diagnostics;
+using AutomatedLine.Domain.Line;
 using AutomatedLine.Domain.Tasks;
 using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Application.Alarms;
 
 /// <summary>
-/// 异常任务放弃协调器（架构文档 §10.4）。
-/// 异常只来自天车状态机执行动作；这里统一做**程序自动清理**：释放路权、取消源/目标预约、释放天车锁、
-/// 清空天车与设备内存、丢弃该工件任务，并暂停线路。全程 try/catch/finally 保证一定释放。
+/// 异常搬运清理协调器（架构文档 §10.4）。
+/// 充磁指令开始下发前保留工件并恢复待派发，开始下发后丢弃工件、清理设备引用。
+/// 两条路径均暂停线路、释放路权与设备预约、释放天车并报警。
 /// 不要求操作员点击任何"清内存/解死锁"按钮。
 /// </summary>
 public sealed class TaskAbortCoordinator
@@ -74,10 +75,22 @@ public sealed class TaskAbortCoordinator
     /// <param name="crane">发生异常的天车</param>
     /// <param name="reason">异常原因（写报警） 这个参数是为了写日志弹窗的</param>
     public void Abort(Crane crane, string reason)
+        => HandleFailure(crane, reason, discardWorkpiece: true);
+
+    /// <summary>终止充磁前的本次搬运，保留工件及原位置，等待人工恢复线路后重新派发。</summary>
+    /// <param name="crane">发生异常的天车</param>
+    /// <param name="reason">异常详情，写入日志及报警</param>
+    public void RecoverBeforeMagnet(Crane crane, string reason)
+        => HandleFailure(crane, reason, discardWorkpiece: false);
+
+    /// <summary>共享资源释放与报警流程，只有弃板路径才清理设备工件引用和位置。</summary>
+    private void HandleFailure(Crane crane, string reason, bool discardWorkpiece)
     {
         var task = crane.Runtime.CurrentTask;
         try
         {
+            // 先暂停再把工件恢复为 Waiting，避免清理期间马上被重新生成并派发。
+            _lineControl.EnterFaultPause();
             // 释放锁与预约（幂等，即使前面步骤失败也不影响）
             if (task is not null)
             {
@@ -95,34 +108,58 @@ public sealed class TaskAbortCoordinator
 
             if (task is not null)
             {
-                // 清空相关设备内存引用（源/目标设备若正持有该工件）
-                ClearDeviceWorkpiece(task.SourceDeviceId, task.WorkpieceRuntimeId);
-                ClearDeviceWorkpiece(task.TargetDeviceId, task.WorkpieceRuntimeId);
+                if (discardWorkpiece)
+                {
+                    // 只有充磁后弃板才清设备引用；充磁前工件仍属于源设备或上料队列。
+                    ClearDeviceWorkpiece(task.SourceDeviceId, task.WorkpieceRuntimeId);
+                    ClearDeviceWorkpiece(task.TargetDeviceId, task.WorkpieceRuntimeId);
+                }
 
-                // 标记该工件为"已丢弃"（**保留记录**便于追溯；设备/天车引用已清、位置置 Discarded），不删除任务
+                // 两条路径都保留任务记录，分别恢复待派发或标记丢弃，方便追溯同一工件。
                 var workpieceTask = _taskManager.Get(task.WorkpieceRuntimeId);
                 if (workpieceTask is not null)
                 {
-                    workpieceTask.Runtime.TaskState = WorkpieceState.Discarded;
-                    workpieceTask.Runtime.CurrentLocation = WorkpieceLocation.Discarded;
+                    if (discardWorkpiece)
+                    {
+                        workpieceTask.Runtime.TaskState = WorkpieceState.Discarded;
+                        workpieceTask.Runtime.CurrentLocation = WorkpieceLocation.Discarded;
+                    }
+                    else
+                    {
+                        // 位置、工序和排位没有发生交接，只结束本次搬运而保留同一工件。
+                        workpieceTask.Runtime.TaskState = WorkpieceState.Waiting;
+                    }
                 }
 
-                // task.txt：任务生命周期终点（异常路径）。带上工件标识，便于只用 task.txt 追一块板。
+                // task.txt 区分搬运回退与工件丢弃，避免把充磁前故障误记成工件生命周期终点。
                 // 注意日志在 if 之外（与原来一致：任务在表里已被移除时也要留痕），故这里必须空安全取工件文本
                 var workpieceText = workpieceTask is null ? "工件任务已不在内存表" : $"工件 {workpieceTask.Info}";
-                _logger.Error(LogCategory.Task,
-                    $"任务丢弃：{workpieceText}（任务 {task.TaskId.ToString("N")[..8]}），天车 {crane.Name}，原因：{reason}");
+                if (discardWorkpiece)
+                {
+                    _logger.Error(LogCategory.Task,
+                        $"任务丢弃：{workpieceText}（任务 {task.TaskId.ToString("N")[..8]}），天车 {crane.Name}，原因：{reason}");
+                }
+                else
+                {
+                    _logger.Warn(LogCategory.Task,
+                        $"搬运回退：{workpieceText}（任务 {task.TaskId.ToString("N")[..8]}），工件保留、状态回 Waiting，天车 {crane.Name}，原因：{reason}");
+                }
             }
         }
         finally
         {
             // 无论如何都要暂停线路并报警，避免半清理状态继续调度
-            _lineControl.EnterFaultPause();
+            if (_lineControl.State != LineState.PausedByFault)
+            {
+                _lineControl.EnterFaultPause();
+            }
             _alarmManager.Raise(
                 AlarmLevel.Error,
                 crane.Name,
                 reason,
-                "已释放路权/预约/锁并标记该工件为已丢弃，线路暂停；现场残留实物取走后重新启动即可",
+                discardWorkpiece
+                    ? "已释放路权/预约/锁并标记该工件为已丢弃，线路暂停；现场残留实物取走后重新启动即可"
+                    : "充磁指令尚未下发，已释放路权/预约/锁；工件及原位置保留，状态恢复待派发，现场处理后重新启动线路可再次搬运",
                 crane.Id,
                 true);
         }

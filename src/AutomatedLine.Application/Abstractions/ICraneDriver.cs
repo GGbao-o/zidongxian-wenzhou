@@ -64,10 +64,11 @@ public interface ICraneDriver : IPlcDriver
         int speedY, int accelY, int decelY, int speedZ, int accelZ, int decelZ,
         CancellationToken cancellationToken = default);
 
-    /// <summary>充磁（轮询 X6 反馈）。</summary>
+    /// <summary>充磁并轮询 X6 反馈，在首次开始下发触发指令时通知调用方。</summary>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <param name="onCommandStarting">首次写充磁触发寄存器前执行的通知；准备动作失败时不调用，可为空</param>
     /// <returns>结果</returns>
-    Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default);
+    Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default, Action? onCommandStarting = null);
 
     /// <summary>退磁（轮询 X7 反馈）。</summary>
     /// <param name="cancellationToken">取消令牌</param>

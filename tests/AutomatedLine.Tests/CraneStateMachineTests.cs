@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Line;
@@ -176,9 +177,9 @@ public class CraneStateMachineTests
         Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
     }
 
-    /// <summary>统一异常：源未就绪超时（充磁前）→ 释放资源 + 清理任务 + 暂停线路（不再区分充磁前后）。</summary>
+    /// <summary>充磁前源未就绪超时，保留队列工件与排位，释放资源并暂停线路。</summary>
     [Fact]
-    public async Task SourceNotReady_Aborts_Releases_And_Pauses()
+    public async Task SourceNotReady_PreservesWorkpiece_Releases_And_Pauses()
     {
         var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), handshakeTimeoutMs: 0);
         // 上料架无板 → 取料等待超时
@@ -186,14 +187,145 @@ public class CraneStateMachineTests
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
 
-        var discarded = h.Tasks.Get(wp.Id);
-        Assert.NotNull(discarded);                                      // 保留记录（标记丢弃，不删除）
-        Assert.Equal(WorkpieceState.Discarded, discarded!.Runtime.TaskState);
+        var retained = h.Tasks.Get(wp.Id);
+        Assert.Same(wp, retained);
+        Assert.Equal(WorkpieceState.Waiting, retained!.Runtime.TaskState);
+        Assert.Equal(WorkpieceLocation.Queue, retained.Runtime.CurrentLocation);
         Assert.Equal(LineState.PausedByFault, h.Line.State);            // 已暂停
         Assert.Null(h.Crane.Runtime.CurrentTask);
         Assert.False(h.Row.IsHeld(task.TaskId));                        // 路权已释放
         Assert.False(h.Reservations.IsReserved(h.Source.Id));           // 源预约已释放
         Assert.False(h.Reservations.IsReserved(h.Target.Id));           // 目标预约已释放
+    }
+
+    /// <summary>充磁前失败保留设备上的工件身份、位置、工序与排位，恢复后同一工件可完成搬运。</summary>
+    /// <returns>异步验证任务</returns>
+    [Fact]
+    public async Task BeforeMagnet_PreservesSourceWorkpiece_AndCanRetry()
+    {
+        var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        wp.Runtime.CurrentProcess = ProcessType.Boring;
+        wp.Runtime.QueueOrder = 7;
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Same(wp, h.Source.CurrentWorkpiece);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Source.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(ProcessType.Boring, wp.Runtime.CurrentProcess);
+        Assert.Equal(7, wp.Runtime.QueueOrder);
+        Assert.Null(h.Crane.CurrentWorkpiece);
+        Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
+
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Line.Start();
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Same(wp, h.Target.CurrentWorkpiece);
+        Assert.Null(h.Source.CurrentWorkpiece);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Target.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+    }
+
+    /// <summary>充磁准备失败保留工件；触发写入或反馈失败时，即使尚未取料完成也必须弃板。</summary>
+    /// <param name="failure">准备失败、反馈超时、触发写入异常或内部取消</param>
+    /// <returns>异步验证任务</returns>
+    [Theory]
+    [InlineData("preparation")]
+    [InlineData("feedback")]
+    [InlineData("write")]
+    [InlineData("internal-cancel")]
+    public async Task MagnetFailure_UsesCommandStartingBoundary(string failure)
+    {
+        var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        switch (failure)
+        {
+            case "preparation":
+                h.CraneDriver.MagnetPreparationFailure = CraneCommandResult.Fail(CraneCommandCode.Communication, "切手动失败");
+                break;
+            case "feedback":
+                h.CraneDriver.MagnetResult = CraneCommandResult.Fail(CraneCommandCode.FeedbackTimeout, "充磁反馈超时");
+                break;
+            case "write":
+                h.CraneDriver.MagnetException = new TimeoutException("充磁写入响应超时");
+                break;
+            default:
+                h.CraneDriver.MagnetException = new OperationCanceledException("充磁内部取消");
+                break;
+        }
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        var beforeMagnet = failure == "preparation";
+        Assert.Equal(beforeMagnet ? WorkpieceState.Waiting : WorkpieceState.Discarded, wp.Runtime.TaskState);
+        Assert.Equal(beforeMagnet ? WorkpieceLocation.AtDevice(h.Source.Id) : WorkpieceLocation.Discarded, wp.Runtime.CurrentLocation);
+        if (beforeMagnet)
+        {
+            Assert.Same(wp, h.Source.CurrentWorkpiece);
+        }
+        else
+        {
+            Assert.Null(h.Source.CurrentWorkpiece);
+        }
+        Assert.Null(h.Crane.Runtime.CurrentTask);
+        Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
+        Assert.Empty(h.SourceDriver.Writes);
+        Assert.Empty(h.TargetDriver.Writes);
+    }
+
+    /// <summary>去源设备运动失败保留工件；放料退磁后回安全位失败仍弃板并清目标引用。</summary>
+    /// <param name="afterPlace">是否在放料完成后的收尾运动注入异常</param>
+    /// <returns>异步验证任务</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MovementFailure_PreservesBeforeMagnet_DiscardsEvenAfterDemagnet(bool afterPlace)
+    {
+        var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.CraneDriver.FailAbsoluteMoveX = afterPlace ? 0 : 1000;
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Equal(afterPlace ? WorkpieceState.Discarded : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        if (afterPlace)
+        {
+            Assert.Contains("MAGNET_OFF", h.CraneDriver.Actions);
+            Assert.Null(h.Source.CurrentWorkpiece);
+            Assert.Equal(WorkpieceLocation.Discarded, wp.Runtime.CurrentLocation);
+        }
+        else
+        {
+            Assert.DoesNotContain("MAGNET_ON", h.CraneDriver.Actions);
+            Assert.Same(wp, h.Source.CurrentWorkpiece);
+            Assert.Equal(WorkpieceLocation.AtDevice(h.Source.Id), wp.Runtime.CurrentLocation);
+        }
+        Assert.Null(h.Target.CurrentWorkpiece);
+        Assert.Null(h.Crane.Runtime.CurrentTask);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
     }
 
     /// <summary>充磁后异常（目标未就绪）：Abort 弃板 + 暂停线路 + 释放全部。</summary>

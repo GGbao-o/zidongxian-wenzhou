@@ -11,6 +11,18 @@ public sealed class FakeCraneDriver : ICraneDriver
     /// <summary>当前状态（测试可改）。</summary>
     public CraneStatusDto? Status { get; set; } = new() { HasPlate = true };
 
+    /// <summary>充磁准备阶段的失败，可验证尚未开始写触发指令的异常。</summary>
+    public CraneCommandResult? MagnetPreparationFailure { get; set; }
+
+    /// <summary>充磁指令开始下发后的结果，默认成功；可模拟反馈超时。</summary>
+    public CraneCommandResult MagnetResult { get; set; } = CraneCommandResult.Ok(CraneCommandCode.Completed, "ok");
+
+    /// <summary>充磁指令开始下发后的异常，用于验证通信异常与宿主取消的分支。</summary>
+    public Exception? MagnetException { get; set; }
+
+    /// <summary>指定绝对运动 X 目标的超时，用于验证去源设备和放料后收尾的异常。</summary>
+    public int? FailAbsoluteMoveX { get; set; }
+
     /// <inheritdoc />
     public int CraneId => 1;
 
@@ -37,6 +49,10 @@ public sealed class FakeCraneDriver : ICraneDriver
     public Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken ct = default)
     {
         Actions.Add($"MOVE({x},{y},{z})");
+        if (x == FailAbsoluteMoveX)
+        {
+            return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Timeout, "运动超时"));
+        }
         return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok"));
     }
 
@@ -48,10 +64,16 @@ public sealed class FakeCraneDriver : ICraneDriver
     }
 
     /// <inheritdoc />
-    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken ct = default)
+    public Task<CraneCommandResult> MagnetOnAsync(CancellationToken ct = default, Action? onCommandStarting = null)
     {
+        ct.ThrowIfCancellationRequested();
+        if (MagnetPreparationFailure is { } preparationFailure)
+        {
+            return Task.FromResult(preparationFailure);
+        }
+        onCommandStarting?.Invoke();
         Actions.Add("MAGNET_ON");
-        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, "ok"));
+        return MagnetException is null ? Task.FromResult(MagnetResult) : Task.FromException<CraneCommandResult>(MagnetException);
     }
 
     /// <inheritdoc />

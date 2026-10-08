@@ -92,37 +92,36 @@ public sealed class CraneStateMachine
     /// <param name="crane">天车</param>
     /// <param name="task">搬运任务</param>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>异步搬运任务；普通故障按充磁边界清理，宿主取消清理后继续传播</returns>
     public async Task RunFlowAsync(Crane crane, TransportTask task, CancellationToken cancellationToken)
     {
-        var wp = _taskManager.Get(task.WorkpieceRuntimeId)
-                 ?? throw new InvalidOperationException("找不到工件任务");
-        var source = _deviceRegistry.Get(task.SourceDeviceId)
-                     ?? throw new InvalidOperationException($"源设备 {task.SourceDeviceId} 不存在");
-        var target = _deviceRegistry.Get(task.TargetDeviceId)
-                     ?? throw new InvalidOperationException($"目标设备 {task.TargetDeviceId} 不存在");
-        //一次搬运流程的上下文
-        var ctx = new TransferContext(crane, wp, _driverRegistry, _configStore, _configService.GetAppOptions(), _logger);
-        var route = $"{wp.Info} {source.Name}→{target.Name}";
-
-        // 标记本车归属（Worker 通常已设；此处兜底，且让异常协调器能取到当前任务）
+        // 初始化也可能失败，先记录归属，确保充磁前故障能释放本次任务并保留工件。
         crane.Runtime.CurrentTask = task;
-
-        // 1) 原子获取路权 + 预约；失败回滚、任务回 Waiting
-        if (!Acquire(ctx, crane, task))
-        {
-            return;
-        }
-
-        crane.Runtime.State = CraneState.Running;
-        wp.Runtime.TaskState = WorkpieceState.Running;
-        //打印日志
-        _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务开始：{route}");
-
-        // 记录当前步骤（异常日志用），覆盖各阶段   phase是阶段 只是用来输出日志
-        var phase = "未知";
-        //已经拿路权 设备预约了 下面开始天车状态机了 天车开始执行任务
+        TransferContext? ctx = null;
+        var route = $"设备{task.SourceDeviceId}→设备{task.TargetDeviceId}";
+        var phase = "初始化";
         try
         {
+            var wp = _taskManager.Get(task.WorkpieceRuntimeId)
+                     ?? throw new InvalidOperationException("找不到工件任务");
+            var source = _deviceRegistry.Get(task.SourceDeviceId)
+                         ?? throw new InvalidOperationException($"源设备 {task.SourceDeviceId} 不存在");
+            var target = _deviceRegistry.Get(task.TargetDeviceId)
+                         ?? throw new InvalidOperationException($"目标设备 {task.TargetDeviceId} 不存在");
+            route = $"{wp.Info} {source.Name}→{target.Name}";
+            ctx = new TransferContext(crane, wp, _driverRegistry, _configStore, _configService.GetAppOptions(), _logger);
+
+            // 1) 原子获取路权 + 预约；竞争失败回滚，任务回 Waiting，不作为故障暂停。
+            phase = "获取资源";
+            if (!Acquire(ctx, crane, task))
+            {
+                return;
+            }
+
+            crane.Runtime.State = CraneState.Running;
+            wp.Runtime.TaskState = WorkpieceState.Running;
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务开始：{route}");
+
             // 2) 再审核源（内存一致；PLC 点位由 handler 首步等待）
             phase = $"审核源({source.Name})";
             AuditSource(source, wp);
@@ -166,7 +165,7 @@ public sealed class CraneStateMachine
             // 宿主取消需要向 Worker 传播；未取消的执行器遇到内部取消则走普通故障，保留真实原因。
             var detail = BuildFailure(crane, ctx, route, phase, "任务被取消");
             _logger.Error(LogCategory.StateMachine, detail);
-            _abortCoordinator.Abort(crane, detail);
+            HandleFailure(crane, ctx, detail);
             throw;
         }
         catch (Exception ex)
@@ -174,8 +173,21 @@ public sealed class CraneStateMachine
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
-            //异常处理机制 状态机发生异常了 下面的方法处理   1.释放路权 2.释放预约 3.清空天车内存状态 4.清空相关设备内存引用(ClearDeviceWorkpiece方法 是把device.CurrentWorkpiece=null)  这个不是无脑清理 5.标记工件已丢弃Discarded
-            _abortCoordinator.Abort(crane, detail);   // 统一：释放天车/路权/预约 + 清理任务 + 暂停 + 报警
+            // 充磁指令开始下发前保留工件；开始下发后（含反馈失败）沿用弃板处理。
+            HandleFailure(crane, ctx, detail);
+        }
+    }
+
+    /// <summary>按指令下发边界选择异常清理，初始化失败时尚未充磁，也必须保留工件。</summary>
+    private void HandleFailure(Crane crane, TransferContext? ctx, string detail)
+    {
+        if (ctx?.MagnetCommandStarted == true)
+        {
+            _abortCoordinator.Abort(crane, detail);
+        }
+        else
+        {
+            _abortCoordinator.RecoverBeforeMagnet(crane, detail);
         }
     }
 
@@ -184,10 +196,10 @@ public sealed class CraneStateMachine
     /// <returns>8 位短号</returns>
     private static string ShortId(Guid taskId) => taskId.ToString("N")[..8];
 
-    /// <summary>构造异常详情（天车 / 工件 / 源→目标 / 步骤 / 原因 / 是否已充磁）。</summary>
-    private static string BuildFailure(Crane crane, TransferContext ctx, string route, string phase, string reason)
+    /// <summary>构造异常详情，标明充磁指令是否已开始下发，避免把反馈超时误报为充磁前。</summary>
+    private static string BuildFailure(Crane crane, TransferContext? ctx, string route, string phase, string reason)
         => $"[{crane.Name}] 任务 {route} 步骤[{phase}] 异常：{reason}"
-           + (ctx.HasPieceOnCrane ? "（已充磁：板可能在天车上）" : "（未充磁：板应在源设备）");
+           + (ctx?.MagnetCommandStarted == true ? "（充磁指令已开始下发：板可能在天车上）" : "（充磁指令未下发：工件保留在原位置）");
 
     /// <summary>原子获取路权 + 源/目标预约；失败回滚并让出天车。</summary>
     private bool Acquire(TransferContext ctx, Crane crane, TransportTask task)
