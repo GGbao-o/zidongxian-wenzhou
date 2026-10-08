@@ -2,7 +2,7 @@
 
 用户已确认：取料开始调用充磁前保留工件，开始调用后弃板；指令写入或等待反馈失败属于充磁后。
 
-各设备 `PickAsync` 在调用 `ctx.MagnetOnAsync` 前置 `MagnetCommandStarted = true`，此后不清零。底层 `CraneService` 与 `ICraneDriver` 保持原样，不增加回调。
+各设备 `PickAsync` 在调用 `ctx.MagnetOnAsync` 前置 `MagnetCommandStarted = true`，此后不清零。异常分界不增加底层回调，驱动接口签名不变；底层充退磁协议按《页面布局/手动操作页面.md》执行 200ms 脉冲与单次反馈读取。
 
 - 标记为 false：`RecoverBeforeMagnet` 保留同一工件、设备引用、位置、工序、队列排位，状态回 `Waiting`。
 - 标记为 true：`Abort` 沿用清相关引用、状态与位置置 `Discarded`，保留记录。
