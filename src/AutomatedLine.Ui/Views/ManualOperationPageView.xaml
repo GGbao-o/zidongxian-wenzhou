@@ -15,36 +15,44 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!--  顶栏：选择天车 + 刷新 + 连接状态徽章  -->
-        <StackPanel
-            Grid.Row="0"
-            Margin="0,0,0,12"
-            Orientation="Horizontal">
-            <TextBlock
-                Margin="0,0,8,0"
-                VerticalAlignment="Center"
-                Foreground="{StaticResource TextPrimaryBrush}"
-                Text="选择天车" />
-            <ComboBox
-                Width="220"
-                DisplayMemberPath="Config.Name"
-                ItemsSource="{Binding Cranes}"
-                SelectedItem="{Binding SelectedCrane, Mode=TwoWay}" />
-            <ui:Button
-                Margin="8,0,0,0"
-                Command="{Binding RefreshCommand}"
-                Content="刷新" />
-            <Border
-                Margin="12,0,0,0"
-                Padding="12,4"
-                VerticalAlignment="Center"
-                Background="{Binding ConnectionBrush}"
-                CornerRadius="6">
+        <!--  顶栏：PLC 按需刷新；任务状态另从内存读取  -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel
+                Orientation="Horizontal">
                 <TextBlock
-                    FontWeight="SemiBold"
-                    Foreground="White"
-                    Text="{Binding ConnectionText}" />
-            </Border>
+                    Margin="0,0,8,0"
+                    VerticalAlignment="Center"
+                    Foreground="{StaticResource TextPrimaryBrush}"
+                    Text="选择天车" />
+                <ComboBox
+                    Width="220"
+                    DisplayMemberPath="Config.Name"
+                    ItemsSource="{Binding Cranes}"
+                    SelectedItem="{Binding SelectedCrane, Mode=TwoWay}" />
+                <ui:Button
+                    Margin="8,0,0,0"
+                    Command="{Binding RefreshCommand}"
+                    Content="刷新" />
+                <Border
+                    Margin="12,0,0,0"
+                    Padding="12,4"
+                    VerticalAlignment="Center"
+                    Background="{Binding ConnectionBrush}"
+                    CornerRadius="6">
+                    <TextBlock
+                        FontWeight="SemiBold"
+                        Foreground="White"
+                        Text="{Binding ConnectionText}" />
+                </Border>
+            </StackPanel>
+            <WrapPanel Margin="0,8,0,0">
+                <TextBlock Margin="0,0,12,0" VerticalAlignment="Center"
+                           Text="{Binding CurrentTaskText}" />
+                <ui:Button Command="{Binding AbortCurrentTaskCommand}" Content="中止当前任务" />
+                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
+                           Foreground="{StaticResource TextPrimaryBrush}"
+                           Text="中止将弃板并暂停线路；现场负责停止天车。" />
+            </WrapPanel>
         </StackPanel>
 
         <!--  内容：多卡片，横竖可滚动  -->

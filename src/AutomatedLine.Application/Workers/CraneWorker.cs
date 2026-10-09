@@ -44,6 +44,45 @@ public sealed class CraneWorker : IHostedService
     /// <summary>各天车的执行循环。</summary>
     private readonly List<Task> _loops = new();
 
+    // 只登记已领取的搬运；每次领取创建新令牌，人工中止不影响本车下一单或其他车。
+    private readonly object _executionSync = new();
+    private readonly Dictionary<int, CraneTaskExecution> _executions = new();
+
+    /// <summary>读取所选天车当前执行的搬运及人工中止状态，不读取 PLC。</summary>
+    /// <param name="craneId">天车标识</param>
+    /// <returns>执行中的搬运和中止标志；空闲或已结束时返回 null</returns>
+    public (TransportTask Task, bool IsAbortRequested)? GetCurrentExecution(int craneId)
+    {
+        lock (_executionSync)
+        {
+            if (!_executions.TryGetValue(craneId, out var execution) || !execution.IsActive
+                || _craneRegistry.Get(craneId)?.Runtime.CurrentTask?.TaskId != execution.Task.TaskId)
+                return null;
+            return (execution.Task, execution.IsManualAbortRequested);
+        }
+    }
+
+    /// <summary>人工中止指定天车的当前搬运，立即暂停线路；不下发急停指令。</summary>
+    /// <param name="craneId">天车标识</param>
+    /// <param name="expectedTaskId">界面看到的搬运标识；拒绝误中止后来分配的新任务</param>
+    /// <returns>首次接受中止返回 true；无任务、已结束、过期或重复请求返回 false</returns>
+    public bool TryAbortCurrentTask(int craneId, Guid expectedTaskId)
+    {
+        CraneTaskExecution execution;
+        lock (_executionSync)
+        {
+            if (!_executions.TryGetValue(craneId, out execution!)
+                || execution.Task.TaskId != expectedTaskId
+                || _craneRegistry.Get(craneId)?.Runtime.CurrentTask?.TaskId != expectedTaskId)
+                return false;
+        }
+        // 不持有登记表锁触发线路/UI 事件，避免事件回读执行状态造成锁交错。
+        if (!execution.TryRequestManualAbort(_lineControl.EnterFaultPause)) return false;
+        _logger.Info(LogCategory.StateMachine,
+            $"[天车{craneId}] 人工中止请求已接受：搬运 {expectedTaskId:N}，线路已暂停");
+        return true;
+    }
+
     /// <summary>
     /// 构造函数。
     /// </summary>
@@ -126,10 +165,12 @@ public sealed class CraneWorker : IHostedService
                 // 本车 Runtime 由本循环独占写（调度器不再碰它）
                 crane.Runtime.CurrentTask = task;//设置天车任务
                 crane.Runtime.State = CraneState.Reserved;//已分配任务  其实这时候 天车就不是空闲状态了   CraneScheduler集中式调度就不会再选择这个天车 
+                var execution = new CraneTaskExecution(task, cancellationToken);
+                lock (_executionSync) _executions[crane.Id] = execution;
                 try
                 {
                     //开始执行任务
-                    await _stateMachine.RunFlowAsync(crane, task, cancellationToken).ConfigureAwait(false);
+                    await _stateMachine.RunFlowAsync(crane, task, execution.Token, execution).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -138,6 +179,12 @@ public sealed class CraneWorker : IHostedService
                     ClearRuntime(crane);
                     throw;
                 }
+                catch (OperationCanceledException) when (execution.IsManualAbortRequested)
+                {
+                    // 人工中止只结束当前搬运；状态机已弃板，宿主循环继续等待后续启动。
+                    FallbackAbort(crane, "人工中止当前任务（兜底）");
+                    ClearRuntime(crane);
+                }
                 catch (Exception ex)
                 {
                     // 状态机内部已处理；这里兜底（含释放资源），避免循环退出与资源泄漏
@@ -145,6 +192,17 @@ public sealed class CraneWorker : IHostedService
                     //异常处理 兜底机制  Abort方法里面其实包含了ClearRuntime()
                     FallbackAbort(crane, ex.Message);
                     ClearRuntime(crane);
+                }
+                finally
+                {
+                    execution.Close();
+                    lock (_executionSync) _executions.Remove(crane.Id);
+                    try { await execution.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception ex)
+                    {
+                        // 取消回调失败也不能带走消费者；流程清理已完成，记录释放异常供排查。
+                        _logger.Error(LogCategory.StateMachine, $"[{crane.Name}] 本次任务取消范围释放异常", ex);
+                    }
                 }
             }
 

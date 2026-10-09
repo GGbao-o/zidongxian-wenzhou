@@ -26,6 +26,203 @@ public class CraneWorkerTests
 {
     private static readonly TimeSpan GuardTimeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>人工中止一律弃板、清资源，恢复后的下一单使用新令牌；旧任务请求不能中止新任务。</summary>
+    /// <param name="afterMagnet">是否已开始取料充磁</param>
+    /// <param name="callbackThrows">是否有外部取消回调抛出异常</param>
+    /// <returns>异步验证任务</returns>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task ManualAbort_DiscardsCurrentTask_AndNextTaskUsesFreshToken(bool afterMagnet, bool callbackThrows)
+    {
+        var h = new Harness();
+        h.Handler.MagnetizeBeforePick = afterMagnet;
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Handler.OnPick = token =>
+        {
+            if (callbackThrows) token.Register(() => throw new InvalidOperationException("外部取消回调失败"));
+            var waiting = Task.Delay(Timeout.Infinite, token);
+            entered.TrySetResult(token);
+            return waiting;
+        };
+        var (first, transport) = h.NewTask();
+        Assert.False(h.Worker.TryAbortCurrentTask(h.Crane.Id, transport.TaskId));
+        Assert.Null(h.Worker.GetCurrentExecution(h.Crane.Id));
+        Assert.True(h.Channels.For(h.Crane.Id).Writer.TryWrite(transport));
+        h.Line.Start();
+        await h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            var firstToken = await entered.Task.WaitAsync(GuardTimeout);
+            Assert.Equal(transport.TaskId, h.Worker.GetCurrentExecution(h.Crane.Id)!.Value.Task.TaskId);
+            Assert.False(h.Worker.TryAbortCurrentTask(h.Crane.Id, Guid.NewGuid()));
+            Assert.Equal(LineState.Running, h.Line.State);
+            Assert.True(h.Worker.TryAbortCurrentTask(h.Crane.Id, transport.TaskId));
+            Assert.Equal(LineState.PausedByFault, h.Line.State);
+            Assert.True(firstToken.IsCancellationRequested);
+            Assert.False(h.Worker.TryAbortCurrentTask(h.Crane.Id, transport.TaskId));
+            await h.FaultRaised.Task.WaitAsync(GuardTimeout);
+            Assert.Equal(WorkpieceState.Discarded, first.Runtime.TaskState);
+            Assert.Equal(WorkpieceLocation.Discarded, first.Runtime.CurrentLocation);
+            Assert.Same(first, h.Tasks.Get(first.Id));
+            Assert.Null(h.Crane.CurrentWorkpiece);
+            Assert.Null(h.Crane.Runtime.CurrentTask);
+            Assert.Null(h.Crane.Runtime.LockedInterval);
+            Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
+            Assert.False(h.Row.IsHeld(transport.TaskId));
+            Assert.False(h.Reservations.IsReserved(h.Source.Id));
+            Assert.False(h.Reservations.IsReserved(h.Target.Id));
+            Assert.Contains(h.Logger.Messages, message => message.Contains("人工中止当前任务") && message.Contains("工件丢弃"));
+            Assert.DoesNotContain(h.Driver.Actions, action => action.StartsWith("MOVE") || action.Contains("EMERGENCY"));
+
+            var secondEntered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var finishSecond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            h.Handler.OnPick = token =>
+            {
+                secondEntered.TrySetResult(token);
+                return finishSecond.Task.WaitAsync(token);
+            };
+            var (second, next) = h.NewTask();
+            Assert.True(h.Channels.For(h.Crane.Id).Writer.TryWrite(next));
+            // 暂停状态不领取下一单；本车循环没有被永久取消。
+            await Task.Delay(150);
+            Assert.Equal(WorkpieceState.Assigned, second.Runtime.TaskState);
+            Assert.False(secondEntered.Task.IsCompleted);
+            h.Line.Start();
+            var secondToken = await secondEntered.Task.WaitAsync(GuardTimeout);
+            Assert.NotEqual(firstToken, secondToken);
+            Assert.False(secondToken.IsCancellationRequested);
+            Assert.False(h.Worker.TryAbortCurrentTask(h.Crane.Id, transport.TaskId));
+            Assert.False(secondToken.IsCancellationRequested);
+            finishSecond.TrySetResult();
+            await WaitForStateAsync(second, WorkpieceState.Completed);
+            Assert.Equal(WorkpieceState.Discarded, first.Runtime.TaskState);
+            Assert.Null(h.Worker.GetCurrentExecution(h.Crane.Id));
+        }
+        finally
+        {
+            using var stop = new CancellationTokenSource(GuardTimeout);
+            await h.Worker.StopAsync(stop.Token);
+        }
+    }
+
+    /// <summary>即使动作忽略取消并返回成功/失败，已接受的人工中止也不能继续中转或退回保板。</summary>
+    /// <param name="actionFails">动作在中止后是否返回普通异常</param>
+    /// <returns>异步验证任务</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManualAbort_ActionReturnsLate_StillDiscards(bool actionFails)
+    {
+        var h = new Harness();
+        h.Handler.OnPick = _ =>
+        {
+            Assert.True(h.Worker.TryAbortCurrentTask(h.Crane.Id, h.Crane.Runtime.CurrentTask!.TaskId));
+            return actionFails ? Task.FromException(new TimeoutException("动作同时失败")) : Task.CompletedTask;
+        };
+        var (workpiece, task) = h.NewTask();
+        Assert.True(h.Channels.For(h.Crane.Id).Writer.TryWrite(task));
+        h.Line.Start();
+        await h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await h.FaultRaised.Task.WaitAsync(GuardTimeout);
+            Assert.Equal(WorkpieceState.Discarded, workpiece.Runtime.TaskState);
+            Assert.Null(h.Target.CurrentWorkpiece);
+            Assert.DoesNotContain(h.Driver.Actions, action => action.StartsWith("MOVE"));
+        }
+        finally
+        {
+            using var stop = new CancellationTokenSource(GuardTimeout);
+            await h.Worker.StopAsync(stop.Token);
+        }
+    }
+
+    /// <summary>放料后的安全位运动期间接受中止时，不能把弃板任务提交为已完成。</summary>
+    /// <returns>异步验证任务</returns>
+    [Fact]
+    public async Task ManualAbort_DuringFinish_DoesNotCommitCompletion()
+    {
+        var h = new Harness();
+        h.Driver.OnAbsoluteMove = (x, _) =>
+        {
+            if (x == h.Crane.SafeX)
+                Assert.True(h.Worker.TryAbortCurrentTask(h.Crane.Id, h.Crane.Runtime.CurrentTask!.TaskId));
+            return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok"));
+        };
+        var (workpiece, task) = h.NewTask();
+        Assert.True(h.Channels.For(h.Crane.Id).Writer.TryWrite(task));
+        h.Line.Start();
+        await h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await h.FaultRaised.Task.WaitAsync(GuardTimeout);
+            Assert.Equal(WorkpieceState.Discarded, workpiece.Runtime.TaskState);
+            Assert.Null(h.Target.CurrentWorkpiece);
+            Assert.False(h.Row.IsHeld(task.TaskId));
+            Assert.False(h.Reservations.IsReserved(h.Target.Id));
+            Assert.DoesNotContain(h.Logger.Messages, message => message.Contains("任务完成：工件"));
+        }
+        finally
+        {
+            using var stop = new CancellationTokenSource(GuardTimeout);
+            await h.Worker.StopAsync(stop.Token);
+        }
+    }
+
+    /// <summary>暂停派发和中止所选车不会取消另一台已经执行的天车。</summary>
+    /// <returns>异步验证任务</returns>
+    [Fact]
+    public async Task ManualAbort_OnlyCancelsSelectedCrane_OtherCraneFinishesWhilePaused()
+    {
+        var h = new Harness(secondCrane: true);
+        var firstEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var otherEntered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finishOther = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Handler.OnPickForCrane = (id, token) =>
+        {
+            if (id == 1)
+            {
+                firstEntered.TrySetResult();
+                return Task.Delay(Timeout.Infinite, token);
+            }
+            otherEntered.TrySetResult(token);
+            return finishOther.Task.WaitAsync(token);
+        };
+        var (first, firstTask) = h.NewTask();
+        var (other, _) = h.NewTask();
+        var otherTask = new TransportTask
+        {
+            WorkpieceRuntimeId = other.Id, SourceDeviceId = 3, TargetDeviceId = 4,
+            SourceX = 6000, TargetX = 7000, TargetProcess = ProcessType.Unloading
+        };
+        Assert.True(h.Channels.For(1).Writer.TryWrite(firstTask));
+        h.Line.Start();
+        await h.Worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await firstEntered.Task.WaitAsync(GuardTimeout);
+            Assert.True(h.Channels.For(2).Writer.TryWrite(otherTask));
+            var otherToken = await otherEntered.Task.WaitAsync(GuardTimeout);
+            Assert.True(h.Worker.TryAbortCurrentTask(1, firstTask.TaskId));
+            await h.FaultRaised.Task.WaitAsync(GuardTimeout);
+            Assert.False(otherToken.IsCancellationRequested);
+            Assert.Equal(WorkpieceState.Running, other.Runtime.TaskState);
+            Assert.True(h.Row.IsHeld(otherTask.TaskId));
+            finishOther.TrySetResult();
+            await WaitForStateAsync(other, WorkpieceState.Completed);
+            Assert.Equal(LineState.PausedByFault, h.Line.State);
+            Assert.Equal(WorkpieceState.Discarded, first.Runtime.TaskState);
+            Assert.False(h.Worker.TryAbortCurrentTask(2, otherTask.TaskId));
+        }
+        finally
+        {
+            using var stop = new CancellationTokenSource(GuardTimeout);
+            await h.Worker.StopAsync(stop.Token);
+        }
+    }
+
     /// <summary>流程内及初始化发生内部取消异常时，按充磁边界处理工件，Worker 恢复后仍可完成下一单。</summary>
     /// <param name="failBeforeFlow">是否在状态机初始化时注入异常</param>
     /// <param name="afterMagnet">是否在充磁指令开始下发之后注入异常</param>
@@ -249,9 +446,11 @@ public class CraneWorkerTests
         };
         public LoadRack Source { get; } = new(1, "上料架", 1000);
         public UnloadRack Target { get; } = new(2, "下料架", 2000);
+        public FakeCraneDriver Driver { get; } = new();
 
         /// <summary>使用同一套管理器装配状态机和 Worker，确保回归覆盖真正的 Channel 消费。</summary>
-        public Harness()
+        /// <param name="secondCrane">是否添加独立设备区间的第二台天车，用于验证中止隔离</param>
+        public Harness(bool secondCrane = false)
         {
             Tasks = new RuntimeTaskManager(Logger);
             Row = new RightOfWayManager(Logger);
@@ -266,7 +465,17 @@ public class CraneWorkerTests
             Cranes.Register(Crane);
             Devices.Register(Source);
             Devices.Register(Target);
-            Drivers.RegisterCrane(new FakeCraneDriver());
+            Drivers.RegisterCrane(Driver);
+            if (secondCrane)
+            {
+                Cranes.Register(new Crane(2, 2, "天车2")
+                    { IsEnabled = true, StartX = 5500, EndX = 8000, Width = 100, SafeX = 5500, SafeZ = 500 });
+                Devices.Register(new LoadRack(3, "上料架2", 6000));
+                Devices.Register(new UnloadRack(4, "下料架2", 7000));
+                Drivers.RegisterCrane(new FakeCraneDriver { CraneId = 2 });
+                store.Devices.Add(new DeviceConfigDto { Id = 3, PositionX = 6000, PositionZ = 500 });
+                store.Devices.Add(new DeviceConfigDto { Id = 4, PositionX = 7000, PositionZ = 500 });
+            }
             Machine = new CraneStateMachine(Devices, Drivers, Tasks, Row, Reservations, abort,
                 new TransferHandlerRegistry(new[] { Handler }), store, Config, Logger);
             Worker = new CraneWorker(Cranes, Channels, Machine, Line, Config, abort, Logger);
@@ -332,6 +541,9 @@ public class CraneWorkerTests
         /// <summary>先通过真实上下文开始充磁，再执行脚本，以覆盖两侧异常边界。</summary>
         public bool MagnetizeBeforePick { get; set; }
 
+        /// <summary>按天车分别控制取料，验证中止隔离。</summary>
+        public Func<int, CancellationToken, Task>? OnPickForCrane { get; set; }
+
         /// <inheritdoc />
         public bool CanHandle(DeviceType type) => type is DeviceType.LoadRack or DeviceType.UnloadRack;
 
@@ -343,7 +555,7 @@ public class CraneWorkerTests
                 ctx.MagnetCommandStarted = true;
                 await ctx.MagnetOnAsync(cancellationToken);
             }
-            await OnPick(cancellationToken);
+            await (OnPickForCrane?.Invoke(ctx.Crane.Id, cancellationToken) ?? OnPick(cancellationToken));
         }
 
         /// <inheritdoc />

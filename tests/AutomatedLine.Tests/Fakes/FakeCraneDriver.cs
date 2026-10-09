@@ -27,7 +27,10 @@ public sealed class FakeCraneDriver : ICraneDriver
     public int? FailAbsoluteMoveX { get; set; }
 
     /// <inheritdoc />
-    public int CraneId => 1;
+    public int CraneId { get; init; } = 1;
+
+    /// <summary>绝对运动脚本，用于在收尾运动期间触发人工中止。</summary>
+    public Func<int, CancellationToken, Task<CraneCommandResult>>? OnAbsoluteMove { get; set; }
 
     /// <inheritdoc />
     public bool IsConnected => true;
@@ -62,6 +65,7 @@ public sealed class FakeCraneDriver : ICraneDriver
     public Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken ct = default)
     {
         Actions.Add($"MOVE({x},{y},{z})");
+        if (OnAbsoluteMove is not null) return OnAbsoluteMove(x, ct);
         if (x == FailAbsoluteMoveX)
         {
             return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Timeout, "运动超时"));

@@ -92,8 +92,10 @@ public sealed class CraneStateMachine
     /// <param name="crane">天车</param>
     /// <param name="task">搬运任务</param>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>异步搬运任务；普通故障按充磁边界清理，宿主取消清理后继续传播</returns>
-    public async Task RunFlowAsync(Crane crane, TransportTask task, CancellationToken cancellationToken)
+    /// <param name="execution">Worker 的本次执行范围；用于识别人工中止，独立调用时可省略</param>
+    /// <returns>异步搬运任务；普通故障按充磁边界清理，人工中止始终弃板，取消清理后向 Worker 传播</returns>
+    public async Task RunFlowAsync(Crane crane, TransportTask task, CancellationToken cancellationToken,
+        CraneTaskExecution? execution = null)
     {
         // 初始化也可能失败，先记录归属，确保充磁前故障能释放本次任务并保留工件。
         crane.Runtime.CurrentTask = task;
@@ -102,6 +104,7 @@ public sealed class CraneStateMachine
         var phase = "初始化";
         try
         {
+            execution?.ThrowIfManualAbortRequested();
             var wp = _taskManager.Get(task.WorkpieceRuntimeId)
                      ?? throw new InvalidOperationException("找不到工件任务");
             var source = _deviceRegistry.Get(task.SourceDeviceId)
@@ -115,8 +118,11 @@ public sealed class CraneStateMachine
             phase = "获取资源";
             if (!Acquire(ctx, crane, task))
             {
+                execution?.ThrowIfManualAbortRequested();
                 return;
             }
+
+            execution?.ThrowIfManualAbortRequested();
 
             crane.Runtime.State = CraneState.Running;
             wp.Runtime.TaskState = WorkpieceState.Running;
@@ -130,11 +136,13 @@ public sealed class CraneStateMachine
             // 下发本车运动速度（每次执行前设置一次）
             phase = "设置速度";
             await ctx.SetCraneSpeedAsync(cancellationToken).ConfigureAwait(false);
+            execution?.ThrowIfManualAbortRequested();
             ctx.LogStep("设置速度完成");
 
             // 3) 去源设备取料阶段：  已经z回升->发下料完成了
             phase = $"取料({source.Name})";
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
+            execution?.ThrowIfManualAbortRequested();
             source.CurrentWorkpiece = null;
             crane.CurrentWorkpiece = wp;
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
@@ -143,11 +151,13 @@ public sealed class CraneStateMachine
             // 4) 中转：XY→目标、释放源预约、缩小路权、清除源设备 目标设备的握手信号(源设备是下料 目标设备上料)
             phase = $"中转({source.Name}→{target.Name})";
             await TransitAsync(ctx, crane, task, source, target, cancellationToken).ConfigureAwait(false);
+            execution?.ThrowIfManualAbortRequested();
             ctx.LogStep($"中转到达：{target.Name}（已释放源预约、缩小路权、复位源握手位）");
 
             // 5) 去目标设备放料阶段：结果：也是z回升了发过下料完成的
             phase = $"放料({target.Name})";
             await _handlers.Get(target.Type).PlaceAsync(ctx, target, cancellationToken).ConfigureAwait(false);
+            execution?.ThrowIfManualAbortRequested();
             target.CurrentWorkpiece = wp;
             crane.CurrentWorkpiece = null;
             wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(target.Id);
@@ -156,12 +166,22 @@ public sealed class CraneStateMachine
 
             // 6) 完成：回安全位、释放全部
             phase = "收尾";
-            await FinishAsync(ctx, crane, task, target, wp, cancellationToken).ConfigureAwait(false);
+            await FinishAsync(ctx, crane, task, target, wp, cancellationToken, execution).ConfigureAwait(false);
 
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            // 关闭中止入口后再选择清理策略，避免清理途中接受按钮导致弃板意图丢失。
+            if (execution?.Close() == true)
+            {
+                var abortDetail = BuildFailure(crane, ctx, route, phase, "人工中止当前任务", manualAbort: true);
+                _logger.Error(LogCategory.StateMachine, abortDetail);
+                // 资源竞争回滚可能刚清掉归属；人工中止仍明确弃掉本次工件。
+                crane.Runtime.CurrentTask = task;
+                _abortCoordinator.Abort(crane, abortDetail);
+                throw;
+            }
             // 宿主取消需要向 Worker 传播；未取消的执行器遇到内部取消则走普通故障，保留真实原因。
             var detail = BuildFailure(crane, ctx, route, phase, "任务被取消");
             _logger.Error(LogCategory.StateMachine, detail);
@@ -170,6 +190,15 @@ public sealed class CraneStateMachine
         }
         catch (Exception ex)
         {
+            if (execution?.Close() == true)
+            {
+                // 原动作失败与按钮中止同时发生时，已接受的人工弃板意图优先。
+                var abortDetail = BuildFailure(crane, ctx, route, phase, $"人工中止当前任务；{ex.Message}", manualAbort: true);
+                _logger.Error(LogCategory.StateMachine, abortDetail, ex);
+                crane.Runtime.CurrentTask = task;
+                _abortCoordinator.Abort(crane, abortDetail);
+                return;
+            }
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
@@ -197,9 +226,11 @@ public sealed class CraneStateMachine
     private static string ShortId(Guid taskId) => taskId.ToString("N")[..8];
 
     /// <summary>构造异常详情，标明取料是否已开始调用充磁，避免把反馈超时误报为充磁前。</summary>
-    private static string BuildFailure(Crane crane, TransferContext? ctx, string route, string phase, string reason)
+    private static string BuildFailure(Crane crane, TransferContext? ctx, string route, string phase, string reason,
+        bool manualAbort = false)
         => $"[{crane.Name}] 任务 {route} 步骤[{phase}] 异常：{reason}"
-           + (ctx?.MagnetCommandStarted == true ? "（取料充磁已开始：板可能在天车上）" : "（取料充磁未开始：工件保留在原位置）");
+           + (manualAbort ? "（人工中止：工件丢弃）"
+               : ctx?.MagnetCommandStarted == true ? "（取料充磁已开始：板可能在天车上）" : "（取料充磁未开始：工件保留在原位置）");
 
     /// <summary>原子获取路权 + 源/目标预约；失败回滚并让出天车。</summary>
     private bool Acquire(TransferContext ctx, Crane crane, TransportTask task)
@@ -317,35 +348,43 @@ public sealed class CraneStateMachine
     }
 
     /// <summary>完成：回安全位、释放天车/路权/目标预约、改进度。</summary>
-    private async Task FinishAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase target, WorkpieceTask wp, CancellationToken cancellationToken)
+    private async Task FinishAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase target, WorkpieceTask wp,
+        CancellationToken cancellationToken, CraneTaskExecution? execution)
     {
         ctx.LogStep($"收尾：回本车安全位（X={crane.SafeX}、Z={crane.SafeZ}）");
         // 回到本车安全位 X（同一目标 Y、Z 取安全高度）
         var (_, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         await ctx.MoveAbsoluteAsync(crane.SafeX, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
-        ctx.LogStep("收尾：释放路权 + 目标设备预约 + 清空天车运行时状态");
-        _rightOfWayManager.Release(task.TaskId);
-        _reservationManager.Release(task.TaskId);
+        // 只有正常完成与人工中止的最终提交互斥；原有运动和收尾内容不变。
+        if (execution is null) CommitCompletion();
+        else execution.Complete(CommitCompletion);
 
-        crane.Runtime.CurrentTask = null;
-        crane.Runtime.State = CraneState.Idle;
-        crane.Runtime.LockedInterval = null;
-
-        wp.Runtime.TaskState = task.TargetProcess == ProcessType.Unloading
-            ? WorkpieceState.Completed
-            : WorkpieceState.Waiting;
-
-        ctx.LogStep($"收尾：工件状态置 {wp.Runtime.TaskState}（目标工序={task.TargetProcess}）");
-
-        // task.txt：任务生命周期**终点**。只有"送到下料架"这一趟才是真正完成；
-        // 其余工序搬完只是回 Waiting（等下一段搬运），不算完成、不写 task.txt。
-        if (wp.Runtime.TaskState == WorkpieceState.Completed)
+        void CommitCompletion()
         {
-            _logger.Info(LogCategory.Task, $"任务完成：工件 {wp.Info}（已送到下料架）");
-        }
+            ctx.LogStep("收尾：释放路权 + 目标设备预约 + 清空天车运行时状态");
+            _rightOfWayManager.Release(task.TaskId);
+            _reservationManager.Release(task.TaskId);
 
-        ctx.LogStep($"完成任务（任务 {ShortId(task.TaskId)}）");
+            crane.Runtime.CurrentTask = null;
+            crane.Runtime.State = CraneState.Idle;
+            crane.Runtime.LockedInterval = null;
+
+            wp.Runtime.TaskState = task.TargetProcess == ProcessType.Unloading
+                ? WorkpieceState.Completed
+                : WorkpieceState.Waiting;
+
+            ctx.LogStep($"收尾：工件状态置 {wp.Runtime.TaskState}（目标工序={task.TargetProcess}）");
+
+            // task.txt：任务生命周期**终点**。只有"送到下料架"这一趟才是真正完成；
+            // 其余工序搬完只是回 Waiting（等下一段搬运），不算完成、不写 task.txt。
+            if (wp.Runtime.TaskState == WorkpieceState.Completed)
+            {
+                _logger.Info(LogCategory.Task, $"任务完成：工件 {wp.Info}（已送到下料架）");
+            }
+
+            ctx.LogStep($"完成任务（任务 {ShortId(task.TaskId)}）");
+        }
     }
 
 }

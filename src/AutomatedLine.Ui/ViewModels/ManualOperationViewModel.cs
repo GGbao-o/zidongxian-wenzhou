@@ -2,8 +2,10 @@ using System.Collections.ObjectModel;
 using System.Windows.Media;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
+using AutomatedLine.Application.Workers;
 using AutomatedLine.Domain.Devices;
 using AutomatedLine.Ui.Helpers;
+using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -30,6 +32,7 @@ public enum CraneConnectionState
 /// <summary>
 /// 手动操作页面 ViewModel（仅天车）。
 /// 天车列表来自数据库；选择后点“刷新”读取状态，按钮下发手动命令。
+/// 当前自动搬运从 Worker 内存刷新，人工中止只取消所选车本次搬运并统一弃板。
 /// 连接状态：绿=已连接、黄=天车报警、红=❌连接失败。
 /// </summary>
 public partial class ManualOperationViewModel : ObservableObject
@@ -39,6 +42,21 @@ public partial class ManualOperationViewModel : ObservableObject
 
     /// <summary>手动操作服务。</summary>
     private readonly IManualOperationService _manualOperationService;
+
+    /// <summary>只通过 Worker 中止当前搬运，不取消宿主或直接写 PLC。</summary>
+    private readonly CraneWorker _craneWorker;
+
+    // 保存界面实际显示的搬运 ID，按钮不能在刷新间隔内误中止下一单。
+    private Guid? _displayedTaskId;
+
+    /// <summary>当前自动搬运任务及人工中止状态，来自内存。</summary>
+    [ObservableProperty]
+    private string _currentTaskText = "当前任务：无";
+
+    /// <summary>仅有尚未中止的当前搬运时允许发起中止。</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AbortCurrentTaskCommand))]
+    private bool _canAbortCurrentTask;
 
     /// <summary>天车列表。</summary>
     public ObservableCollection<CraneConfigRowViewModel> Cranes { get; } = new();
@@ -177,12 +195,42 @@ public partial class ManualOperationViewModel : ObservableObject
     /// </summary>
     /// <param name="configurationStore">配置存储</param>
     /// <param name="manualOperationService">手动操作服务</param>
-    public ManualOperationViewModel(IConfigurationStore configurationStore, IManualOperationService manualOperationService)
+    /// <param name="craneWorker">当前搬运执行器</param>
+    /// <param name="ticker">UI 内存状态刷新节拍，不触发 PLC 读取</param>
+    public ManualOperationViewModel(IConfigurationStore configurationStore, IManualOperationService manualOperationService,
+        CraneWorker craneWorker, IRuntimeTicker ticker)
     {
         _configurationStore = configurationStore;
         _manualOperationService = manualOperationService;
+        _craneWorker = craneWorker;
+        ticker.Tick += (_, _) => RefreshCurrentTask();
         _ = LoadCranesAsync();
         _ = LoadHandshakeDevicesAsync();
+    }
+
+    partial void OnSelectedCraneChanged(CraneConfigRowViewModel? value) => RefreshCurrentTask();
+
+    // 仅刷新 Worker 的执行登记；现有 PLC 状态仍由“刷新”按钮按需读取。
+    private void RefreshCurrentTask()
+    {
+        var current = SelectedCrane is null ? null : _craneWorker.GetCurrentExecution(SelectedCrane.Id);
+        _displayedTaskId = current?.Task.TaskId;
+        CanAbortCurrentTask = current is { IsAbortRequested: false };
+        CurrentTaskText = current is { } active
+            ? $"当前任务：设备{active.Task.SourceDeviceId} → 设备{active.Task.TargetDeviceId}"
+              + $"（{active.Task.TaskId.ToString("N")[..8]}）" + (active.IsAbortRequested ? " 中止中…" : "")
+            : "当前任务：无";
+    }
+
+    /// <summary>人工弃掉所选车当前任务；清理由状态机完成，现场负责停止实物运动。</summary>
+    [RelayCommand(CanExecute = nameof(CanAbortCurrentTask))]
+    private void AbortCurrentTask()
+    {
+        if (SelectedCrane is null || _displayedTaskId is not { } taskId) return;
+        Message = _craneWorker.TryAbortCurrentTask(SelectedCrane.Id, taskId)
+            ? $"{SelectedCrane.Config.Name}：已请求中止当前任务，线路已暂停；清理后工件标记为已丢弃。"
+            : "当前任务已变化、已结束或已请求中止，请查看最新任务状态。";
+        RefreshCurrentTask();
     }
 
     /// <summary>加载天车列表（数据库，仅启用天车）。</summary>
