@@ -35,6 +35,9 @@ public partial class ScreenViewModel : ObservableObject
     /// <summary>工件任务总表（统计已派发任务）。</summary>
     private readonly IRuntimeTaskManager _taskManager;
 
+    /// <summary>整轮刷新占用标记，慢通信期间跳过新节拍，避免请求在连接锁前积压。</summary>
+    private int _refreshInProgress;
+
     /// <summary>设备卡片数据。</summary>
     public ObservableCollection<DeviceRowViewModel> Devices { get; } = new();
 
@@ -86,10 +89,31 @@ public partial class ScreenViewModel : ObservableObject
         _ = RefreshAsync();
     }
 
+    /// <summary>尝试执行一轮刷新；上一轮未结束时跳过本次触发，不排队或补跑。</summary>
+    /// <returns>本轮刷新任务；忙时立即完成。</returns>
+    private async Task RefreshAsync()
+    {
+        // 首轮刷新与后续节拍共用入口，确保整轮最多只有一个执行者。
+        if (Interlocked.CompareExchange(ref _refreshInProgress, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await RefreshCoreAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            // 即使读取或展示更新失败，也允许下一个节拍重新读取最新状态。
+            Volatile.Write(ref _refreshInProgress, 0);
+        }
+    }
+
     /// <summary>
     /// 差量刷新设备卡片（读缓存）与天车卡片（按需读状态）。
     /// </summary>
-    private async Task RefreshAsync()
+    private async Task RefreshCoreAsync()
     {
         // 上料架的"当前工件"= 上料架队列队头（未启动/暂停不入队，无队头即无工件）
         var queueHead = _taskManager.Snapshot()
