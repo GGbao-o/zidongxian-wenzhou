@@ -11,6 +11,14 @@ public sealed class FakeCraneDriver : ICraneDriver
     /// <summary>当前状态（测试可改）。</summary>
     public CraneStatusDto? Status { get; set; } = new() { HasPlate = true };
 
+    private int _statusReadCount;
+
+    /// <summary>完整状态实际读取次数，用于验证缓存消费不会重复触发通信。</summary>
+    public int StatusReadCount => Volatile.Read(ref _statusReadCount);
+
+    /// <summary>可脚本化完整状态读取，模拟慢通信、取消和恢复。</summary>
+    public Func<CancellationToken, Task<CraneStatusDto?>>? OnReadStatus { get; set; }
+
     /// <summary>充磁指令开始下发后的结果，默认成功；可模拟反馈超时。</summary>
     public CraneCommandResult MagnetResult { get; set; } = CraneCommandResult.Ok(CraneCommandCode.Completed, "ok");
 
@@ -49,7 +57,11 @@ public sealed class FakeCraneDriver : ICraneDriver
     public Task WriteSignalAsync(string pointName, object? value, CancellationToken ct = default) => Task.CompletedTask;
 
     /// <inheritdoc />
-    public Task<CraneStatusDto?> ReadStatusAsync(CancellationToken ct = default) => Task.FromResult(Status);
+    public Task<CraneStatusDto?> ReadStatusAsync(CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref _statusReadCount);
+        return OnReadStatus?.Invoke(ct) ?? Task.FromResult(Status);
+    }
 
     /// <inheritdoc />
     public Task<bool> ReadHasPlateAsync(CancellationToken ct = default)

@@ -1,7 +1,7 @@
 namespace AutomatedLine.Application.Abstractions;
 
 /// <summary>
-/// 天车状态快照（手动页显示用）。
+/// 天车 PLC 状态数据；共享采集、界面展示与驱动即时读取复用，不包含程序任务或路权。
 /// 显示值与绝对编码器值分别对应不同基准：相对运动用显示值、绝对运动用编码器值。
 /// </summary>
 public sealed class CraneStatusDto

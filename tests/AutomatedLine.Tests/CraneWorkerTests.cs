@@ -1,4 +1,5 @@
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Collection;
 using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Generation;
@@ -379,7 +380,10 @@ public class CraneWorkerTests
         h.Target.MaxLength = 5000;
         var pool = new CandidateTaskPool();
         var generator = new TransportTaskGenerator(h.Tasks, h.Devices, pool, h.Reservations, h.Line, h.Config, h.Logger);
-        var scheduler = new CraneScheduler(pool, h.Channels, h.Cranes, h.Drivers, h.Row, h.Reservations, h.Line, h.Config, h.Logger);
+        var craneStates = new CraneStateStore(h.Cranes, h.Drivers, h.Config);
+        using var collector = new CraneStateCollector(h.Cranes, h.Drivers, craneStates, h.Config, h.Logger);
+        await collector.StartAsync(CancellationToken.None);
+        var scheduler = new CraneScheduler(pool, h.Channels, h.Cranes, craneStates, h.Row, h.Reservations, h.Line, h.Config, h.Logger);
         h.Handler.OnPick = _ => Task.FromException(new TimeoutException("去源设备运动超时"));
         var (workpiece, first) = h.NewTask();
         workpiece.Runtime.QueueOrder = 9;
@@ -410,6 +414,7 @@ public class CraneWorkerTests
             await scheduler.StopAsync(stopDeadline.Token);
             await generator.StopAsync(stopDeadline.Token);
             await h.Worker.StopAsync(stopDeadline.Token);
+            await collector.StopAsync(stopDeadline.Token);
         }
     }
 

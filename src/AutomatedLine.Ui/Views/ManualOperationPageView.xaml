@@ -73,47 +73,47 @@
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
                             Text="显示值坐标" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding XDisplay, StringFormat=X：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding YDisplay, StringFormat=Y：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding ZDisplay, StringFormat=Z：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XDisplay, StringFormat=X：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YDisplay, StringFormat=Y：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZDisplay, StringFormat=Z：{0}, TargetNullValue=—}" />
 
                         <TextBlock
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
                             Text="绝对编码器坐标" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding XEncoder, StringFormat=X：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding YEncoder, StringFormat=Y：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding ZEncoder, StringFormat=Z：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XEncoder, StringFormat=X：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YEncoder, StringFormat=Y：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZEncoder, StringFormat=Z：{0}, TargetNullValue=—}" />
 
                         <TextBlock
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
                             Text="三轴速度 / 加速度 / 减速度" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding XSpeedDisp, StringFormat=X 速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding XAccelDisp, StringFormat=X 加速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding XDecelDisp, StringFormat=X 减速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding YSpeedDisp, StringFormat=Y 速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding YAccelDisp, StringFormat=Y 加速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding YDecelDisp, StringFormat=Y 减速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding ZSpeedDisp, StringFormat=Z 速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding ZAccelDisp, StringFormat=Z 加速度：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding ZDecelDisp, StringFormat=Z 减速度：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XSpeedDisp, StringFormat=X 速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XAccelDisp, StringFormat=X 加速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XDecelDisp, StringFormat=X 减速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YSpeedDisp, StringFormat=Y 速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YAccelDisp, StringFormat=Y 加速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YDecelDisp, StringFormat=Y 减速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZSpeedDisp, StringFormat=Z 速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZAccelDisp, StringFormat=Z 加速度：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZDecelDisp, StringFormat=Z 减速度：{0}, TargetNullValue=—}" />
 
                         <TextBlock
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
                             Text="回原点" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding XHome, StringFormat=X 已回原点：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding YHome, StringFormat=Y 已回原点：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding ZHome, StringFormat=Z 已回原点：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XHome, StringFormat=X 已回原点：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YHome, StringFormat=Y 已回原点：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZHome, StringFormat=Z 已回原点：{0}, TargetNullValue=—}" />
 
                         <TextBlock
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
                             Text="报警" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding ServoAlarm, StringFormat=伺服报警：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding PlcServoAlarm, StringFormat=PLC伺服指令报警：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding PlcAlarm, StringFormat=PLC报警：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ServoAlarm, StringFormat=伺服报警：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding PlcServoAlarm, StringFormat=PLC伺服指令报警：{0}, TargetNullValue=—}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding PlcAlarm, StringFormat=PLC报警：{0}, TargetNullValue=—}" />
 
                         <TextBlock
                             Margin="0,8,0,0"

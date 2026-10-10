@@ -254,7 +254,7 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        // 启动前先做冷启动核对：现场有料但内存无数据 → 仅告警，不阻塞（天车状态按需读取）
+        // 启动前先核对有效采集快照；现场有料但内存无数据仍只告警，保持原启动策略。
         var blocks = await _coldStartChecker.CheckAsync();
         if (blocks.Count > 0)
         {

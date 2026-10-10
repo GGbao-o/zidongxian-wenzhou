@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Collection;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Logging;
 using AutomatedLine.Application.Reservations;
@@ -31,8 +32,8 @@ public sealed class CraneScheduler : IHostedService
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
 
-    /// <summary>驱动注册表（按需读天车状态）。</summary>
-    private readonly DriverRegistry _driverRegistry;
+    /// <summary>共享快照（只使用有效且未过期的状态）。</summary>
+    private readonly ICraneStateProvider _craneStates;
 
     /// <summary>路权管理器。</summary>
     private readonly RightOfWayManager _rightOfWayManager;
@@ -64,7 +65,7 @@ public sealed class CraneScheduler : IHostedService
     /// <param name="candidatePool">候选任务池</param>
     /// <param name="channels">每车任务队列</param>
     /// <param name="craneRegistry">天车注册表</param>
-    /// <param name="driverRegistry">驱动注册表（按需读天车状态）</param>
+    /// <param name="craneStates">共享快照（只使用有效且未过期的状态）</param>
     /// <param name="rightOfWayManager">路权管理器</param>
     /// <param name="reservationManager">预约管理器</param>
     /// <param name="lineControl">线路控制</param>
@@ -74,7 +75,7 @@ public sealed class CraneScheduler : IHostedService
         CandidateTaskPool candidatePool,
         CraneTaskChannels channels,
         CraneRegistry craneRegistry,
-        DriverRegistry driverRegistry,
+        ICraneStateProvider craneStates,
         RightOfWayManager rightOfWayManager,
         ResourceReservationManager reservationManager,
         LineControlService lineControl,
@@ -84,7 +85,7 @@ public sealed class CraneScheduler : IHostedService
         _candidatePool = candidatePool;
         _channels = channels;
         _craneRegistry = craneRegistry;
-        _driverRegistry = driverRegistry;
+        _craneStates = craneStates;
         _rightOfWayManager = rightOfWayManager;
         _reservationManager = reservationManager;
         _lineControl = lineControl;
@@ -177,18 +178,19 @@ public sealed class CraneScheduler : IHostedService
     /// </summary>
     /// <param name="verbose">是否输出本轮"开始/完成"日志（按周期节流，见 <see cref="RunAsync"/>）</param>
     /// <param name="cancellationToken">取消令牌</param>
-    private async Task DispatchOnceAsync(bool verbose, CancellationToken cancellationToken)
+    private Task DispatchOnceAsync(bool verbose, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var startedTimestamp = Stopwatch.GetTimestamp();
         var cranes = _craneRegistry.Snapshot();
 
-        // 先看候选池：空则本轮无事可做，省掉一次天车状态读取
+        // 候选池为空时不必整理选车缓存，后台采集仍独立运行。
         var pool = _candidatePool.Snapshot();
         if (pool.Count == 0)
         {
             // 登记"候选池为空"：空↔非空各出一条，现场据此区分"没活干"与"有活但派不出去"
             _reasonLog.Report("sched-pool", "调度", "候选池为空", "候选池为空，本轮无任务可派");
-            return;
+            return Task.CompletedTask;
         }
 
         if (verbose)
@@ -197,8 +199,8 @@ public sealed class CraneScheduler : IHostedService
                 $"调度开始：候选池 {pool.Count} 个，启用天车 {cranes.Count(c => c.IsEnabled)} 台");
         }
 
-        // 只对"启用且空闲"的天车按需读一次状态（连接/报警/位置），供本轮选车使用。天车不做后台采集。
-        var statuses = await ReadIdleCraneStatusesAsync(cranes, cancellationToken).ConfigureAwait(false);
+        // 启用且空闲的天车只读有效缓存；未采集、失败或过期均不参加本轮选车。
+        var statuses = ReadIdleCraneStatuses(cranes);
 
         // 候选排序：优先级降序 → 距离最近（最近可执行天车到源的距离；无可执行天车的排最后）。不做负载均衡。
         var candidates = pool
@@ -209,6 +211,7 @@ public sealed class CraneScheduler : IHostedService
         var dispatchedCount = 0;
         foreach (var candidate in candidates)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var task = candidate.Workpiece;
 
             // 只派发仍在"排队中"的任务（可能已被本轮/其它周期派发，或已暂停/完成）
@@ -316,6 +319,7 @@ public sealed class CraneScheduler : IHostedService
             _logger.Info(LogCategory.Scheduling,
                 $"调度完成：候选 {candidates.Count} 个，本轮派发 {dispatchedCount} 个，耗时 {(long)Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds}ms");
         }
+        return Task.CompletedTask;
     }
 
     /// <summary>候选任务日志短文本（工件 + 源→目标）。</summary>
@@ -349,7 +353,7 @@ public sealed class CraneScheduler : IHostedService
             }
             if (!statuses.TryGetValue(crane.Id, out var status) || status is null)
             {
-                reasons.Add($"{crane.Name}:状态读取失败"); continue;
+                reasons.Add($"{crane.Name}:状态不可用（未采集/失败/过期）"); continue;
             }
             if (status.HasAlarm) { reasons.Add($"{crane.Name}:报警"); continue; }
             reasons.Add($"{crane.Name}:可执行");
@@ -388,45 +392,13 @@ public sealed class CraneScheduler : IHostedService
         return best;
     }
 
-    /// <summary>
-    /// 对"启用且空闲"的天车按需读取状态（连接/报警/位置），供本轮选车使用。
-    /// </summary>
-    /// <param name="cranes">天车快照</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>天车号 → 状态（读取失败为 null）</returns>
-    private async Task<Dictionary<int, CraneStatusDto?>> ReadIdleCraneStatusesAsync(IReadOnlyList<Crane> cranes, CancellationToken cancellationToken)
+    /// <summary>取得启用且空闲天车的有效共享状态，不在调度线程发起通信。</summary>
+    /// <param name="cranes">当前天车目录快照。</param>
+    /// <returns>天车号到有效状态的映射，不可用时为 null。</returns>
+    private Dictionary<int, CraneStatusDto?> ReadIdleCraneStatuses(IReadOnlyList<Crane> cranes)
     {
-        var map = new Dictionary<int, CraneStatusDto?>();
-        foreach (var crane in cranes)
-        {
-            if (!crane.IsEnabled || !crane.IsIdle)
-            {
-                continue;
-            }
-
-            var driver = _driverRegistry.GetCrane(crane.Id);
-            if (driver is null)
-            {
-                map[crane.Id] = null;
-                continue;
-            }
-
-            try
-            {
-                map[crane.Id] = await driver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger.Warn(LogCategory.Scheduling, $"读取天车[{crane.Id}] 状态失败：{ex.Message}");
-                map[crane.Id] = null;
-            }
-        }
-
-        return map;
+        return cranes.Where(c => c.IsEnabled && c.IsIdle)
+            .ToDictionary(c => c.Id, c => _craneStates.GetFreshStatus(c.Id));
     }
 
     /// <summary>任务标识短文本，用于日志。</summary>

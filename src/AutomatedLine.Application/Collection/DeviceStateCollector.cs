@@ -11,7 +11,7 @@ namespace AutomatedLine.Application.Collection;
 /// 每周期**并发**读取所有已装载（数据库启用）的设备，`Task.WhenAll` 全部完成后统一替换缓存。
 /// 单台读取失败/超时**只放弃本台本周期**（写断开空快照），不重试、不报警——
 /// 报警是异常（天车状态机等）的事，设备采集失败不算报警（架构文档 §10.4）。
-/// 天车不做后台采集：运动/到位由 CraneService 方法实时读，其余按需调用 ICraneDriver.ReadStatusAsync。
+/// 天车由独立的 CraneStateCollector 采集；运动和动作确认仍由驱动实时读取。
 /// </summary>
 public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
 {
@@ -107,8 +107,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
         var options = _configService.GetAppOptions().Collection;
         var deviceInterval = Math.Max(50, options.DeviceIntervalMs);
 
-        // 只采集设备。天车不再后台轮询：运动/到位由 CraneService 的方法自身实时读取，
-        // 调度/预检查/冷启动/界面按需调用 ICraneDriver.ReadStatusAsync（见各消费点）。
+        // 地面设备与天车采用不同的发布策略，天车独立循环不能受本轮最慢设备影响。
         await LoopAsync(deviceInterval, cancellationToken).ConfigureAwait(false);
     }
 

@@ -99,7 +99,7 @@ public partial class App : System.Windows.Application
             });
         };
 
-        // 冷启动核对：等采集器跑一轮拿到信号后，检查现场是否有无法关联的内存在制品
+        // 地面设备保留原等待；天车核对自身有界等待共享采集，不再由页面直接读取 PLC。
         var coldStartChecker = _host.Services.GetRequiredService<IColdStartChecker>();
         await Task.Delay(700);
         var blocks = await coldStartChecker.CheckAsync();
@@ -158,6 +158,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<DeviceRegistry>();
         services.AddSingleton<CraneRegistry>();
         services.AddSingleton<DriverRegistry>();
+
+        // 采集与消费者复用同一缓存；查询接口只读，不能触发通信或修改业务运行态。
+        services.AddSingleton(TimeProvider.System);
+        services.AddSingleton<CraneStateStore>();
+        services.AddSingleton<ICraneStateProvider>(sp => sp.GetRequiredService<CraneStateStore>());
+        services.AddSingleton<CraneStateCollector>();
+        services.AddHostedService(sp => sp.GetRequiredService<CraneStateCollector>());
 
         // 配置装载、配置存储（CRUD）与冷启动核对
         services.AddSingleton<IConfigurationLoader, ConfigurationLoader>();

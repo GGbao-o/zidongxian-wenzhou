@@ -8,7 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace AutomatedLine.Ui.ViewModels;
 
 /// <summary>
-/// 天车列表/大屏中的一行。把天车对象与信号快照翻译成界面文本。
+/// 天车列表/大屏中的一行。把天车对象与共享有效信号快照翻译成界面文本。
 /// 大屏悬浮详情（当前任务、工件、source→target）也由此提供。
 /// </summary>
 public partial class CraneRowViewModel : ObservableObject
@@ -88,7 +88,7 @@ public partial class CraneRowViewModel : ObservableObject
     /// </summary>
     /// <param name="crane">天车对象</param>
     /// <param name="deviceLookup">设备查询委托，可为空（列表页可不需要解析设备名）</param>
-    /// <param name="status">按需读到的天车状态（null=未读到/未连接）</param>
+    /// <param name="status">共享有效天车状态；null 表示未采集、失败或过期。</param>
     public CraneRowViewModel(Crane crane, Func<int, DeviceBase?>? deviceLookup = null, CraneStatusDto? status = null)
     {
         Id = crane.Id;
@@ -97,10 +97,10 @@ public partial class CraneRowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 依据天车最新状态（按需读取的结果）刷新展示字段。
+    /// 依据天车运行态和共享有效状态刷新展示字段，不自行触发通信。
     /// </summary>
     /// <param name="crane">天车对象</param>
-    /// <param name="status">按需读到的天车状态（null=未读到/未连接）</param>
+    /// <param name="status">共享有效天车状态；null 表示未采集、失败或过期。</param>
     public void Refresh(Crane crane, CraneStatusDto? status)
     {
         No = crane.No;
@@ -139,7 +139,7 @@ public partial class CraneRowViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 组装多行信号明细（来自按需读到的状态）。
+    /// 组装共享快照的多行信号明细，保持单点未知的展示语义。
     /// </summary>
     /// <param name="status">天车状态</param>
     /// <returns>多行文本</returns>

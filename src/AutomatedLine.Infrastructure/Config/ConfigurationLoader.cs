@@ -131,7 +131,7 @@ public class ConfigurationLoader : IConfigurationLoader
             };
             _craneRegistry.Register(crane);
 
-            // 同样不主动连接：天车 PLC 离线时不影响配置装载，首次操作时再连。
+            // 装载不主动连接：离线不影响装载；后台首次采集或动作请求由驱动自动连接。
             var driver = DriverFactory.CreateCraneDriver(config, _logger, _configService);
             _driverRegistry.RegisterCrane(driver);
             driverCount++;

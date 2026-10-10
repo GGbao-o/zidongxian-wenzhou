@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Collection;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Devices;
@@ -23,8 +24,8 @@ public partial class ScreenViewModel : ObservableObject
     /// <summary>天车注册表。</summary>
     private readonly CraneRegistry _craneRegistry;
 
-    /// <summary>驱动注册表（天车状态按需读取）。</summary>
-    private readonly DriverRegistry _driverRegistry;
+    /// <summary>天车共享状态（查询不触发通信）。</summary>
+    private readonly ICraneStateProvider _craneStates;
 
     /// <summary>设备预约管理器（设备卡片黄=F 被任务预约）。</summary>
     private readonly ResourceReservationManager _reservationManager;
@@ -65,7 +66,7 @@ public partial class ScreenViewModel : ObservableObject
     /// </summary>
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
-    /// <param name="driverRegistry">驱动注册表（天车状态按需读取）</param>
+    /// <param name="craneStates">天车共享状态（查询不触发通信）</param>
     /// <param name="reservationManager">设备预约管理器</param>
     /// <param name="candidateTaskPool">候选任务池</param>
     /// <param name="taskManager">工件任务总表</param>
@@ -73,7 +74,7 @@ public partial class ScreenViewModel : ObservableObject
     public ScreenViewModel(
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
-        DriverRegistry driverRegistry,
+        ICraneStateProvider craneStates,
         ResourceReservationManager reservationManager,
         CandidateTaskPool candidateTaskPool,
         IRuntimeTaskManager taskManager,
@@ -81,7 +82,7 @@ public partial class ScreenViewModel : ObservableObject
     {
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
-        _driverRegistry = driverRegistry;
+        _craneStates = craneStates;
         _reservationManager = reservationManager;
         _candidateTaskPool = candidateTaskPool;
         _taskManager = taskManager;
@@ -111,9 +112,9 @@ public partial class ScreenViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 差量刷新设备卡片（读缓存）与天车卡片（按需读状态）。
+    /// 差量刷新设备与天车卡片，均读取 Application 缓存，不触发 PLC 通信。
     /// </summary>
-    private async Task RefreshCoreAsync()
+    private Task RefreshCoreAsync()
     {
         // 上料架的"当前工件"= 上料架队列队头（未启动/暂停不入队，无队头即无工件）
         var queueHead = _taskManager.Snapshot()
@@ -130,27 +131,9 @@ public partial class ScreenViewModel : ObservableObject
             device => new DeviceRowViewModel(device, _reservationManager.IsReserved, DisplayWorkpiece(device, queueHead)),
             (row, device) => row.Refresh(device, DisplayWorkpiece(device, queueHead)));
 
-        // 天车不再后台采集：刷新时按需读一次状态
+        // 两个页面共用后台快照；读取失败或过期时交给原卡片逻辑显示不可用。
         var craneList = _craneRegistry.Snapshot().OrderBy(c => c.No).ToList();
-        var statuses = new Dictionary<int, CraneStatusDto?>();
-        foreach (var crane in craneList)
-        {
-            var driver = _driverRegistry.GetCrane(crane.Id);
-            if (driver is null)
-            {
-                statuses[crane.Id] = null;
-                continue;
-            }
-
-            try
-            {
-                statuses[crane.Id] = await driver.ReadStatusAsync().ConfigureAwait(true);
-            }
-            catch
-            {
-                statuses[crane.Id] = null;
-            }
-        }
+        var statuses = craneList.ToDictionary(c => c.Id, c => _craneStates.GetFreshStatus(c.Id));
 
         ObservableCollectionSync.SyncById(
             Cranes,
@@ -183,6 +166,8 @@ public partial class ScreenViewModel : ObservableObject
         DispatchedTasksText = dispatched.Count == 0
             ? "无已派发任务"
             : string.Join(Environment.NewLine, dispatched);
+        return Task.CompletedTask;
+
     }
 
     /// <summary>上料架显示队头工件；其余设备返回 null（用设备自身内存工件）。</summary>

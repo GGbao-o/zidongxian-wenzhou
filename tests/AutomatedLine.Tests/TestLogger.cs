@@ -1,26 +1,29 @@
+using System.Collections.Concurrent;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Diagnostics;
 
 namespace AutomatedLine.Tests;
 
 /// <summary>
-/// 测试用日志桩：把日志写进内存列表，供断言或排查。
+/// 测试用日志桩：支持多后台循环并发记录，断言只枚举稳定快照。
 /// </summary>
 public sealed class TestLogger : IAppLogger
 {
-    /// <summary>采集到的日志。</summary>
-    public List<string> Messages { get; } = new();
+    private readonly ConcurrentQueue<string> _messages = new();
+
+    /// <summary>查询时刻的日志快照，后续写入不使正在执行的断言枚举失效。</summary>
+    public IReadOnlyList<string> Messages => _messages.ToArray();
 
     /// <inheritdoc />
-    public void Info(LogCategory category, string message) => Messages.Add($"I:{category}:{message}");
+    public void Info(LogCategory category, string message) => _messages.Enqueue($"I:{category}:{message}");
 
     /// <inheritdoc />
-    public void Warn(LogCategory category, string message) => Messages.Add($"W:{category}:{message}");
+    public void Warn(LogCategory category, string message) => _messages.Enqueue($"W:{category}:{message}");
 
     /// <inheritdoc />
     public void Error(LogCategory category, string message, Exception? exception = null)
-        => Messages.Add($"E:{category}:{message}");
+        => _messages.Enqueue($"E:{category}:{message}");
 
     /// <inheritdoc />
-    public void Sample(LogCategory category, string key, string message) => Messages.Add($"S:{category}:{message}");
+    public void Sample(LogCategory category, string key, string message) => _messages.Enqueue($"S:{category}:{message}");
 }

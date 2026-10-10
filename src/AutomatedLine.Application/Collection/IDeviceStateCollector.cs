@@ -1,8 +1,8 @@
 namespace AutomatedLine.Application.Collection;
 
 /// <summary>
-/// 设备/天车状态采集器（架构文档 §8.2）。
-/// 周期性读取所有驱动信号并整体替换到设备/天车对象上；只采集，不调度、不下发工艺动作。
+/// 地面设备状态采集器（架构文档 §8.2）；天车由独立的 CraneStateCollector 采集。
+/// 周期性读取设备信号并整体替换到设备对象上；只采集，不调度、不下发工艺动作。
 /// </summary>
 public interface IDeviceStateCollector
 {

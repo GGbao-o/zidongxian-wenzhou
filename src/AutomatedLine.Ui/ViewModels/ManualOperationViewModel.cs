@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows.Media;
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Collection;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Workers;
 using AutomatedLine.Domain.Devices;
@@ -25,15 +26,15 @@ public enum CraneConnectionState
     /// <summary>已连接但有报警。</summary>
     Alarm,
 
-    /// <summary>连接失败。</summary>
+    /// <summary>状态不可用，包括未采集、读取失败或快照过期。</summary>
     Failed
 }
 
 /// <summary>
 /// 手动操作页面 ViewModel（仅天车）。
-/// 天车列表来自数据库；选择后点“刷新”读取状态，按钮下发手动命令。
+/// 天车列表来自数据库；所选车状态按秒从共享缓存更新，按钮下发手动命令。
 /// 当前自动搬运从 Worker 内存刷新，人工中止只取消所选车本次搬运并统一弃板。
-/// 连接状态：绿=已连接、黄=天车报警、红=❌连接失败。
+/// 状态徽标：绿=有效且无报警、黄=天车报警、红=状态不可用。
 /// </summary>
 public partial class ManualOperationViewModel : ObservableObject
 {
@@ -42,6 +43,9 @@ public partial class ManualOperationViewModel : ObservableObject
 
     /// <summary>手动操作服务。</summary>
     private readonly IManualOperationService _manualOperationService;
+
+    /// <summary>只查询共享 PLC 状态，页面不再自行读取整车状态。</summary>
+    private readonly ICraneStateProvider _craneStates;
 
     /// <summary>只通过 Worker 中止当前搬运，不取消宿主或直接写 PLC。</summary>
     private readonly CraneWorker _craneWorker;
@@ -82,55 +86,55 @@ public partial class ManualOperationViewModel : ObservableObject
 
     /// <summary>操作/刷新结果提示。</summary>
     [ObservableProperty]
-    private string _message = "选择天车后点击“刷新”读取状态。";
+    private string _message = "选择天车后自动显示最新采集状态。";
 
     // ── 状态显示：显示值/编码器 ──
     /// <summary>X 显示值坐标。</summary>
-    [ObservableProperty] private int _xDisplay;
+    [ObservableProperty] private int? _xDisplay;
     /// <summary>Y 显示值坐标。</summary>
-    [ObservableProperty] private int _yDisplay;
+    [ObservableProperty] private int? _yDisplay;
     /// <summary>Z 显示值坐标。</summary>
-    [ObservableProperty] private int _zDisplay;
+    [ObservableProperty] private int? _zDisplay;
     /// <summary>X 绝对编码器坐标。</summary>
-    [ObservableProperty] private int _xEncoder;
+    [ObservableProperty] private int? _xEncoder;
     /// <summary>Y 绝对编码器坐标。</summary>
-    [ObservableProperty] private int _yEncoder;
+    [ObservableProperty] private int? _yEncoder;
     /// <summary>Z 绝对编码器坐标。</summary>
-    [ObservableProperty] private int _zEncoder;
+    [ObservableProperty] private int? _zEncoder;
 
     // ── 回原点/报警 ──
     /// <summary>X 已回原点。</summary>
-    [ObservableProperty] private bool _xHome;
+    [ObservableProperty] private bool? _xHome;
     /// <summary>Y 已回原点。</summary>
-    [ObservableProperty] private bool _yHome;
+    [ObservableProperty] private bool? _yHome;
     /// <summary>Z 已回原点。</summary>
-    [ObservableProperty] private bool _zHome;
+    [ObservableProperty] private bool? _zHome;
     /// <summary>伺服报警。</summary>
-    [ObservableProperty] private int _servoAlarm;
+    [ObservableProperty] private int? _servoAlarm;
     /// <summary>PLC 伺服指令报警。</summary>
-    [ObservableProperty] private int _plcServoAlarm;
+    [ObservableProperty] private int? _plcServoAlarm;
     /// <summary>PLC 报警。</summary>
-    [ObservableProperty] private int _plcAlarm;
+    [ObservableProperty] private int? _plcAlarm;
 
     // ── 三轴速度显示（读回当前速度参数）──
     /// <summary>X 速度。</summary>
-    [ObservableProperty] private int _xSpeedDisp;
+    [ObservableProperty] private int? _xSpeedDisp;
     /// <summary>X 加速度。</summary>
-    [ObservableProperty] private int _xAccelDisp;
+    [ObservableProperty] private int? _xAccelDisp;
     /// <summary>X 减速度。</summary>
-    [ObservableProperty] private int _xDecelDisp;
+    [ObservableProperty] private int? _xDecelDisp;
     /// <summary>Y 速度。</summary>
-    [ObservableProperty] private int _ySpeedDisp;
+    [ObservableProperty] private int? _ySpeedDisp;
     /// <summary>Y 加速度。</summary>
-    [ObservableProperty] private int _yAccelDisp;
+    [ObservableProperty] private int? _yAccelDisp;
     /// <summary>Y 减速度。</summary>
-    [ObservableProperty] private int _yDecelDisp;
+    [ObservableProperty] private int? _yDecelDisp;
     /// <summary>Z 速度。</summary>
-    [ObservableProperty] private int _zSpeedDisp;
+    [ObservableProperty] private int? _zSpeedDisp;
     /// <summary>Z 加速度。</summary>
-    [ObservableProperty] private int _zAccelDisp;
+    [ObservableProperty] private int? _zAccelDisp;
     /// <summary>Z 减速度。</summary>
-    [ObservableProperty] private int _zDecelDisp;
+    [ObservableProperty] private int? _zDecelDisp;
 
     // ── X 区信号（显示文本）──
     // 用文本而非 bool 的原因：线圈读取失败时值为"未知"，不能显示成 0/False
@@ -195,22 +199,28 @@ public partial class ManualOperationViewModel : ObservableObject
     /// </summary>
     /// <param name="configurationStore">配置存储</param>
     /// <param name="manualOperationService">手动操作服务</param>
+    /// <param name="craneStates">全线共享的有效天车状态</param>
     /// <param name="craneWorker">当前搬运执行器</param>
     /// <param name="ticker">UI 内存状态刷新节拍，不触发 PLC 读取</param>
-    public ManualOperationViewModel(IConfigurationStore configurationStore, IManualOperationService manualOperationService,
+    public ManualOperationViewModel(IConfigurationStore configurationStore, IManualOperationService manualOperationService, ICraneStateProvider craneStates,
         CraneWorker craneWorker, IRuntimeTicker ticker)
     {
         _configurationStore = configurationStore;
         _manualOperationService = manualOperationService;
+        _craneStates = craneStates;
         _craneWorker = craneWorker;
-        ticker.Tick += (_, _) => RefreshCurrentTask();
+        ticker.Tick += (_, _) => { RefreshCurrentTask(); RefreshStatus(); };
         _ = LoadCranesAsync();
         _ = LoadHandshakeDevicesAsync();
     }
 
-    partial void OnSelectedCraneChanged(CraneConfigRowViewModel? value) => RefreshCurrentTask();
+    partial void OnSelectedCraneChanged(CraneConfigRowViewModel? value)
+    {
+        RefreshCurrentTask();
+        RefreshStatus();
+    }
 
-    // 仅刷新 Worker 的执行登记；现有 PLC 状态仍由“刷新”按钮按需读取。
+    // 当前任务仍来自 Worker；PLC 展示数据由独立共享采集提供，不混入执行登记。
     private void RefreshCurrentTask()
     {
         var current = SelectedCrane is null ? null : _craneWorker.GetCurrentExecution(SelectedCrane.Id);
@@ -297,59 +307,65 @@ public partial class ManualOperationViewModel : ObservableObject
             : $"❌ {SelectedHandshakeDevice.Name}：{result.Message}";
     }
 
-    /// <summary>刷新选中天车状态。</summary>
+    /// <summary>立即将最新有效缓存应用到所选天车，不触发 PLC 通信。</summary>
     [RelayCommand]
-    private async Task RefreshAsync()
+    private Task RefreshAsync()
     {
+        RefreshStatus(showMessage: true);
+        return Task.CompletedTask;
+    }
+
+    // 定时刷新不覆盖操作结果；切车、未采集或失效时清空旧值，避免展示另一台车的坐标。
+    private void RefreshStatus(bool showMessage = false)
+    {
+        var status = SelectedCrane is null ? null : _craneStates.GetFreshStatus(SelectedCrane.Id);
+        XDisplay = status?.XDisplay;
+        YDisplay = status?.YDisplay;
+        ZDisplay = status?.ZDisplay;
+        XEncoder = status?.XEncoder;
+        YEncoder = status?.YEncoder;
+        ZEncoder = status?.ZEncoder;
+        XHome = status?.XHomeCompleted;
+        YHome = status?.YHomeCompleted;
+        ZHome = status?.ZHomeCompleted;
+        ServoAlarm = status?.ServoAlarm;
+        PlcServoAlarm = status?.PlcServoAlarm;
+        PlcAlarm = status?.PlcAlarm;
+        XSpeedDisp = status?.XSpeed;
+        XAccelDisp = status?.XAccel;
+        XDecelDisp = status?.XDecel;
+        YSpeedDisp = status?.YSpeed;
+        YAccelDisp = status?.YAccel;
+        YDecelDisp = status?.YDecel;
+        ZSpeedDisp = status?.ZSpeed;
+        ZAccelDisp = status?.ZAccel;
+        ZDecelDisp = status?.ZDecel;
+        X0DrainOpenText = FormatLevel(status?.DrainOpen);
+        X1DrainCloseText = FormatLevel(status?.DrainClose);
+        X2PressureText = FormatLevel(status?.PressureLimit);
+        X3HomeXText = FormatLevel(status?.PhysicalHomeX);
+        X4HomeYText = FormatLevel(status?.PhysicalHomeY);
+        X5HomeZText = FormatLevel(status?.PhysicalHomeZ);
+        X6MagnetizeText = FormatLevel(status?.MagnetizeFeedback);
+        X7DemagnetizeText = FormatLevel(status?.DemagnetizeFeedback);
+        X11HasPlateText = FormatLevel(status?.HasPlate);
+
         if (SelectedCrane is null)
         {
             SetState(CraneConnectionState.Unknown, "请选择天车");
-            return;
+            if (showMessage) Message = "请先选择天车。";
         }
-
-        var status = await _manualOperationService.ReadStatusAsync(SelectedCrane.Id);
-        if (status is null)
+        else if (status is null)
         {
-            SetState(CraneConnectionState.Failed, "❌连接失败");
-            Message = "读取状态失败，请检查 IP / 网络 / PLC。";
-            return;
+            SetState(CraneConnectionState.Failed, "状态不可用");
+            if (showMessage) Message = "尚未采集、读取失败或快照已过期，等待后台采集更新。";
         }
-
-        XDisplay = status.XDisplay;
-        YDisplay = status.YDisplay;
-        ZDisplay = status.ZDisplay;
-        XEncoder = status.XEncoder;
-        YEncoder = status.YEncoder;
-        ZEncoder = status.ZEncoder;
-        XHome = status.XHomeCompleted;
-        YHome = status.YHomeCompleted;
-        ZHome = status.ZHomeCompleted;
-        ServoAlarm = status.ServoAlarm;
-        PlcServoAlarm = status.PlcServoAlarm;
-        PlcAlarm = status.PlcAlarm;
-        XSpeedDisp = status.XSpeed;
-        XAccelDisp = status.XAccel;
-        XDecelDisp = status.XDecel;
-        YSpeedDisp = status.YSpeed;
-        YAccelDisp = status.YAccel;
-        YDecelDisp = status.YDecel;
-        ZSpeedDisp = status.ZSpeed;
-        ZAccelDisp = status.ZAccel;
-        ZDecelDisp = status.ZDecel;
-        // X 区线圈：读到显示"是/否"，单点读取失败显示"—"（不影响其它点位与坐标显示）
-        X0DrainOpenText = FormatLevel(status.DrainOpen);
-        X1DrainCloseText = FormatLevel(status.DrainClose);
-        X2PressureText = FormatLevel(status.PressureLimit);
-        X3HomeXText = FormatLevel(status.PhysicalHomeX);
-        X4HomeYText = FormatLevel(status.PhysicalHomeY);
-        X5HomeZText = FormatLevel(status.PhysicalHomeZ);
-        X6MagnetizeText = FormatLevel(status.MagnetizeFeedback);
-        X7DemagnetizeText = FormatLevel(status.DemagnetizeFeedback);
-        X11HasPlateText = FormatLevel(status.HasPlate);
-
-        SetState(status.HasAlarm ? CraneConnectionState.Alarm : CraneConnectionState.Connected,
-            status.HasAlarm ? "天车报警" : "已连接");
-        Message = "状态已刷新。";
+        else
+        {
+            SetState(status.HasAlarm ? CraneConnectionState.Alarm : CraneConnectionState.Connected,
+                status.HasAlarm ? "天车报警" : "已连接");
+            if (showMessage) Message = "已显示最新有效采集状态。";
+        }
     }
 
     /// <summary>设置三轴绝对速度。</summary>
@@ -440,15 +456,13 @@ public partial class ManualOperationViewModel : ObservableObject
         return await action(SelectedCrane.Id);
     }
 
-    /// <summary>统一处理命令结果：显示消息，并在成功后刷新状态。</summary>
+    /// <summary>统一处理命令结果：保留操作消息，并在成功后同步当前缓存状态。</summary>
     /// <param name="result">结果</param>
-    private async Task FinishAsync(ManualOperationResult result)
+    private Task FinishAsync(ManualOperationResult result)
     {
         Message = result.Message;
-        if (result.Success)
-        {
-            await RefreshAsync();
-        }
+        if (result.Success) RefreshStatus();
+        return Task.CompletedTask;
     }
 
     /// <summary>

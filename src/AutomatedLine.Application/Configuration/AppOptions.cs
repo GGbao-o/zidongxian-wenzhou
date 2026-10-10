@@ -32,7 +32,13 @@ public sealed class CollectionOptions
     /// <summary>设备 PLC 信号采集周期（毫秒）。默认 500ms（架构文档 §8.2）。</summary>
     public int DeviceIntervalMs { get; set; } = 500;
 
-    /// <summary>单次通信请求超时（毫秒）。超时按瞬时故障处理，触发重连重试。</summary>
+    /// <summary>每台天车一轮采集结束后的等待时间（毫秒）；跨车独立采集，默认 500ms。</summary>
+    public int CraneIntervalMs { get; set; } = 500;
+
+    /// <summary>天车快照从读取开始算起的最大可用年龄（毫秒），过期不展示为有效状态、不参与选车；默认 2000ms。</summary>
+    public int CraneSnapshotMaxAgeMs { get; set; } = 2000;
+
+    /// <summary>设备单次通信期限及冷启动等待天车有效快照的上限（毫秒）；天车客户端单次请求仍使用原默认期限。</summary>
     public int CommunicationTimeoutMs { get; set; } = 3000;
 }
 
