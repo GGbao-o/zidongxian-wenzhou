@@ -107,14 +107,14 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         lock (_sync)
         {
             task = _tasks.FirstOrDefault(t => t.Id == taskId);
-            if (task is null || task.Runtime.TaskState != WorkpieceState.Waiting)
+            // 与调度器竞争同一个 Waiting 状态；派发先成功时不能再覆盖归属或清掉排位。
+            if (task is null || !task.Runtime.TryTransition(WorkpieceState.Waiting, WorkpieceState.Paused))
             {
                 return false;
             }
 
-            // 出队：清空顺序号；再次启动会重新入队尾
+            // 仅成功暂停才出队；再次启动仍按原有规则重新入队尾。
             task.Runtime.QueueOrder = 0;
-            task.Runtime.TaskState = WorkpieceState.Paused;
         }
 
         Console.WriteLine($"[RuntimeTaskManager] 暂停任务 {taskId}");
