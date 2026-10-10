@@ -160,6 +160,125 @@ public class CraneStateMachineTests
         Assert.Contains("UnloadDone=0", targetWrites);
     }
 
+    /// <summary>源握手清理尚未完成时保持预约；清理结束或取消后均能释放全部资源。</summary>
+    /// <param name="cancelDuringClear">是否在源握手清理期间取消本次搬运</param>
+    /// <returns>异步验证任务</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Transit_HoldsSourceReservationUntilHandshakeClearEnds(bool cancelDuringClear)
+    {
+        var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 10000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        var blockingDriver = new BlockingHandshakeDriver(h.SourceDriver);
+        h.Drivers.RegisterDevice(blockingDriver);
+        h.CraneDriver.OnAbsoluteMove = (x, token) =>
+        {
+            token.ThrowIfCancellationRequested();
+            if (x == 2000)
+            {
+                // 中转后的目标放料运动到来时，源清理必须已结束且已让出设备。
+                if (h.SourceDriver.Writes.Contains("UnloadDone=0"))
+                {
+                    Assert.False(h.Reservations.IsReserved(h.Source.Id));
+                    Assert.True(h.Reservations.IsReserved(h.Target.Id));
+                    Assert.Equal(new XInterval(1950, 2050), h.Crane.Runtime.LockedInterval);
+                }
+            }
+
+            return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok"));
+        };
+        using var cancellation = new CancellationTokenSource();
+        var flow = h.Machine.RunFlowAsync(h.Crane, task, cancellation.Token);
+        var competitor = Guid.NewGuid();
+        try
+        {
+            await blockingDriver.ClearingStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(h.Reservations.IsReserved(h.Source.Id));
+            Assert.True(h.Reservations.IsReserved(h.Target.Id));
+            Assert.False(h.Reservations.TryReserve(competitor, 99, h.Source.Id), "旧任务清理未结束时，新任务不能取得源设备");
+
+            if (cancelDuringClear)
+            {
+                cancellation.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => flow.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.Equal(WorkpieceState.Discarded, wp.Runtime.TaskState);
+                Assert.Equal(LineState.PausedByFault, h.Line.State);
+            }
+            else
+            {
+                blockingDriver.AllowClear.TrySetResult();
+                await flow.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Contains("DataSentDone=0", h.SourceDriver.Writes);
+                Assert.Contains("LoadDone=0", h.SourceDriver.Writes);
+                Assert.Contains("UnloadDone=0", h.SourceDriver.Writes);
+                Assert.Same(wp, h.Target.CurrentWorkpiece);
+                Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+            }
+
+            Assert.False(h.Reservations.IsReserved(h.Source.Id));
+            Assert.False(h.Reservations.IsReserved(h.Target.Id));
+            Assert.False(h.Row.IsHeld(task.TaskId));
+            Assert.True(h.Reservations.TryReserve(competitor, 99, h.Source.Id));
+        }
+        finally
+        {
+            blockingDriver.AllowClear.TrySetResult();
+            // 即使断言失败也结束本次流程，不遗留仍在等待驱动的测试任务。
+            try { await flow.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            h.Reservations.Release(competitor);
+        }
+    }
+
+    /// <summary>仅延迟首次握手清零，后续写入仍由原有记录驱动处理。</summary>
+    private sealed class BlockingHandshakeDriver : IDeviceDriver
+    {
+        private readonly FakeDeviceDriver _inner;
+
+        /// <summary>通知测试：状态机已经进入源握手清理。</summary>
+        public TaskCompletionSource ClearingStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>允许清零完成，模拟异步通信结束。</summary>
+        public TaskCompletionSource AllowClear { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>包装已有驱动，保留取料及握手写入记录。</summary>
+        /// <param name="inner">记录读写的设备驱动</param>
+        public BlockingHandshakeDriver(FakeDeviceDriver inner) => _inner = inner;
+
+        /// <inheritdoc />
+        public int DeviceId => _inner.DeviceId;
+
+        /// <inheritdoc />
+        public bool IsConnected => _inner.IsConnected;
+
+        /// <inheritdoc />
+        public Task ConnectAsync(CancellationToken cancellationToken = default) => _inner.ConnectAsync(cancellationToken);
+
+        /// <inheritdoc />
+        public Task DisconnectAsync(CancellationToken cancellationToken = default) => _inner.DisconnectAsync(cancellationToken);
+
+        /// <inheritdoc />
+        public Task<IReadOnlyDictionary<string, object?>> ReadAllSignalsAsync(CancellationToken cancellationToken = default)
+            => _inner.ReadAllSignalsAsync(cancellationToken);
+
+        /// <inheritdoc />
+        public async Task WriteSignalAsync(string pointName, object? value, CancellationToken cancellationToken = default)
+        {
+            if (pointName == "DataSentDone" && value is int number && number == 0)
+            {
+                ClearingStarted.TrySetResult();
+                await AllowClear.Task.WaitAsync(cancellationToken);
+            }
+
+            await _inner.WriteSignalAsync(pointName, value, cancellationToken);
+        }
+    }
+
     /// <summary>acquire 失败：路权被占 → 回滚、任务仍 Waiting、未动设备。</summary>
     [Fact]
     public async Task AcquireFails_RollsBack_ToWaiting()

@@ -293,11 +293,11 @@ public sealed class CraneStateMachine
     }
 
     /// <summary>
-    /// 中转：XY→目标上方、释放源预约、路权缩小到车体+目标，并**尽力复位源与目标两侧的握手位**。
+    /// 中转：XY→目标上方、先尽力复位源握手，再释放源预约及缩小路权，最后复位目标握手。
     /// <para>
     /// 清握手位放在这里（而不是取料末尾）的理由：
     /// ① 此刻距"写下 下料完成=1"已隔整段 XY 移动（通常 1~3s），PLC 必然已采到那个 1，**无需额外等待或延时**；
-    /// ② 语义对齐——正好是"与源设备的业务关系结束"（源预约也在同一处释放）。
+    /// ② 源握手复位结束后才释放源预约，避免另一任务取得设备后被旧流程清零。
     /// </para>
     /// **源与目标两侧都清，顺序先源后目标**：
     /// 源侧清掉刚写出的"下料完成"等位；目标侧清掉**上一轮残留**，
@@ -311,17 +311,7 @@ public sealed class CraneStateMachine
         await ctx.MoveAbsoluteAsync(x, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
         ctx.LogStep(target, "中转：已到达目标上方（Z 仍在安全高度）");
 
-        //释放源设备预约 缩小路权
-        ctx.LogStep(target, "中转：释放源设备预约 + 路权缩小到目标车体区间");
-        _reservationManager.ReleaseSource(task.TaskId);
-        var targetInterval = XInterval.FromTask(target.PositionX, target.PositionX, crane.Width);
-        if (_rightOfWayManager.Resize(task.TaskId, targetInterval))
-        {
-            // 大屏读取天车运行态；仅在调整成功后同步，避免显示未实际取得的区间。
-            crane.Runtime.LockedInterval = targetInterval;
-        }
-
-        // 源设备这一轮彻底结束：把它"上位机写入的握手位"复位为 0（双头镗/斜床/研磨机有效，其余空操作）。
+        // 清源握手时继续持有预约，保证旧任务所有源写入结束前不会交给下一任务。
         // 内部逐点容错：清不掉只记警告、不影响本任务（最坏退回"残留 1"的旧行为）。
         ctx.LogStep(source, "中转：复位源设备握手位（双头镗/斜床/研磨机有效，其余无操作；避免残留 1 让下一轮上料收不到上升沿）");
         //
@@ -331,6 +321,16 @@ public sealed class CraneStateMachine
             await _handlers.Get(source.Type)
                 .ClearHandshakeAsync(sourceDriver, source.Name, _logger, cancellationToken)
                 .ConfigureAwait(false);
+        }
+
+        // 源侧异步写入已全部结束，此时让出设备和区间，下一任务才可开始交互。
+        ctx.LogStep(target, "中转：源握手复位结束，释放源设备预约 + 路权缩小到目标车体区间");
+        _reservationManager.ReleaseSource(task.TaskId);
+        var targetInterval = XInterval.FromTask(target.PositionX, target.PositionX, crane.Width);
+        if (_rightOfWayManager.Resize(task.TaskId, targetInterval))
+        {
+            // 大屏读取天车运行态；仅在调整成功后同步，避免显示未实际取得的区间。
+            crane.Runtime.LockedInterval = targetInterval;
         }
 
         // 目标设备：放料前把它"上位机写入的握手位"清零，保证放料阶段每次写 1 都是干净的上升沿
