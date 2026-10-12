@@ -291,6 +291,7 @@ public class CraneWorkerTests
         var h = new Harness();
         h.Handler.OnPick = _ => Task.FromException(new OperationCanceledException("驱动内部超时"));
         var (workpiece, transport) = h.NewTask();
+        h.Line.Start();
 
         await h.Machine.RunFlowAsync(h.Crane, transport, CancellationToken.None);
 
@@ -318,6 +319,7 @@ public class CraneWorkerTests
         };
         var (workpiece, transport) = h.NewTask();
 
+        h.Line.Start();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => h.Machine.RunFlowAsync(h.Crane, transport, cancellation.Token));
 
@@ -482,7 +484,7 @@ public class CraneWorkerTests
                 store.Devices.Add(new DeviceConfigDto { Id = 4, PositionX = 7000, PositionZ = 500 });
             }
             Machine = new CraneStateMachine(Devices, Drivers, Tasks, Row, Reservations, abort,
-                new TransferHandlerRegistry(new[] { Handler }), store, Config, Logger);
+                new TransferHandlerRegistry(new[] { Handler }), store, Config, Line, Logger);
             Worker = new CraneWorker(Cranes, Channels, Machine, Line, Config, abort, Logger);
         }
 

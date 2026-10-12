@@ -1,5 +1,6 @@
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Alarms;
+using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.RightOfWay;
 using AutomatedLine.Application.Runtime;
@@ -48,6 +49,9 @@ public sealed class CraneStateMachine
     /// <summary>配置服务（程序参数）。</summary>
     private readonly IConfigService _configService;
 
+    /// <summary>搬运入口再次核对线路状态，避免出队与暂停之间的窗口导致未开始任务继续动作。</summary>
+    private readonly LineControlService _lineControl;
+
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
@@ -63,6 +67,7 @@ public sealed class CraneStateMachine
     /// <param name="handlers">取放料策略注册表</param>
     /// <param name="configStore">配置存储</param>
     /// <param name="configService">配置服务</param>
+    /// <param name="lineControl">全线共享的线路状态，入口未运行时只回滚分配</param>
     /// <param name="logger">日志</param>
     public CraneStateMachine(
         DeviceRegistry deviceRegistry,
@@ -74,6 +79,7 @@ public sealed class CraneStateMachine
         TransferHandlerRegistry handlers,
         IConfigurationStore configStore,
         IConfigService configService,
+        LineControlService lineControl,
         IAppLogger logger)
     {
         _deviceRegistry = deviceRegistry;
@@ -85,6 +91,7 @@ public sealed class CraneStateMachine
         _handlers = handlers;
         _configStore = configStore;
         _configService = configService;
+        _lineControl = lineControl;
         _logger = logger;
     }
 
@@ -93,7 +100,7 @@ public sealed class CraneStateMachine
     /// <param name="task">搬运任务</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <param name="execution">Worker 的本次执行范围；用于识别人工中止，独立调用时可省略</param>
-    /// <returns>异步搬运任务；普通故障按充磁边界清理，人工中止始终弃板，取消清理后向 Worker 传播</returns>
+    /// <returns>异步搬运任务；入口未运行只回滚分配，普通故障按充磁边界清理，人工中止始终弃板，取消清理后向 Worker 传播</returns>
     public async Task RunFlowAsync(Crane crane, TransportTask task, CancellationToken cancellationToken,
         CraneTaskExecution? execution = null)
     {
@@ -105,6 +112,17 @@ public sealed class CraneStateMachine
         try
         {
             execution?.ThrowIfManualAbortRequested();
+            if (!_lineControl.IsRunning)
+            {
+                phase = "启动检查";
+                // 尚未获取资源或交接工件：只撤回分配，不把正常暂停升级为故障，也不触碰设备引用/PLC。
+                // 先关闭按钮入口再回滚；已接受的人工中止或宿主取消仍进入原异常分支，不能被保留策略吞掉。
+                execution?.Close();
+                cancellationToken.ThrowIfCancellationRequested();
+                execution?.ThrowIfManualAbortRequested();
+                Rollback(crane, task, $"线路未运行（{_lineControl.State}），本次搬运暂不执行");
+                return;
+            }
             var wp = _taskManager.Get(task.WorkpieceRuntimeId)
                      ?? throw new InvalidOperationException("找不到工件任务");
             var source = _deviceRegistry.Get(task.SourceDeviceId)
@@ -259,7 +277,10 @@ public sealed class CraneStateMachine
         return true;
     }
 
-    /// <summary>获取失败回滚（尚未开始搬运）。</summary>
+    /// <summary>尚未开始搬运的分配回滚；用于入口未运行或资源竞争失败，保留设备引用和工件位置/工序/排位。</summary>
+    /// <param name="crane">本次搬运使用的天车。</param>
+    /// <param name="task">需回滚的搬运分配。</param>
+    /// <param name="reason">回滚原因，记录日志但不触发故障报警。</param>
     private void Rollback(Crane crane, TransportTask task, string reason)
     {
         crane.Runtime.LockedInterval = null;

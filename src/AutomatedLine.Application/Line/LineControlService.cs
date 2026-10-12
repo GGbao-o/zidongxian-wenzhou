@@ -14,6 +14,9 @@ public sealed class LineControlService
     /// <summary>并发保护锁。</summary>
     private readonly object _sync = new();
 
+    /// <summary>供生成、调度和各车线程读取的线路状态；volatile保证读写可见性，不代表已进入的流程自动取消。</summary>
+    private volatile LineState _state = LineState.Stopped;
+
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
@@ -30,7 +33,7 @@ public sealed class LineControlService
     public event EventHandler? StateChanged;
 
     /// <summary>当前线路状态。</summary>
-    public LineState State { get; private set; } = LineState.Stopped;
+    public LineState State => _state;
 
     /// <summary>是否处于自动运行（调度与执行器据此推进）。</summary>
     public bool IsRunning => State == LineState.Running;
@@ -64,7 +67,7 @@ public sealed class LineControlService
     {
         lock (_sync)
         {
-            State = state;
+            _state = state;
         }
 
         StateChanged?.Invoke(this, EventArgs.Empty);

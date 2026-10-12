@@ -21,7 +21,7 @@ namespace AutomatedLine.Tests;
 
 /// <summary>
 /// 编排器 RunFlowAsync 集成测试（打桩驱动）：
-/// 正常一条、acquire 失败回滚、充磁前回滚、充磁后中止。
+/// 入口暂停回滚、正常搬运、资源竞争回滚、充磁前保留和充磁后中止。
 /// </summary>
 public class CraneStateMachineTests
 {
@@ -54,7 +54,12 @@ public class CraneStateMachineTests
         public FakeDeviceDriver SourceDriver { get; }
         public FakeDeviceDriver TargetDriver { get; }
 
-        public Harness(DeviceBase source, DeviceBase target, int handshakeTimeoutMs)
+        /// <summary>装配真实状态机和桩驱动；默认启动线路，非运行入口测试可显式保留Stopped。</summary>
+        /// <param name="source">本次搬运源设备。</param>
+        /// <param name="target">本次搬运目标设备。</param>
+        /// <param name="handshakeTimeoutMs">设备握手等待期限，单位毫秒。</param>
+        /// <param name="startLine">是否按正常搬运前提启动线路。</param>
+        public Harness(DeviceBase source, DeviceBase target, int handshakeTimeoutMs, bool startLine = true)
         {
             Source = source;
             Target = target;
@@ -72,7 +77,7 @@ public class CraneStateMachineTests
                 new GrinderHandler(), new MarkerHandler(), new UnloadRackHandler()
             });
 
-            Machine = new CraneStateMachine(Devices, Drivers, Tasks, Row, Reservations, abort, handlers, Store, Config, logger);
+            Machine = new CraneStateMachine(Devices, Drivers, Tasks, Row, Reservations, abort, handlers, Store, Config, Line, logger);
 
             Cranes.Register(Crane);
             Drivers.RegisterCrane(CraneDriver);
@@ -84,6 +89,7 @@ public class CraneStateMachineTests
             Drivers.RegisterDevice(TargetDriver);
             Store.Devices.Add(new DeviceConfigDto { Id = source.Id, PositionX = 1000, PositionY = 0, PositionZ = 500 });
             Store.Devices.Add(new DeviceConfigDto { Id = target.Id, PositionX = 2000, PositionY = 0, PositionZ = 500 });
+            if (startLine) Line.Start();
         }
 
         /// <summary>建一个料架→目标 的搬运任务。</summary>
@@ -101,6 +107,173 @@ public class CraneStateMachineTests
             };
             return (wp, task);
         }
+    }
+
+    /// <summary>出队后发现线路未运行时仅回滚分配，设备引用、快照及工件原位置全部保留。</summary>
+    /// <param name="lineState">进入状态机时的非运行线路状态。</param>
+    /// <param name="onDevice">工件是否已在源设备上，否则仍在上料队列。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(LineState.Stopped, false)]
+    [InlineData(LineState.Stopped, true)]
+    [InlineData(LineState.Paused, false)]
+    [InlineData(LineState.Paused, true)]
+    [InlineData(LineState.PausedByFault, false)]
+    [InlineData(LineState.PausedByFault, true)]
+    public async Task NotRunningAtEntry_RollsBackWithoutChangingDevices(LineState lineState, bool onDevice)
+    {
+        DeviceBase source = onDevice ? new BoringMachine(1, "源双头镗", 1000) : new LoadRack(1, "上料架", 1000);
+        var h = new Harness(source, new BoringMachine(2, "目标双头镗", 2000), 10000,
+            startLine: lineState != LineState.Stopped);
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var sourceSignals = h.Source.Signals;
+        var targetSignals = h.Target.Signals;
+        var (wp, task) = h.NewTask();
+        wp.Runtime.TaskState = WorkpieceState.Assigned;
+        wp.Runtime.CurrentLocation = onDevice ? WorkpieceLocation.AtDevice(source.Id) : WorkpieceLocation.Queue;
+        wp.Runtime.CurrentProcess = onDevice ? ProcessType.Boring : ProcessType.Unknown;
+        wp.Runtime.QueueOrder = 7;
+        h.Source.CurrentWorkpiece = onDevice ? wp : null;
+        var targetWorkpiece = h.Tasks.Add(new WorkpieceInfo { PlateNo = "其他工件" });
+        h.Target.CurrentWorkpiece = targetWorkpiece;
+        h.Crane.Runtime.State = CraneState.Reserved;
+        h.Crane.Runtime.CurrentTask = task;
+        var otherTaskId = Guid.NewGuid();
+        Assert.True(h.Row.TryAcquire(otherTaskId, new XInterval(10000, 11000)));
+        Assert.True(h.Reservations.TryReserve(otherTaskId, 20, 21));
+        if (lineState == LineState.Paused) h.Line.Pause();
+        if (lineState == LineState.PausedByFault) h.Line.EnterFaultPause();
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Equal(lineState, h.Line.State);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Equal(onDevice ? WorkpieceLocation.AtDevice(source.Id) : WorkpieceLocation.Queue, wp.Runtime.CurrentLocation);
+        Assert.Equal(onDevice ? ProcessType.Boring : ProcessType.Unknown, wp.Runtime.CurrentProcess);
+        Assert.Equal(7, wp.Runtime.QueueOrder);
+        Assert.Same(onDevice ? wp : null, h.Source.CurrentWorkpiece);
+        Assert.Same(targetWorkpiece, h.Target.CurrentWorkpiece);
+        Assert.Equal(WorkpieceState.Created, targetWorkpiece.Runtime.TaskState);
+        Assert.Same(sourceSignals, h.Source.Signals);
+        Assert.Same(targetSignals, h.Target.Signals);
+        Assert.True(h.Crane.IsIdle);
+        Assert.Null(h.Crane.CurrentWorkpiece);
+        Assert.Null(h.Crane.Runtime.LockedInterval);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.True(h.Row.IsHeld(otherTaskId));
+        Assert.Single(h.Row.Snapshot());
+        Assert.False(h.Reservations.IsReserved(source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.True(h.Reservations.IsReserved(20));
+        Assert.True(h.Reservations.IsReserved(21));
+        Assert.Empty(h.CraneDriver.Actions);
+        Assert.Empty(h.SourceDriver.Writes);
+        Assert.Empty(h.TargetDriver.Writes);
+        Assert.Empty(h.Alarms.Store.Snapshot());
+    }
+
+    /// <summary>暂停回滚后同一块设备工件仍能在恢复线路、重新派发后完成搬运。</summary>
+    /// <returns>异步验证任务。</returns>
+    [Fact]
+    public async Task PausedAtEntry_SameWorkpieceCanRunAfterResume()
+    {
+        var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), 10000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (wp, task) = h.NewTask();
+        wp.Runtime.TaskState = WorkpieceState.Assigned;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        wp.Runtime.CurrentProcess = ProcessType.Boring;
+        wp.Runtime.QueueOrder = 7;
+        h.Source.CurrentWorkpiece = wp;
+        h.Line.Pause();
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Same(wp, h.Source.CurrentWorkpiece);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Empty(h.CraneDriver.Actions);
+        h.Line.Start();
+        Assert.True(wp.Runtime.TryTransition(WorkpieceState.Waiting, WorkpieceState.Assigned));
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Same(wp, h.Target.CurrentWorkpiece);
+        Assert.Null(h.Source.CurrentWorkpiece);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Target.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Equal(7, wp.Runtime.QueueOrder);
+        Assert.True(h.Crane.IsIdle);
+        Assert.Null(h.Crane.CurrentWorkpiece);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.Empty(h.Alarms.Store.Snapshot());
+    }
+
+    /// <summary>入口未运行时仍优先处理已经接受的人工中止和宿主取消，不能静默保留后返回。</summary>
+    /// <param name="manualAbort">是否人工中止，否则模拟关联的宿主令牌取消。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NotRunningAtEntry_CancellationKeepsOriginalCleanup(bool manualAbort)
+    {
+        var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), 10000);
+        var (wp, task) = h.NewTask();
+        wp.Runtime.TaskState = WorkpieceState.Assigned;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        h.Source.CurrentWorkpiece = wp;
+        using var host = new CancellationTokenSource();
+        await using var execution = new CraneTaskExecution(task, host.Token);
+        if (manualAbort)
+        {
+            // 使用真实执行范围登记中止，不新增公开入口仅为测试绕过 Worker。
+            var request = typeof(CraneTaskExecution).GetMethod("TryRequestManualAbort",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            Assert.Equal(true, request.Invoke(execution, new object[] { (Action)h.Line.EnterFaultPause }));
+        }
+        else
+        {
+            h.Line.Pause();
+            host.Cancel();
+        }
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            h.Machine.RunFlowAsync(h.Crane, task, execution.Token, execution));
+
+        Assert.Equal(manualAbort ? WorkpieceState.Discarded : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Equal(manualAbort ? WorkpieceLocation.Discarded : WorkpieceLocation.AtDevice(h.Source.Id), wp.Runtime.CurrentLocation);
+        Assert.Same(manualAbort ? null : wp, h.Source.CurrentWorkpiece);
+        Assert.True(h.Crane.IsIdle);
+        Assert.Null(h.Crane.CurrentWorkpiece);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
+        Assert.Single(h.Alarms.Store.Snapshot());
+        Assert.Empty(h.CraneDriver.Actions);
+    }
+
+    /// <summary>入口已通过的搬运在后续正常暂停时继续执行，不改变原有在途任务语义。</summary>
+    /// <returns>异步验证任务。</returns>
+    [Fact]
+    public async Task PauseAfterEntry_DoesNotCancelStartedFlow()
+    {
+        var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), 10000);
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.CraneDriver.OnReadHasPlate = h.Line.Pause;
+        var (wp, task) = h.NewTask();
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Equal(LineState.Paused, h.Line.State);
+        Assert.Same(wp, h.Target.CurrentWorkpiece);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Target.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.True(h.Crane.IsIdle);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.Empty(h.Alarms.Store.Snapshot());
     }
 
     /// <summary>正常一条：料架取料 → 双头镗放料 → 释放全部、工件 Waiting、位置在目标。</summary>
