@@ -12,6 +12,16 @@ public sealed class FakeCraneDriver : ICraneDriver
     public CraneStatusDto? Status { get; set; } = new() { HasPlate = true };
 
     private int _statusReadCount;
+    private int _hasPlateReadCount;
+
+    /// <summary>专用X11实际读取次数，区分原位检查与每次补降后的检查。</summary>
+    public int HasPlateReadCount => Volatile.Read(ref _hasPlateReadCount);
+
+    /// <summary>脚本化专用X11结果或异常，验证无板补降不会用完整状态的有板缓存替代。</summary>
+    public Func<CancellationToken, Task<bool>>? OnReadHasPlateAsync { get; set; }
+
+    /// <summary>脚本化相对运动完成或失败，用于验证Z补降和取消边界。</summary>
+    public Func<int, int, int, CancellationToken, Task<CraneCommandResult>>? OnRelativeMove { get; set; }
 
     /// <summary>完整状态实际读取次数，用于验证缓存消费不会重复触发通信。</summary>
     public int StatusReadCount => Volatile.Read(ref _statusReadCount);
@@ -67,7 +77,9 @@ public sealed class FakeCraneDriver : ICraneDriver
     public Task<bool> ReadHasPlateAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        Interlocked.Increment(ref _hasPlateReadCount);
         OnReadHasPlate?.Invoke();
+        if (OnReadHasPlateAsync is not null) return OnReadHasPlateAsync(ct);
         return HasPlateException is null
             ? Task.FromResult(Status?.HasPlate ?? false)
             : Task.FromException<bool>(HasPlateException);
@@ -89,6 +101,7 @@ public sealed class FakeCraneDriver : ICraneDriver
     public Task<CraneCommandResult> MoveRelativeAsync(int dx, int dy, int dz, CancellationToken ct = default)
     {
         Actions.Add($"REL({dx},{dy},{dz})");
+        if (OnRelativeMove is not null) return OnRelativeMove(dx, dy, dz, ct);
         return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok"));
     }
 

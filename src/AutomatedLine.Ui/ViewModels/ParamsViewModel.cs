@@ -126,9 +126,11 @@ public partial class ParamsViewModel : ObservableObject
         crane.Items.Add(IntItem("下压容差(mm)", () => _options.Crane.PressureToleranceMm, v => _options.Crane.PressureToleranceMm = v));
         Categories.Add(crane);
 
-        var stateMachine = new ParamCategoryViewModel("状态机", "握手超时与推进周期");
+        var stateMachine = new ParamCategoryViewModel("状态机", "握手超时、推进周期与取料无板补降");
         stateMachine.Items.Add(IntItem("握手超时(ms)", () => _options.StateMachine.HandshakeTimeoutMs, v => _options.StateMachine.HandshakeTimeoutMs = v));
         stateMachine.Items.Add(IntItem("状态机推进周期(ms)", () => _options.StateMachine.ExecuteIntervalMs, v => _options.StateMachine.ExecuteIntervalMs = v));
+        stateMachine.Items.Add(IntItem("取料无板追加下降次数", () => _options.StateMachine.PickPlateRetryCount, v => _options.StateMachine.PickPlateRetryCount = v));
+        stateMachine.Items.Add(IntItem("取料无板每次下降(mm)", () => _options.StateMachine.PickPlateStepMm, v => _options.StateMachine.PickPlateStepMm = v));
         Categories.Add(stateMachine);
 
         // 斜床搬运参数：每台斜床一份（顶尖距离 / 大孔 / 小孔偏移），保存到 App:Transfer

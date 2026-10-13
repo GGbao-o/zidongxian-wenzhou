@@ -78,6 +78,12 @@ public sealed class StateMachineOptions
 
     /// <summary>天车状态机（Worker）推进周期（毫秒）。</summary>
     public int ExecuteIntervalMs { get; set; } = 500;
+
+    /// <summary>取料位X11明确无板时允许的追加下降次数；不含原位检查，默认3次，0表示不补降。</summary>
+    public int PickPlateRetryCount { get; set; } = 3;
+
+    /// <summary>取料无板每次仅Z轴追加下降的指令距离（mm），必须为正整数；默认5mm。</summary>
+    public int PickPlateStepMm { get; set; } = 5;
 }
 
 /// <summary>日志参数。</summary>

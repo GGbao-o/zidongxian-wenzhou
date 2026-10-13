@@ -562,6 +562,8 @@ public class CraneStateMachineTests
         Assert.False(h.Reservations.IsReserved(h.Source.Id));
         Assert.False(h.Reservations.IsReserved(h.Target.Id));
         Assert.Equal(LineState.PausedByFault, h.Line.State);
+        Assert.Equal(communicationFailure ? 1 : 4, h.CraneDriver.HasPlateReadCount);
+        Assert.Equal(communicationFailure ? 0 : 3, h.CraneDriver.Actions.Count(action => action == "REL(0,0,5)"));
 
         h.CraneDriver.Status = new() { HasPlate = true };
         h.CraneDriver.HasPlateException = null;
@@ -570,6 +572,57 @@ public class CraneStateMachineTests
         Assert.Null(h.Source.CurrentWorkpiece);
         Assert.Same(wp, h.Target.CurrentWorkpiece);
         Assert.Equal(WorkpieceLocation.AtDevice(h.Target.Id), wp.Runtime.CurrentLocation);
+    }
+
+    /// <summary>五类来源共用配置化Z补降，检测到板后才充磁，设备内存交接仍在完整Pick返回后发生。</summary>
+    /// <param name="sourceType">支持取料的源设备类型。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(DeviceType.LoadRack)]
+    [InlineData(DeviceType.BoringMachine)]
+    [InlineData(DeviceType.LatheMachine)]
+    [InlineData(DeviceType.GrinderMachine)]
+    [InlineData(DeviceType.MarkerMachine)]
+    public async Task PlateRetry_AllPickHandlersShareConfiguredDrop(DeviceType sourceType)
+    {
+        DeviceBase source = sourceType switch
+        {
+            DeviceType.LoadRack => new LoadRack(1, "源上料架", 1000),
+            DeviceType.BoringMachine => new BoringMachine(1, "源双头镗", 1000),
+            DeviceType.LatheMachine => new LatheMachine(1, "源斜床", 1000),
+            DeviceType.GrinderMachine => new GrinderMachine(1, "源研磨机", 1000),
+            DeviceType.MarkerMachine => new MarkerMachine(1, "源打号机", 1000),
+            _ => throw new InvalidOperationException("测试设备类型不支持")
+        };
+        var h = new Harness(source, new BoringMachine(2, "目标双头镗", 2000), 10000);
+        h.Config.Options.StateMachine.PickPlateRetryCount = 1;
+        h.Config.Options.StateMachine.PickPlateStepMm = 2;
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true),
+            ("TailstockOpened", true), ("UnloadReleaseDone", true), ("ProcessDone", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.CraneDriver.OnReadHasPlateAsync = _ => Task.FromResult(h.CraneDriver.HasPlateReadCount > 1);
+        var (wp, task) = h.NewTask();
+        if (sourceType != DeviceType.LoadRack)
+        {
+            source.CurrentWorkpiece = wp;
+            wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(source.Id);
+        }
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Equal(LineState.Running, h.Line.State);
+        Assert.Equal(2, h.CraneDriver.HasPlateReadCount);
+        Assert.Equal(1, h.CraneDriver.Actions.Count(action => action == "REL(0,0,2)"));
+        Assert.True(h.CraneDriver.Actions.IndexOf("REL(0,0,2)") < h.CraneDriver.Actions.IndexOf("MAGNET_ON"));
+        Assert.Null(source.CurrentWorkpiece);
+        Assert.Same(wp, h.Target.CurrentWorkpiece);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Target.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.True(h.Crane.IsIdle);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+        Assert.Empty(h.Alarms.Store.Snapshot());
     }
 
     /// <summary>取料已开始调用充磁时，命令失败、触发写入或反馈失败均必须弃板。</summary>

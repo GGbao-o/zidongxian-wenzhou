@@ -174,18 +174,92 @@ public sealed class TransferContext
         }
     }
 
-    /// <summary>取料 Z 到位后等待 500ms，再只读一次 X11；无板或读取失败抛异常，供充磁前恢复。</summary>
+    /// <summary>取料到位后等500ms专用读取X11；明确无板时按配置仅Z补降并重查，全程仍属充磁前。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>有板时完成；无板、通信失败或取消时抛异常</returns>
+    /// <returns>任一次有板时完成；配置非法、次数耗尽、专用读取/运动失败或取消时抛异常。</returns>
     public async Task CheckPlateBeforeMagnetAsync(CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 取料：Z 到位后等待 500ms，单次检查 X11 有板");
-        // 先等待接触信号稳定；不重试，无板时尚未充磁，工件仍留在源设备。
-        await Task.Delay(500, cancellationToken).ConfigureAwait(false);
-        if (!await CraneDriver.ReadHasPlateAsync(cancellationToken).ConfigureAwait(false))
+        var retryCount = Options.StateMachine.PickPlateRetryCount;
+        var stepMm = Options.StateMachine.PickPlateStepMm;
+        var completedDrops = 0;
+        long totalCommandDropMm = 0;
+        var position = "当前位置未知（尚未读取）";
+        var action = "参数检查";
+        try
         {
-            throw new InvalidOperationException($"{Tag} 取料有板检查失败：X11=0，无板，尚未充磁");
+            if (retryCount < 0 || stepMm <= 0)
+                throw new InvalidOperationException($"取料补降配置不合法：追加次数={retryCount}（须>=0），单次下降={stepMm}mm（须>0）");
+
+            _logger.Info(LogCategory.StateMachine,
+                $"{Tag} 取料有板检查开始：最多追加下降{retryCount}次，每次{stepMm}mm，最大累计指令下降{(long)retryCount * stepMm}mm；原位及每次补降后均等待500ms");
+            while (true)
+            {
+                action = "等待信号稳定";
+                _logger.Info(LogCategory.StateMachine,
+                    $"{Tag} 取料：检查第{(long)completedDrops + 1}次前等待500ms，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm");
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                action = "专用读取X11";
+                // 只有专用读取明确返回false才允许继续下降；通信失败不能解释成无板，也不读取缓存判定。
+                var hasPlate = await CraneDriver.ReadHasPlateAsync(cancellationToken).ConfigureAwait(false);
+                action = "读取诊断位置";
+                position = await ReadPlateCheckPositionAsync(cancellationToken).ConfigureAwait(false);
+                var progress = $"已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，{position}";
+                _logger.Info(LogCategory.StateMachine,
+                    $"{Tag} 取料：检查第{(long)completedDrops + 1}次，X11={(hasPlate ? 1 : 0)}，{progress}");
+                if (hasPlate)
+                {
+                    _logger.Info(LogCategory.StateMachine, $"{Tag} 取料有板检查通过：X11=1，{progress}，下一步才开始充磁");
+                    return;
+                }
+                if (completedDrops >= retryCount)
+                {
+                    action = "补降次数耗尽";
+                    throw new InvalidOperationException($"{Tag} 取料有板检查失败：X11=0，{progress}，仍无板，尚未充磁");
+                }
+
+                action = $"第{completedDrops + 1}/{retryCount}次补降";
+                _logger.Warn(LogCategory.StateMachine,
+                    $"{Tag} 取料：X11=0，准备{action}，仅Z相对下降{stepMm}mm，计划累计指令下降{totalCommandDropMm + stepMm}mm；下压前{position}");
+                // 本系统Z正向为下降；只动Z保留源设备XY及斜床Y偏移，复用原运动超时/下压判定。
+                await MoveRelativeAsync(0, 0, stepMm, cancellationToken).ConfigureAwait(false);
+                completedDrops++;
+                totalCommandDropMm += stepMm;
+                // 累计的是成功执行的指令距离，不把到位容差或下压限位结果冒充实测下降量。
+                _logger.Info(LogCategory.StateMachine,
+                    $"{Tag} 取料：补降运动完成，已完成补降{completedDrops}/{retryCount}次，本次指令下降{stepMm}mm，累计指令下降{totalCommandDropMm}mm；等待稳定后重读X11和实际位置");
+            }
         }
+        catch (OperationCanceledException ex)
+        {
+            _logger.Warn(LogCategory.StateMachine,
+                $"{Tag} 取料有板检查中止：{action}，执行令牌已取消={cancellationToken.IsCancellationRequested}，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，最后读取的{position}，原因：{ex.Message}");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(LogCategory.StateMachine,
+                $"{Tag} 取料有板检查失败：{action}，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，最后读取的{position}，尚未充磁，原因：{ex.Message}", ex);
+            throw;
+        }
+    }
+
+    // 位置只用于诊断：实时读数不可用时明确记未知，不让附加日志读取改变专用X11判据或捏造零坐标。
+    private async Task<string> ReadPlateCheckPositionAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var status = await CraneDriver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (status is not null)
+                return $"当前显示坐标X={status.XDisplay} Y={status.YDisplay} Z={status.ZDisplay}；编码器X={status.XEncoder} Y={status.YEncoder} Z={status.ZEncoder}";
+            _logger.Warn(LogCategory.StateMachine, $"{Tag} 取料位置日志：实时状态不可用，当前位置记未知，X11仍以专用读取为准");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.StateMachine, $"{Tag} 取料位置日志读取失败，当前位置记未知：{ex.Message}");
+        }
+        return "当前位置未知（实时状态不可用）";
     }
 
     /// <summary>轮询天车状态直到满足条件；超时/报警抛异常。</summary>

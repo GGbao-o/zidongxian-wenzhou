@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Application.Transfer;
@@ -10,10 +11,10 @@ using AutomatedLine.Tests.Fakes;
 
 namespace AutomatedLine.Tests;
 
-/// <summary>验证各源设备在取料下降后等待信号稳定，并以单次 X11 读取作为充磁前条件。</summary>
+/// <summary>验证各源设备在原位和每次补降后等待稳定，专用X11确认成功前不充磁、不写后续握手。</summary>
 public class PickPlateCheckTests
 {
-    /// <summary>五种源设备都只读一次 X11；无板和通信失败不能开始充磁或进行后续握手。</summary>
+    /// <summary>五种来源原位有板即可充磁，无板至补降耗尽/通信失败不能充磁或进行后续握手。</summary>
     /// <param name="sourceKind">源设备类型序号</param>
     /// <param name="result">有板、无板或读取失败</param>
     /// <returns>异步验证任务</returns>
@@ -33,7 +34,7 @@ public class PickPlateCheckTests
     [InlineData(2, "communication")]
     [InlineData(3, "communication")]
     [InlineData(4, "communication")]
-    public async Task PickChecksOnceAfterSettlingBeforeMagnet(int sourceKind, string result)
+    public async Task PickChecksAfterEachSettlingBeforeMagnet(int sourceKind, string result)
     {
         (DeviceBase Source, ITransferHandler Handler) selection = sourceKind switch
         {
@@ -64,11 +65,23 @@ public class PickPlateCheckTests
             drivers, store, options, new TestLogger());
         var reads = 0;
         var elapsed = Stopwatch.StartNew();
+        driver.OnRelativeMove = (dx, dy, dz, _) =>
+        {
+            if (dz > 0)
+            {
+                Assert.Equal(0, dx);
+                Assert.Equal(0, dy);
+                Assert.Equal(options.StateMachine.PickPlateStepMm, dz);
+                elapsed.Restart(); // 每次补降后也必须重新等待稳定，不能只在原位等一次。
+            }
+            return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, "到位"));
+        };
         driver.OnReadHasPlate = () =>
         {
             reads++;
             Assert.True(elapsed.ElapsedMilliseconds >= 490);
-            Assert.Equal(2, driver.Actions.Count); // XY 到源上方、Z 到取料位，尚未充磁。
+            Assert.Equal(2, driver.Actions.Count(action => action.StartsWith("MOVE(")));
+            Assert.Equal(reads - 1, driver.Actions.Count(action => action == "REL(0,0,5)"));
             Assert.False(ctx.MagnetCommandStarted);
         };
 
@@ -91,6 +104,6 @@ public class PickPlateCheckTests
             Assert.DoesNotContain("MAGNET_ON", driver.Actions);
             Assert.Empty(deviceDriver.Writes);
         }
-        Assert.Equal(1, reads);
+        Assert.Equal(result == "empty" ? 4 : 1, reads);
     }
 }
