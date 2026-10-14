@@ -33,13 +33,9 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [ObservableProperty]
     private double _length;
 
-    /// <summary>左堵厚。</summary>
+    /// <summary>堵厚原始录入值，与双头镗实际下发的整数Word分开保存。</summary>
     [ObservableProperty]
-    private double _leftPlugThickness;
-
-    /// <summary>右堵厚。</summary>
-    [ObservableProperty]
-    private double _rightPlugThickness;
+    private double _plugThickness;
 
     /// <summary>堵孔尺寸：只能 70（小孔）或 100（大孔）。</summary>
     [ObservableProperty]
@@ -48,14 +44,6 @@ public partial class AddWorkpieceViewModel : ObservableObject
     /// <summary>打印内容。</summary>
     [ObservableProperty]
     private string _printContent = string.Empty;
-
-    /// <summary>内孔锥度。</summary>
-    [ObservableProperty]
-    private double _innerHoleTaper;
-
-    /// <summary>圆角大小。</summary>
-    [ObservableProperty]
-    private double _filletSize;
 
     /// <summary>斜床工艺（写入斜床宏 #909）：1~10。</summary>
     [ObservableProperty]
@@ -87,12 +75,9 @@ public partial class AddWorkpieceViewModel : ObservableObject
         SerialNo = info.SerialNo.ToString();
         Diameter = info.Diameter;
         Length = info.Length;
-        LeftPlugThickness = info.LeftPlugThickness;
-        RightPlugThickness = info.RightPlugThickness;
+        PlugThickness = info.PlugThickness;
         PlugHole = info.PlugHole;
         PrintContent = info.PrintContent;
-        InnerHoleTaper = info.InnerHoleTaper;
-        FilletSize = info.FilletSize;
         LatheMachiningMode = info.LatheMachiningMode;
     }
 
@@ -108,12 +93,9 @@ public partial class AddWorkpieceViewModel : ObservableObject
         SerialNo = int.TryParse(SerialNo.Trim(), out var serialNo) ? serialNo : 0,
         Diameter = Diameter,
         Length = Length,
-        LeftPlugThickness = LeftPlugThickness,
-        RightPlugThickness = RightPlugThickness,
+        PlugThickness = PlugThickness,
         PlugHole = PlugHole,
         PrintContent = PrintContent.Trim(),
-        InnerHoleTaper = InnerHoleTaper,
-        FilletSize = FilletSize,
         LatheMachiningMode = LatheMachiningMode
     };
 

@@ -128,7 +128,7 @@ public class CraneStateMachineTests
         var h = new Harness(source, new BoringMachine(2, "目标双头镗", 2000), 10000,
             startLine: lineState != LineState.Stopped);
         h.Source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         var sourceSignals = h.Source.Signals;
         var targetSignals = h.Target.Signals;
         var (wp, task) = h.NewTask();
@@ -181,8 +181,8 @@ public class CraneStateMachineTests
     public async Task PausedAtEntry_SameWorkpieceCanRunAfterResume()
     {
         var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), 10000);
-        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("UnloadReleaseDone", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         var (wp, task) = h.NewTask();
         wp.Runtime.TaskState = WorkpieceState.Assigned;
         wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
@@ -263,7 +263,7 @@ public class CraneStateMachineTests
     {
         var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), 10000);
         h.Source.Signals = TestSignals.Of(("HasMaterial", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         h.CraneDriver.OnReadHasPlate = h.Line.Pause;
         var (wp, task) = h.NewTask();
 
@@ -284,7 +284,7 @@ public class CraneStateMachineTests
     {
         var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), handshakeTimeoutMs: 10000);
         h.Source.Signals = TestSignals.Of(("HasMaterial", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         var (wp, task) = h.NewTask();
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
@@ -311,7 +311,7 @@ public class CraneStateMachineTests
     {
         var h = new Harness(new LatheMachine(3, "斜床1", 1000), new BoringMachine(2, "双头镗", 2000), handshakeTimeoutMs: 10000);
         h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("TailstockOpened", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         var (_, task) = h.NewTask();
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
@@ -344,8 +344,8 @@ public class CraneStateMachineTests
     public async Task Transit_HoldsSourceReservationUntilHandshakeClearEnds(bool cancelDuringClear)
     {
         var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 10000);
-        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("UnloadReleaseDone", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         var (wp, task) = h.NewTask();
         h.Source.CurrentWorkpiece = wp;
         wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
@@ -498,7 +498,7 @@ public class CraneStateMachineTests
     public async Task BeforeMagnet_PreservesSourceWorkpiece_AndCanRetry()
     {
         var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         var (wp, task) = h.NewTask();
         h.Source.CurrentWorkpiece = wp;
         wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
@@ -519,7 +519,7 @@ public class CraneStateMachineTests
         Assert.False(h.Reservations.IsReserved(h.Target.Id));
         Assert.Equal(LineState.PausedByFault, h.Line.State);
 
-        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("UnloadReleaseDone", true));
         h.Line.Start();
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
 
@@ -538,8 +538,8 @@ public class CraneStateMachineTests
     public async Task PlateCheckFailure_PreservesSourceAndCanRetry(bool communicationFailure)
     {
         var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
-        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("UnloadReleaseDone", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         h.CraneDriver.Status = new() { HasPlate = false };
         h.CraneDriver.HasPlateException = communicationFailure ? new TimeoutException("X11 读取超时") : null;
         var (wp, task) = h.NewTask();
@@ -601,7 +601,7 @@ public class CraneStateMachineTests
         h.Config.Options.StateMachine.PickPlateStepMm = 2;
         h.Source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true),
             ("TailstockOpened", true), ("UnloadReleaseDone", true), ("ProcessDone", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         h.CraneDriver.OnReadHasPlateAsync = _ => Task.FromResult(h.CraneDriver.HasPlateReadCount > 1);
         var (wp, task) = h.NewTask();
         if (sourceType != DeviceType.LoadRack)
@@ -638,7 +638,7 @@ public class CraneStateMachineTests
     public async Task PickMagnetFailure_DiscardsAfterCallingMagnet(string failure)
     {
         var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
-        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("UnloadReleaseDone", true));
         var (wp, task) = h.NewTask();
         h.Source.CurrentWorkpiece = wp;
         wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
@@ -682,8 +682,8 @@ public class CraneStateMachineTests
     public async Task MovementFailure_PreservesBeforeMagnet_DiscardsEvenAfterDemagnet(bool afterPlace)
     {
         var h = new Harness(new BoringMachine(1, "源双头镗", 1000), new BoringMachine(2, "目标双头镗", 2000), handshakeTimeoutMs: 0);
-        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
-        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true), ("UnloadReleaseDone", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
         h.CraneDriver.FailAbsoluteMoveX = afterPlace ? 0 : 1000;
         var (wp, task) = h.NewTask();
         h.Source.CurrentWorkpiece = wp;
@@ -756,6 +756,41 @@ public class CraneStateMachineTests
         Assert.False(h.Row.IsHeld(task.TaskId));
         Assert.False(h.Reservations.IsReserved(source.Id));
         Assert.False(h.Reservations.IsReserved(target.Id));
+    }
+
+    /// <summary>双头镗新增卡钳等待失败仍进入充磁后弃板，资源及内存引用由原协调器清理。</summary>
+    /// <param name="pick">卡钳松开发生于取料，夹紧发生于放料。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BoringFeedbackFailure_UsesExistingDiscardCleanup(bool pick)
+    {
+        DeviceBase source = pick ? new BoringMachine(1, "源双头镗", 1000) : new LoadRack(1, "上料架", 1000);
+        DeviceBase target = pick ? new UnloadRack(2, "下料架", 2000) : new BoringMachine(2, "目标双头镗", 2000);
+        var h = new Harness(source, target, 0);
+        source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true), ("UnloadReleaseDone", false));
+        target.Signals = TestSignals.Of(("HasMaterial", false), ("RequestData", true), ("RequestLoad", true), ("LoadLockDone", false));
+        var (wp, task) = h.NewTask();
+        if (pick)
+        {
+            source.CurrentWorkpiece = wp;
+            wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(source.Id);
+        }
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Equal(WorkpieceState.Discarded, wp.Runtime.TaskState);
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
+        Assert.Null(source.CurrentWorkpiece);
+        Assert.Null(target.CurrentWorkpiece);
+        Assert.Null(h.Crane.CurrentWorkpiece);
+        Assert.True(h.Crane.IsIdle);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(source.Id));
+        Assert.False(h.Reservations.IsReserved(target.Id));
+        Assert.DoesNotContain("MAGNET_OFF", h.CraneDriver.Actions);
+        Assert.DoesNotContain(pick ? "UnloadDone=1" : "LoadDone=1", (pick ? h.SourceDriver : h.TargetDriver).Writes);
     }
 
     /// <summary>充磁后异常（目标未就绪）：Abort 弃板 + 暂停线路 + 释放全部。</summary>

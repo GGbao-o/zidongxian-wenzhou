@@ -41,10 +41,7 @@ public class RuntimeTaskManagerTests
             Length = 800,
             PlugHole = 100,
             PrintContent = "X",
-            InnerHoleTaper = 1.5,
-            FilletSize = 2.5,
-            LeftPlugThickness = 3,
-            RightPlugThickness = 4,
+            PlugThickness = 12.7,
             LatheMachiningMode = 7
         };
 
@@ -54,6 +51,7 @@ public class RuntimeTaskManagerTests
         Assert.Equal(originalId, task.Id);
         Assert.Equal(120, task.Info.Diameter);
         Assert.Equal(800, task.Info.Length);
+        Assert.Equal(12.7, task.Info.PlugThickness);
         Assert.Equal(7, task.Info.LatheMachiningMode);
         Assert.Equal(WorkpieceState.Created, task.Runtime.TaskState);
     }

@@ -157,9 +157,8 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
     /// <param name="info">工件数据</param>
     /// <returns>摘要文本</returns>
     private static string Describe(WorkpieceInfo info)
-        => $"直径={info.Diameter} 长度={info.Length} 左堵厚={info.LeftPlugThickness} 右堵厚={info.RightPlugThickness} " +
-           $"堵孔={info.PlugHole} 打印内容={info.PrintContent} 内孔锥度={info.InnerHoleTaper} " +
-           $"圆角={info.FilletSize} 斜床工艺={info.LatheMachiningMode}";
+        => $"直径={info.Diameter} 长度={info.Length} 堵厚={info.PlugThickness} " +
+           $"堵孔={info.PlugHole} 打印内容={info.PrintContent} 斜床工艺={info.LatheMachiningMode}";
 
     /// <summary>任务标识短文本，用于日志。</summary>
     /// <param name="taskId">任务标识</param>

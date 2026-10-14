@@ -30,13 +30,9 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private double _length;
 
-    /// <summary>左堵厚。</summary>
+    /// <summary>堵厚原始录入值，供主表显示。</summary>
     [ObservableProperty]
-    private double _leftPlugThickness;
-
-    /// <summary>右堵厚。</summary>
-    [ObservableProperty]
-    private double _rightPlugThickness;
+    private double _plugThickness;
 
     /// <summary>堵孔文本（70=小孔 / 100=大孔）。</summary>
     [ObservableProperty]
@@ -45,14 +41,6 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     /// <summary>打印内容。</summary>
     [ObservableProperty]
     private string _printContent = string.Empty;
-
-    /// <summary>内孔锥度。</summary>
-    [ObservableProperty]
-    private double _innerHoleTaper;
-
-    /// <summary>圆角大小。</summary>
-    [ObservableProperty]
-    private double _filletSize;
 
     /// <summary>斜床工艺文本（写入斜床宏 #909，取值 1~10）。</summary>
     [ObservableProperty]
@@ -128,8 +116,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         SerialNo = info.SerialNo.ToString();
         Diameter = info.Diameter;
         Length = info.Length;
-        LeftPlugThickness = info.LeftPlugThickness;
-        RightPlugThickness = info.RightPlugThickness;
+        PlugThickness = info.PlugThickness;
         PlugHoleText = info.PlugHole switch
         {
             70 => "70（小孔）",
@@ -137,8 +124,6 @@ public partial class WorkpieceTaskViewModel : ObservableObject
             _ => info.PlugHole.ToString()
         };
         PrintContent = info.PrintContent;
-        InnerHoleTaper = info.InnerHoleTaper;
-        FilletSize = info.FilletSize;
         LatheMachiningModeText = info.LatheMachiningMode.ToString();
         ProcessText = ProcessToText(runtime.CurrentProcess);
         // QueueOrderText（入线顺序=上料架队列排位）由主 ViewModel 按当前队列统一计算后写入，见 MainViewModel.RefreshTasks

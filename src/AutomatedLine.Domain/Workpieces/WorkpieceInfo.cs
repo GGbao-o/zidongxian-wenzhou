@@ -22,23 +22,14 @@ public sealed class WorkpieceInfo
     /// <summary>直径。用于目标设备加工范围匹配。</summary>
     public double Diameter { get; init; }
 
-    /// <summary>左堵厚。</summary>
-    public double LeftPlugThickness { get; init; }
-
-    /// <summary>右堵厚。</summary>
-    public double RightPlugThickness { get; init; }
+    /// <summary>堵厚原始录入值；双头镗下发时舍入为整数Word，界面仍保留录入的小数。</summary>
+    public double PlugThickness { get; init; }
 
     /// <summary>堵孔尺寸：**只能 70 / 100**，70=小孔、100=大孔。</summary>
     public int PlugHole { get; init; }
 
     /// <summary>打印内容。</summary>
     public string PrintContent { get; init; } = string.Empty;
-
-    /// <summary>内孔锥度。</summary>
-    public double InnerHoleTaper { get; init; }
-
-    /// <summary>圆角大小。</summary>
-    public double FilletSize { get; init; }
 
     /// <summary>斜床工艺最小值。</summary>
     public const int LatheMachiningModeMin = 1;

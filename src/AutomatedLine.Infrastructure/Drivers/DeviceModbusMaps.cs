@@ -10,25 +10,25 @@ namespace AutomatedLine.Infrastructure.Drivers;
 /// </summary>
 public static class DeviceModbusMaps
 {
-    /// <summary>双头镗点位表（保持寄存器，FC03 读 / FC06 写；长度原值、其余×100）。</summary>
+    /// <summary>双头镗五个握手输入/五个输出；仅下发板长、外径、堵厚三个Word，外径倍率10。</summary>
     /// <returns>点位表</returns>
     public static IReadOnlyList<ModbusPoint> Boring() => new List<ModbusPoint>
     {
         // 读：握手输入
         new("RequestData", ModbusArea.HoldingRegister, BoringMachineAddress.RequestData, false, true),
         new("RequestLoad", ModbusArea.HoldingRegister, BoringMachineAddress.RequestLoad, false, true),
+        new("LoadLockDone", ModbusArea.HoldingRegister, BoringMachineAddress.LoadLockDone, false, true),
         new("RequestUnload", ModbusArea.HoldingRegister, BoringMachineAddress.RequestUnload, false, true),
+        new("UnloadReleaseDone", ModbusArea.HoldingRegister, BoringMachineAddress.UnloadReleaseDone, false, true),
         // 写：加工参数
-        new("Length", ModbusArea.HoldingRegister, BoringMachineAddress.Length, true, false, 1),
-        new("Diameter", ModbusArea.HoldingRegister, BoringMachineAddress.Diameter, true, false, 100),
-        new("LeftPlugThickness", ModbusArea.HoldingRegister, BoringMachineAddress.LeftPlugThickness, true, false, 100),
-        new("RightPlugThickness", ModbusArea.HoldingRegister, BoringMachineAddress.RightPlugThickness, true, false, 100),
-        new("InnerHoleTaper", ModbusArea.HoldingRegister, BoringMachineAddress.InnerHoleTaper, true, false, 100),
-        new("BorePlug", ModbusArea.HoldingRegister, BoringMachineAddress.BorePlug, true, false, 100),
-        new("FilletSize", ModbusArea.HoldingRegister, BoringMachineAddress.FilletSize, true, false, 100),
+        new("Length", ModbusArea.HoldingRegister, BoringMachineAddress.Length, true, false, 1, RoundViaInt32: true),
+        new("Diameter", ModbusArea.HoldingRegister, BoringMachineAddress.Diameter, true, false, 10, RoundViaInt32: true),
+        new("PlugThickness", ModbusArea.HoldingRegister, BoringMachineAddress.PlugThickness, true, false, 1, RoundViaInt32: true),
         // 写：握手输出
         new("DataSentDone", ModbusArea.HoldingRegister, BoringMachineAddress.DataSentDone, true, true),
+        new("LoadInPlace", ModbusArea.HoldingRegister, BoringMachineAddress.LoadInPlace, true, true),
         new("LoadDone", ModbusArea.HoldingRegister, BoringMachineAddress.LoadDone, true, true),
+        new("UnloadInPlace", ModbusArea.HoldingRegister, BoringMachineAddress.UnloadInPlace, true, true),
         new("UnloadDone", ModbusArea.HoldingRegister, BoringMachineAddress.UnloadDone, true, true)
     };
 

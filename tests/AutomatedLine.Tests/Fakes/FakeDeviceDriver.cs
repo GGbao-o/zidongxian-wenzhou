@@ -11,6 +11,9 @@ public sealed class FakeDeviceDriver : IDeviceDriver
     /// <summary>写入记录。</summary>
     public List<string> Writes { get; } = new();
 
+    /// <summary>脚本化写入时机或故障，用于核对到位通知、反馈等待与后续动作的顺序。</summary>
+    public Func<string, object?, CancellationToken, Task>? OnWrite { get; set; }
+
     /// <summary>构造函数。</summary>
     /// <param name="deviceId">设备号</param>
     public FakeDeviceDriver(int deviceId) => DeviceId = deviceId;
@@ -32,10 +35,10 @@ public sealed class FakeDeviceDriver : IDeviceDriver
         => Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>(Signals));
 
     /// <inheritdoc />
-    public Task WriteSignalAsync(string pointName, object? value, CancellationToken ct = default)
+    public async Task WriteSignalAsync(string pointName, object? value, CancellationToken ct = default)
     {
         Writes.Add($"{pointName}={value}");
+        if (OnWrite is not null) await OnWrite(pointName, value, ct);
         Signals[pointName] = value;
-        return Task.CompletedTask;
     }
 }

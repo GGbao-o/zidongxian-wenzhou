@@ -31,8 +31,9 @@ public enum ModbusArea
 /// <param name="IsBool">是否为布尔语义（寄存器按 0/1 判定）</param>
 /// <param name="Scale">工程值→原始值倍率（如 ×100 填 100；布尔/整数填 1）</param>
 /// <param name="InvertDiscreteInput">是否反转FC02离散输入；下料架允许放板信号需转换为HasMaterial，其他点默认不反转</param>
+/// <param name="RoundViaInt32">是否按协议先Convert.ToInt32再转Word；双头镗三参数启用，其他设备保持原换算</param>
 public sealed record ModbusPoint(string Name, ModbusArea Area, int Address, bool Writable, bool IsBool, double Scale = 1,
-    bool InvertDiscreteInput = false);
+    bool InvertDiscreteInput = false, bool RoundViaInt32 = false);
 
 /// <summary>
 /// 通用 Modbus 设备驱动（双头镗/研磨机/打号机/料架共用）。
@@ -135,10 +136,14 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
                 await _client.WriteCoilAsync(point.Address, ToBool(value), cancellationToken).ConfigureAwait(false);
                 break;
             case ModbusArea.HoldingRegister:
-                var raw = point.IsBool
-                    ? (ushort)(ToBool(value) ? 1 : 0)
-                    : (ushort)Math.Round(ToDouble(value) * point.Scale);
+                var raw = ToRegisterWord(point, value);
                 await _client.WriteRegisterAsync(point.Address, raw, cancellationToken).ConfigureAwait(false);
+                if (point.RoundViaInt32)
+                {
+                    _logger.Info(LogCategory.Communication,
+                        $"设备[{DeviceId}] FC06写 {point.Name}，PDU={point.Address}，录入={value}，倍率={point.Scale}，Word={raw} 成功");
+                    return;
+                }
                 break;
             default:
                 throw new NotSupportedException($"设备[{DeviceId}] 点名 {pointName} 所在区域不可写");
@@ -167,6 +172,15 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
             default:
                 return null;
         }
+    }
+
+    /// <summary>按点位协议编码单Word，保留原录入值用于日志和后续工序。</summary>
+    private static ushort ToRegisterWord(ModbusPoint point, object? value)
+    {
+        if (point.IsBool) return (ushort)(ToBool(value) ? 1 : 0);
+        var scaled = ToDouble(value) * point.Scale;
+        // 双头镗明确要求Convert.ToInt32（.5取偶数）后转Word；以点位选择，不改变其他设备的参数编码。
+        return point.RoundViaInt32 ? (ushort)Convert.ToInt32(scaled) : (ushort)Math.Round(scaled);
     }
 
     /// <summary>值转布尔。</summary>

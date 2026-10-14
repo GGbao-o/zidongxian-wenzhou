@@ -63,7 +63,7 @@ public class TransferFlowTests
         var target = new BoringMachine(2, "双头镗", 2000);
         var wp = new WorkpieceTask(new WorkpieceInfo { Diameter = 100, Length = 700 });
         var ctx = BuildContext(out var craneDriver, out _, out var targetDriver, source, target, wp);
-        target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true));
 
         await new BoringHandler().PlaceAsync(ctx, target, CancellationToken.None);
 
