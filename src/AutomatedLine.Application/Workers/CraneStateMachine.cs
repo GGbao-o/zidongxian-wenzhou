@@ -334,7 +334,7 @@ public sealed class CraneStateMachine
 
         // 清源握手时继续持有预约，保证旧任务所有源写入结束前不会交给下一任务。
         // 内部逐点容错：清不掉只记警告、不影响本任务（最坏退回"残留 1"的旧行为）。
-        ctx.LogStep(source, "中转：复位源设备握手位（双头镗/斜床/研磨机有效，其余无操作；避免残留 1 让下一轮上料收不到上升沿）");
+        ctx.LogStep(source, "中转：复位源设备握手位（双头镗/斜床/研磨机/打号机有效，料架无操作；避免残留 1 让下一轮上料收不到上升沿）");
         //
         if (_driverRegistry.GetDevice(source.Id) is { } sourceDriver)
         {
@@ -355,7 +355,7 @@ public sealed class CraneStateMachine
         }
 
         // 目标设备：放料前把它"上位机写入的握手位"清零，保证放料阶段每次写 1 都是干净的上升沿
-        // （同样只对双头镗/斜床/研磨机有效；打号机、下料架为空操作）。
+        // （对双头镗/斜床/研磨机/打号机有效；上料架、下料架为空操作）。
         // 顺序：先清源（下料完成已发出、PLC 已采到）→ 再清目标（清上一轮残留，为即将到来的上料做准备）。
         ctx.LogStep(target, "中转：复位目标设备握手位（清上一轮残留，保证上料写 1 是干净上升沿）");
         if (_driverRegistry.GetDevice(target.Id) is { } targetDriver)

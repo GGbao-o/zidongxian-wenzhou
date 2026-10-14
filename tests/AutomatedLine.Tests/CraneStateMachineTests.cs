@@ -93,7 +93,9 @@ public class CraneStateMachineTests
         }
 
         /// <summary>建一个料架→目标 的搬运任务。</summary>
-        public (WorkpieceTask Wp, TransportTask Task) NewTask()
+        /// <param name="targetProcess">本次搬运的目标工序。</param>
+        /// <returns>工件及其搬运任务。</returns>
+        public (WorkpieceTask Wp, TransportTask Task) NewTask(ProcessType targetProcess = ProcessType.Boring)
         {
             var wp = Tasks.Add(new WorkpieceInfo { Diameter = 100, Length = 700 });
             var task = new TransportTask
@@ -103,7 +105,7 @@ public class CraneStateMachineTests
                 TargetDeviceId = Target.Id,
                 SourceX = Source.PositionX,
                 TargetX = Target.PositionX,
-                TargetProcess = ProcessType.Boring
+                TargetProcess = targetProcess
             };
             return (wp, task);
         }
@@ -708,6 +710,52 @@ public class CraneStateMachineTests
         Assert.False(h.Reservations.IsReserved(h.Source.Id));
         Assert.False(h.Reservations.IsReserved(h.Target.Id));
         Assert.Equal(LineState.PausedByFault, h.Line.State);
+    }
+
+    /// <summary>真实中转按源/目标角色复位打号机握手，取放完成信号和后续内存交接保持原顺序。</summary>
+    /// <param name="markerSource">打号机是否作为源设备；否则作为目标设备。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Transit_ResetsMarkerHandshakeForBothRoles(bool markerSource)
+    {
+        DeviceBase source = markerSource ? new MarkerMachine(1, "源打号机", 1000) : new LoadRack(1, "上料架", 1000);
+        DeviceBase target = markerSource ? new UnloadRack(2, "下料架", 2000) : new MarkerMachine(2, "目标打号机", 2000);
+        var h = new Harness(source, target, 10000);
+        source.Signals = TestSignals.Of(("HasMaterial", true), ("ProcessDone", true));
+        target.Signals = TestSignals.Of(("HasMaterial", false), ("Busy", false));
+        var (wp, task) = h.NewTask(markerSource ? ProcessType.Unloading : ProcessType.Marking);
+        if (markerSource)
+        {
+            source.CurrentWorkpiece = wp;
+            wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(source.Id);
+        }
+        var markerDriver = markerSource ? h.SourceDriver : h.TargetDriver;
+        markerDriver.Signals["LoadDone"] = 1;
+        markerDriver.Signals["UnloadDone"] = 1;
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        if (markerSource)
+        {
+            Assert.Equal(new[] { "UnloadDone=1", "LoadDone=0", "UnloadDone=0" }, markerDriver.Writes);
+        }
+        else
+        {
+            Assert.Equal(new[] { "LoadDone=0", "UnloadDone=0" }, markerDriver.Writes.Take(2));
+            Assert.StartsWith("PrintContent=", markerDriver.Writes[2]);
+            Assert.Equal("LoadDone=1", markerDriver.Writes.Last());
+        }
+        Assert.Same(wp, target.CurrentWorkpiece);
+        Assert.Null(source.CurrentWorkpiece);
+        Assert.Equal(markerSource ? WorkpieceState.Completed : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Equal(LineState.Running, h.Line.State);
+        Assert.Equal(CraneState.Idle, h.Crane.Runtime.State);
+        Assert.Null(h.Crane.Runtime.CurrentTask);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(source.Id));
+        Assert.False(h.Reservations.IsReserved(target.Id));
     }
 
     /// <summary>充磁后异常（目标未就绪）：Abort 弃板 + 暂停线路 + 释放全部。</summary>

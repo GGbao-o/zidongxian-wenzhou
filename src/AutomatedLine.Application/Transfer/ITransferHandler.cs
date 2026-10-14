@@ -27,7 +27,7 @@ public interface ITransferHandler
     Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken);
 
     /// <summary>
-    /// 尽力复位本机"上位机写入的握手位"（写 0）。只清握手位、不清加工参数；料架/打号机/下料架无此需求，实现为空操作。
+    /// 尽力复位本机"上位机写入的握手位"（写 0）。只清握手位、不清加工参数；上料架/下料架无此需求，实现为空操作。
     /// <para>
     /// **约定时机（两侧都调，由编排器在中转时统一做）**：
     /// ① 本机作为**源**完成取料之后 —— 清掉刚写出的"下料完成"等位（此时距写下已隔整段 XY 移动，PLC 必然已采到那个 1，

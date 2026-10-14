@@ -8,13 +8,16 @@ namespace AutomatedLine.Application.Transfer.Handlers;
 /// </summary>
 public sealed class MarkerHandler : ITransferHandler
 {
+    /// <summary>只复位取放完成握手，避免上一轮残留1；保留打印内容、内外径及设备只读状态。</summary>
+    private static readonly string[] WrittenHandshakePoints = { "LoadDone", "UnloadDone" };
+
     /// <inheritdoc />
     public bool CanHandle(DeviceType type) => type == DeviceType.MarkerMachine;
 
     /// <inheritdoc />
-    /// <remarks>按现场确认：打号机的握手位（`LoadDone` / `UnloadDone`）**无需复位**，故为空操作。</remarks>
+    /// <remarks>源侧取料后、目标侧放料前，将0005/0006（PDU4/5）写0；逐点容错和取消传播沿用统一实现。</remarks>
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
-        => Task.FromResult(0);
+        => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
     /// <inheritdoc />
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
