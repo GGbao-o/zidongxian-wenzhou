@@ -21,10 +21,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 直接编译真实客户端和天车驱动，验证通信边界及脉冲协议，避免加载 MySQL 或 FOCAS 原生依赖。 -->
+    <!-- 直接编译真实客户端与设备/天车驱动，验证通信边界、料架地址及脉冲协议，避免加载 MySQL 或 FOCAS 原生依赖。 -->
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\ModbusTcpClient.cs" Link="Infrastructure\ModbusTcpClient.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\CraneService.cs" Link="Infrastructure\CraneService.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\CraneAddress.cs" Link="Infrastructure\CraneAddress.cs" />
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Drivers\ModbusDeviceDriver.cs" Link="Infrastructure\ModbusDeviceDriver.cs" />
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Drivers\DeviceModbusMaps.cs" Link="Infrastructure\DeviceModbusMaps.cs" />
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\RackAddress.cs" Link="Infrastructure\RackAddress.cs" />
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\BoringMachineAddress.cs" Link="Infrastructure\BoringMachineAddress.cs" />
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\GrinderMachineAddress.cs" Link="Infrastructure\GrinderMachineAddress.cs" />
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\MarkerMachineAddress.cs" Link="Infrastructure\MarkerMachineAddress.cs" />
   </ItemGroup>
 
   <ItemGroup>

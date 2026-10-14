@@ -30,7 +30,9 @@ public enum ModbusArea
 /// <param name="Writable">是否可写</param>
 /// <param name="IsBool">是否为布尔语义（寄存器按 0/1 判定）</param>
 /// <param name="Scale">工程值→原始值倍率（如 ×100 填 100；布尔/整数填 1）</param>
-public sealed record ModbusPoint(string Name, ModbusArea Area, int Address, bool Writable, bool IsBool, double Scale = 1);
+/// <param name="InvertDiscreteInput">是否反转FC02离散输入；下料架允许放板信号需转换为HasMaterial，其他点默认不反转</param>
+public sealed record ModbusPoint(string Name, ModbusArea Area, int Address, bool Writable, bool IsBool, double Scale = 1,
+    bool InvertDiscreteInput = false);
 
 /// <summary>
 /// 通用 Modbus 设备驱动（双头镗/研磨机/打号机/料架共用）。
@@ -154,7 +156,8 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
                 return await _client.ReadCoilAsync(point.Address, cancellationToken).ConfigureAwait(false);
             case ModbusArea.DiscreteInput:
                 var bits = await _client.ReadDiscreteInputsAsync(point.Address, 1, cancellationToken).ConfigureAwait(false);
-                return bits[0];
+                // 仅在读取成功后按点位极性归一化；通信异常继续传播，不能把失败当成无板可放。
+                return point.InvertDiscreteInput ? !bits[0] : bits[0];
             case ModbusArea.InputRegister:
                 var input = await _client.ReadInputRegistersAsync(point.Address, 1, cancellationToken).ConfigureAwait(false);
                 return point.IsBool ? input[0] != 0 : (object)(input[0] / point.Scale);

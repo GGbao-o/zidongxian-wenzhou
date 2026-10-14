@@ -72,18 +72,20 @@ public static class DeviceModbusMaps
         new("RollerInnerDiameter", ModbusArea.HoldingRegister, MarkerMachineAddress.RollerInnerDiameter, true, false, 1)
     };
 
-    /// <summary>料架点位表（FC02 读离散输入，只有"有板"）。</summary>
+    /// <summary>料架允许输入映射为有料状态：上料架DI1同向，下料架DI3反转，保持业务层HasMaterial语义一致。</summary>
     /// <param name="type">料架类型（上料架/下料架）</param>
     /// <returns>点位表</returns>
     public static IReadOnlyList<ModbusPoint> Rack(DeviceType type)
     {
-        var bit = type == DeviceType.UnloadRack
-            ? RackAddress.UnloadRackHasPlate
+        var isUnloadRack = type == DeviceType.UnloadRack;
+        var bit = isUnloadRack
+            ? RackAddress.UnloadRackCanPlace
             : RackAddress.LoadRackHasPlate;
 
         return new List<ModbusPoint>
         {
-            new("HasMaterial", ModbusArea.DiscreteInput, bit, false, true)
+            // 下料架原始1表示无板可放，必须变成HasMaterial=false，不能让调度/放料等待反向判断。
+            new("HasMaterial", ModbusArea.DiscreteInput, bit, false, true, InvertDiscreteInput: isUnloadRack)
         };
     }
 }
