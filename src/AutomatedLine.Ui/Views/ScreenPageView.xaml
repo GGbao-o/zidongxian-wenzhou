@@ -51,7 +51,7 @@
 
         <!--
             关键：ScrollViewer 同时开启横向与纵向滚动。
-            WrapPanel 在无限宽度下会把所有卡片排成一行，因此设备/天车再多也能横向滚动查看，不会被截断。
+            设备固定两行排布，天车沿用单行；内容超过视口时可横向滚动查看，避免卡片被截断。
         -->
         <ScrollViewer
             Grid.Row="2"
@@ -69,7 +69,7 @@
                 <ItemsControl ItemsSource="{Binding Devices}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <WrapPanel Orientation="Horizontal" />
+                            <UniformGrid Rows="2" HorizontalAlignment="Left" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
