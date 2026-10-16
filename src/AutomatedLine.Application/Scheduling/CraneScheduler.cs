@@ -143,6 +143,7 @@ public sealed class CraneScheduler : IHostedService
             _reasonLog.BeginCycle();
             try
             {
+                //线路正在运行
                 if (_lineControl.IsRunning)
                 {
                     await DispatchOnceAsync(cycle++ % verboseEvery == 0, cancellationToken).ConfigureAwait(false);
@@ -202,7 +203,7 @@ public sealed class CraneScheduler : IHostedService
         // 启用且空闲的天车只读有效缓存；未采集、失败或过期均不参加本轮选车。
         var statuses = ReadIdleCraneStatuses(cranes);
 
-        // 候选排序：优先级降序 → 距离最近（最近可执行天车到源的距离；无可执行天车的排最后）。不做负载均衡。
+        // 候选排序：优先级降序 → 距离最近（最近可执行天车到源的距离；无可执行天车的排最后）。不做负载均衡。  拿到的是个List集合
         var candidates = pool
             .OrderByDescending(c => c.Priority)
             .ThenBy(c => NearestCraneDistance(c, cranes, statuses))
@@ -223,8 +224,9 @@ public sealed class CraneScheduler : IHostedService
             // 本候选的**可执行天车**：启用、空闲、范围覆盖源与目标、状态可读且无报警。
             // "一车一任务"由 IsIdle 保证：派发时立即置 State=Reserved，该车 IsIdle 当场变 false，
             // 后续候选自然排除它（Snapshot 是同一批 Crane 引用）。  
-            //eligible 是“针对当前这个候选任务，所有有资格执行它的天车”列表，已按“离源最近”排好序。 判断是否启动  IsIdle是否空闲(CraneStated的状态和Runtime.CurrentTask)
-            var eligible = cranes
+            //eligible 是“针对当前这个候选任务，所有有资格执行它的天车”列表，已按“离源最近”排好序。 判断是否启动  IsIdle是否空闲(CraneStated的状态和Runtime.CurrentTask)   决定当前任务先尝试哪台天车。
+            //把所有满足条件的天车都筛选出来，然后按照距离源工位从近到远排序。
+            var eligible = cranes   
                 .Where(c => c.IsEnabled
                             && c.IsIdle
                             && c.Covers(candidate.Source.PositionX)
@@ -236,13 +238,14 @@ public sealed class CraneScheduler : IHostedService
             // 逐候选记录"为什么这些天车不行"：**只要本轮有天车被排除就报**（不再等"全都没资格"），
             // 这样"2 台车里 1 台能干活"时，也能看到另一台被排除的原因（未启用/忙/范围不覆盖/读状态失败/报警）
             var craneReasons = ExplainNoEligible(candidate, cranes, statuses);
+            //判断有没有天车被筛选排除，而不是判断有没有可执行天车。
             if (eligible.Count < cranes.Count)
             {
                 _reasonLog.Report($"sched-crane-{task.Id}", $"候选 {Describe(candidate)}", craneReasons,
                     $"候选 {Describe(candidate)} 天车筛选：{craneReasons}"
                     + (eligible.Count == 0 ? "（无可执行天车）" : $"（可执行 {eligible.Count} 台）"));
             }
-
+            //当前任务可执行的天车数量为0
             if (eligible.Count == 0)
             {
                 continue;
@@ -282,7 +285,7 @@ public sealed class CraneScheduler : IHostedService
                     Priority = candidate.Priority
                 };
 
-                // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）   将这个任务已派发     仅当当前状态 == Waiting 时，才把它改成 Assigned，返回 true；否则返回 false，不改动。
+                // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）   将这个任务已派发     仅当当前状态 == Waiting 时，才把它改成 Assigned已派发，返回 true；否则返回 false，不改动。
                 if (!task.Runtime.TryTransition(WorkpieceState.Waiting, WorkpieceState.Assigned))
                 {
                     blockReason = "任务已被其它周期派发";
@@ -397,6 +400,7 @@ public sealed class CraneScheduler : IHostedService
     /// <returns>天车号到有效状态的映射，不可用时为 null。</returns>
     private Dictionary<int, CraneStatusDto?> ReadIdleCraneStatuses(IReadOnlyList<Crane> cranes)
     {
+        //调用的是CraneStateCollector后台采集拿到的缓存数据 
         return cranes.Where(c => c.IsEnabled && c.IsIdle)
             .ToDictionary(c => c.Id, c => _craneStates.GetFreshStatus(c.Id));
     }

@@ -179,6 +179,7 @@ public sealed class TransferContext
     /// <returns>任一次有板时完成；配置非法、次数耗尽、专用读取/运动失败或取消时抛异常。</returns>
     public async Task CheckPlateBeforeMagnetAsync(CancellationToken cancellationToken)
     {
+        //从配置中拿下次数和下将mm值
         var retryCount = Options.StateMachine.PickPlateRetryCount;
         var stepMm = Options.StateMachine.PickPlateStepMm;
         var completedDrops = 0;

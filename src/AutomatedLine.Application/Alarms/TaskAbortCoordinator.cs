@@ -89,7 +89,7 @@ public sealed class TaskAbortCoordinator
         var task = crane.Runtime.CurrentTask;
         try
         {
-            // 先暂停再把工件恢复为 Waiting，避免清理期间马上被重新生成并派发。
+            // 先暂停再把工件恢复为 Waiting，避免清理期间马上被重新生成并派发。   线路只要暂停了  生成器下一轮发现线路未运行，会清空候选池
             _lineControl.EnterFaultPause();
             // 释放锁与预约（幂等，即使前面步骤失败也不影响）
             if (task is not null)
@@ -108,6 +108,7 @@ public sealed class TaskAbortCoordinator
 
             if (task is not null)
             {
+                //充磁过  需要设备清理一下内存数据
                 if (discardWorkpiece)
                 {
                     // 只有充磁后弃板才清设备引用；充磁前工件仍属于源设备或上料队列。
@@ -119,14 +120,17 @@ public sealed class TaskAbortCoordinator
                 var workpieceTask = _taskManager.Get(task.WorkpieceRuntimeId);
                 if (workpieceTask is not null)
                 {
+                    //充磁过  工件的内存状态需要清除
                     if (discardWorkpiece)
                     {
+                        //工件标记为已丢弃
                         workpieceTask.Runtime.TaskState = WorkpieceState.Discarded;
                         workpieceTask.Runtime.CurrentLocation = WorkpieceLocation.Discarded;
                     }
+                    //没有充磁过 工件的状态回退
                     else
                     {
-                        // 位置、工序和排位没有发生交接，只结束本次搬运而保留同一工件。
+                        // 位置、工序和排位没有发生交接，只结束本次搬运而保留同一工件。   这样下一次还能继续派发
                         workpieceTask.Runtime.TaskState = WorkpieceState.Waiting;
                     }
                 }
@@ -158,8 +162,8 @@ public sealed class TaskAbortCoordinator
                 crane.Name,
                 reason,
                 discardWorkpiece
-                    ? "已释放路权/预约/锁并标记该工件为已丢弃，线路暂停；现场残留实物取走后重新启动即可"
-                    : "尚未开始取料充磁，已释放路权/预约/锁；工件及原位置保留，状态恢复待派发，现场处理后重新启动线路可再次搬运",
+                    ? "已释放路权/预约/锁并标记该工件为已丢弃，线路暂停；现场残留工件取走 确保天车在安全位置后重新启动即可"
+                    : "尚未开始取料充磁，已释放路权/预约/锁；线路已暂停 工件置保留，PLC信号正确 天车在安全位置后重新启动线路可再次搬运",
                 crane.Id,
                 true);
         }

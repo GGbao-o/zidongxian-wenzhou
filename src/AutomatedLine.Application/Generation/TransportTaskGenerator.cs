@@ -127,7 +127,7 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
-        //从配置中拿候选任务生成周期 500ms
+        //从配置中拿候选任务生成周期 500ms   是从配置中拿 但是只拿一次 后面进入while  一直用的这个值
         var interval = Math.Max(50, _configService.GetAppOptions().Scheduling.GenerateIntervalMs);
 
         // 周期级"开始/完成"日志节流：约每 10s 打一对（轮数按实际周期换算，改配置也不会把日志刷爆）。
@@ -148,6 +148,7 @@ public sealed class TransportTaskGenerator : IHostedService
                     //生成候选任务
                     GenerateOnce(cycle++ % verboseEvery == 0);
                 }
+                //线路没有启动 清空候选任务池
                 else if (!_candidatePool.IsEmpty)
                 {
                     // 线路未启动/暂停：不生成，清空候选池（采集仍在后台进行）。
@@ -247,13 +248,14 @@ public sealed class TransportTaskGenerator : IHostedService
             var info = task.Info;
             var matched = 0;
             var targetSkips = new List<string>();
+            //过滤设备  找当前任务对应的下一个设备是什么
             foreach (var target in devices)
             {
                 if (target.Type != next.DeviceType)
                 {
                     continue;   // 只看下一道工序对应的设备类型
                 }
-
+            
                 // 逐个收集"被排除的原因"，全部排除时汇总输出，帮助判断是设备没连线还是条件没到
                 if (!target.IsEnabled) { targetSkips.Add($"{target.Name}:未启用"); continue; }
                 if (target.Id == source.Id) { targetSkips.Add($"{target.Name}:与源相同"); continue; }

@@ -33,10 +33,10 @@ public sealed class CraneStateStore : ICraneStateProvider
         _time = time ?? TimeProvider.System;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />   获取完整采集快照，包括 PLC 状态、采集时间、成功或失败原因、序号等。
     public CraneStateSnapshot? GetSnapshot(int craneId) => FindCurrent(craneId)?.Snapshot;
 
-    /// <inheritdoc />
+    /// <inheritdoc />  只获取有效且没有过期的 PLC 状态，适合天车调度、运动控制前的状态判断
     public CraneStatusDto? GetFreshStatus(int craneId)
     {
         var entry = FindCurrent(craneId);
@@ -69,7 +69,7 @@ public sealed class CraneStateStore : ICraneStateProvider
             FailureReason = status is null ? failureReason ?? "天车状态读取失败" : null
         };
         var candidate = new Entry(driver, startedTimestamp, snapshot);
-        // 重载可能发生在前置判断之后；更新重试时再核对身份，避免旧结果覆盖新驱动已发布的数据。
+        // 线程安全地新增或更新天车状态缓存。
         _entries.AddOrUpdate(driver.CraneId, candidate,
             (_, current) => ReferenceEquals(_drivers.GetCrane(driver.CraneId), driver) ? candidate : current);
     }

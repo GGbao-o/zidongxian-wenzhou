@@ -37,7 +37,7 @@ public sealed class CraneWorker : IHostedService
 
     /// <summary>异常协调器（兜底释放资源）。</summary>
     private readonly TaskAbortCoordinator _abortCoordinator;
-
+     
     /// <summary>取消源。</summary>
     private CancellationTokenSource? _cts;
 
@@ -160,11 +160,13 @@ public sealed class CraneWorker : IHostedService
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (_lineControl.IsRunning && channel.Reader.TryRead(out var task))
+            //线路正在运行
+            if (_lineControl.IsRunning && channel.Reader.TryRead(out var task))//读取成功 元素-1 元素-1之后  CraneScheduler集中式调度其实天车调度器又可以进行分配了
             {
                 // 本车 Runtime 由本循环独占写（调度器不再碰它）
                 crane.Runtime.CurrentTask = task;//设置天车任务
                 crane.Runtime.State = CraneState.Reserved;//已分配任务  其实这时候 天车就不是空闲状态了   CraneScheduler集中式调度就不会再选择这个天车 
+                //建立本次搬运独享的令牌
                 var execution = new CraneTaskExecution(task, cancellationToken);
                 lock (_executionSync) _executions[crane.Id] = execution;
                 try
@@ -172,6 +174,7 @@ public sealed class CraneWorker : IHostedService
                     //开始执行任务
                     await _stateMachine.RunFlowAsync(crane, task, execution.Token, execution).ConfigureAwait(false);
                 }
+                //循环的宿主令牌	程序关闭、调用 Worker 的 StopAsync
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     // 只有执行器真的被取消才退出；驱动内部取消按普通故障兜底，避免丢失后续任务的消费者。
@@ -179,6 +182,7 @@ public sealed class CraneWorker : IHostedService
                     ClearRuntime(crane);
                     throw;
                 }
+                //本次搬运的人工中止标志 令牌取消了出现的异常  点击“中止当前任务”触发
                 catch (OperationCanceledException) when (execution.IsManualAbortRequested)
                 {
                     // 人工中止只结束当前搬运；状态机已弃板，宿主循环继续等待后续启动。

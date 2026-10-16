@@ -95,13 +95,14 @@ public partial class ScreenViewModel : ObservableObject
     private async Task RefreshAsync()
     {
         // 首轮刷新与后续节拍共用入口，确保整轮最多只有一个执行者。
+        //Interlocked.CompareExchange(ref location, value, comparand) 的语义是原子操作：  如果 _refreshInProgress == comparand(0)，就把它设为 value(1)，并返回原值；否则不改，直接返回原值。 正常是0 返回值是0 if哦安端位false 不return   是1说明下面的await方法还没执行完
         if (Interlocked.CompareExchange(ref _refreshInProgress, 1, 0) != 0)
         {
             return;
         }
-
         try
         {
+            //读取天车信息
             await RefreshCoreAsync().ConfigureAwait(true);
         }
         finally
@@ -113,6 +114,8 @@ public partial class ScreenViewModel : ObservableObject
 
     /// <summary>
     /// 差量刷新设备与天车卡片，均读取 Application 缓存，不触发 PLC 通信。
+    /// 从各个管理器（Manager/Registry）拉取最新快照，计算显示内容，然后同步到界面绑定的集合和属性上。 这个方法只是更新 ViewModel 里的数据；  1s调用1次
+    /// 更新viewmodel的数据更新完 显示页面是：PropertyChanged 通知 WPF，WPF 再把新数据显示到页面上。
     /// </summary>
     private Task RefreshCoreAsync()
     {
@@ -123,6 +126,7 @@ public partial class ScreenViewModel : ObservableObject
             .OrderBy(t => t.Runtime.QueueOrder)
             .FirstOrDefault();
 
+        //把界面绑定的 ObservableCollection<TItem> 集合，按数据源 source 的最新内容进行增量更新（增、删、改、排序），而不是清空重建。
         ObservableCollectionSync.SyncById(
             Devices,
             _deviceRegistry.Snapshot().OrderBy(d => d.Id).ToList(),

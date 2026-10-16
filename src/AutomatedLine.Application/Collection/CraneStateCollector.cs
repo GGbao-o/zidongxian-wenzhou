@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 namespace AutomatedLine.Application.Collection;
 
 /// <summary>随宿主运行的天车状态采集服务；每车一个串行循环，跨车独立发布，暂停线路仍持续采集。</summary>
+/// 继承 BackgroundService   调用ExecuteAsync()
 public sealed class CraneStateCollector : BackgroundService
 {
     private readonly CraneRegistry _cranes;
@@ -32,6 +33,16 @@ public sealed class CraneStateCollector : BackgroundService
         _logger = logger;
         _time = time ?? TimeProvider.System;
     }
+/*//学习：对比	StartAsync()	ExecuteAsync()
+        所属类型	IHostedService	BackgroundService
+        主要作用	启动服务	执行长期后台任务
+        谁来调用	宿主框架	BackgroundService 基类
+        运行次数	正常每次启动调用一次	正常每次启动调用一次
+        能否使用 while 循环	可以，但不宜在其中长期等待	非常适合
+        是否必须重写	继承 BackgroundService 时通常不需要	必须实现
+        适合业务	初始化、建立必要资源	PLC 采集、调度、监控
+        注意：ExecuteAsync() 也只被调用一次，但方法内部可以有一个持续运行的 while 循环。
+        而且 StartAsync() 不只存在于后台服务中，你自己定义的普通类也可以有一个同名方法，具体行为取决于代码实现。*/
 
     /// <summary>维护每车采集循环，观察退出并按当前目录创建循环；单车慢通信不等待其他车。</summary>
     /// <param name="stoppingToken">宿主停止令牌。</param>
@@ -94,7 +105,7 @@ public sealed class CraneStateCollector : BackgroundService
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
                 catch (Exception ex) { failure = ex.Message; }
-
+                //发布本次采集结果
                 _store.Publish(driver, status, startedTimestamp, startedAt, failure);
                 var maxAgeMs = Math.Max(50, _config.GetAppOptions().Collection.CraneSnapshotMaxAgeMs);
                 var succeeded = status is not null && _time.GetElapsedTime(startedTimestamp).TotalMilliseconds <= maxAgeMs;

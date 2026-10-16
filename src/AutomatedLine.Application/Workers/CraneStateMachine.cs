@@ -112,14 +112,15 @@ public sealed class CraneStateMachine
         try
         {
             execution?.ThrowIfManualAbortRequested();
+            //判断线路是否暂停 暂停状态就不执行任务了 防止因为异常触发暂停引擎了 另一个天车又有派发的任务
             if (!_lineControl.IsRunning)
             {
                 phase = "启动检查";
                 // 尚未获取资源或交接工件：只撤回分配，不把正常暂停升级为故障，也不触碰设备引用/PLC。
                 // 先关闭按钮入口再回滚；已接受的人工中止或宿主取消仍进入原异常分支，不能被保留策略吞掉。
-                execution?.Close();
-                cancellationToken.ThrowIfCancellationRequested();
-                execution?.ThrowIfManualAbortRequested();
+                execution?.Close();//关闭当前这单的人工中止入口，之后按钮请求会被拒绝；不会清资源或取消令牌
+                cancellationToken.ThrowIfCancellationRequested();//检查当前令牌是否已取消，取消了就抛异常
+                execution?.ThrowIfManualAbortRequested();//检查是否已接受人工中止，接受了就抛异常，继续原弃板处理
                 Rollback(crane, task, $"线路未运行（{_lineControl.State}），本次搬运暂不执行");
                 return;
             }
@@ -139,7 +140,7 @@ public sealed class CraneStateMachine
                 execution?.ThrowIfManualAbortRequested();
                 return;
             }
-
+            //判断一下任务中止没 
             execution?.ThrowIfManualAbortRequested();
 
             crane.Runtime.State = CraneState.Running;
@@ -161,12 +162,13 @@ public sealed class CraneStateMachine
             phase = $"取料({source.Name})";
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
             execution?.ThrowIfManualAbortRequested();
+            //这个时候才转移设备
             source.CurrentWorkpiece = null;
             crane.CurrentWorkpiece = wp;
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
             ctx.LogStep($"取料完成：{source.Name}（板已在天车 {crane.Name} 上）");
 
-            // 4) 中转：XY→目标、释放源预约、缩小路权、清除源设备 目标设备的握手信号(源设备是下料 目标设备上料)
+            // 4) 中转：XY到目标→清理源设备plc点位->释放源预约->缩小路权->清除目标设备plc点位
             phase = $"中转({source.Name}→{target.Name})";
             await TransitAsync(ctx, crane, task, source, target, cancellationToken).ConfigureAwait(false);
             execution?.ThrowIfManualAbortRequested();
@@ -188,27 +190,29 @@ public sealed class CraneStateMachine
 
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}");
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)//为true 表示这个token已经失效了 手动取消的任务
         {
             // 关闭中止入口后再选择清理策略，避免清理途中接受按钮导致弃板意图丢失。
-            if (execution?.Close() == true)
+            if (execution?.Close() == true)//人工暂停了
             {
                 var abortDetail = BuildFailure(crane, ctx, route, phase, "人工中止当前任务", manualAbort: true);
                 _logger.Error(LogCategory.StateMachine, abortDetail);
                 // 资源竞争回滚可能刚清掉归属；人工中止仍明确弃掉本次工件。
                 crane.Runtime.CurrentTask = task;
                 _abortCoordinator.Abort(crane, abortDetail);
-                throw;
+                throw;//外层抛出异常
             }
-            // 宿主取消需要向 Worker 传播；未取消的执行器遇到内部取消则走普通故障，保留真实原因。
+            //主要用于程序关闭、Worker 停止时的宿主取消  因为token是当前任务的令牌，但创建时明确关联了宿主令牌 所以程序关闭 token也失效
             var detail = BuildFailure(crane, ctx, route, phase, "任务被取消");
             _logger.Error(LogCategory.StateMachine, detail);
             HandleFailure(crane, ctx, detail);
             throw;
         }
+        //状态机异常处理
         catch (Exception ex)
         {
-            if (execution?.Close() == true)
+            //这个判断处理人工中止与普通故障同时发生的情况
+            if (execution?.Close() == true)//人工停止天车任务
             {
                 // 原动作失败与按钮中止同时发生时，已接受的人工弃板意图优先。
                 var abortDetail = BuildFailure(crane, ctx, route, phase, $"人工中止当前任务；{ex.Message}", manualAbort: true);
@@ -228,10 +232,12 @@ public sealed class CraneStateMachine
     /// <summary>按 PickAsync 的充磁标记选择异常清理，初始化失败时尚未充磁，也必须保留工件。</summary>
     private void HandleFailure(Crane crane, TransferContext? ctx, string detail)
     {
+        //下发了充磁命令异常处理
         if (ctx?.MagnetCommandStarted == true)
         {
             _abortCoordinator.Abort(crane, detail);
         }
+        //没有下发充磁命令异常处理
         else
         {
             _abortCoordinator.RecoverBeforeMagnet(crane, detail);
@@ -290,7 +296,7 @@ public sealed class CraneStateMachine
         var wp = _taskManager.Get(task.WorkpieceRuntimeId);
         if (wp is not null)
         {
-            //将工件任务重新设置为入线
+            //将工件任务重新设置为入线    这个WorkpieceState 在CraneScheduler天车调度的时候 已经标记为Assigned
             wp.Runtime.TaskState = WorkpieceState.Waiting;
         }
 
@@ -329,13 +335,14 @@ public sealed class CraneStateMachine
     {
         ctx.LogStep(target, $"中转：XY → 目标上方（安全高度 Z={crane.SafeZ}）");
         var (x, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
+        //去目标位置
         await ctx.MoveAbsoluteAsync(x, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
         ctx.LogStep(target, "中转：已到达目标上方（Z 仍在安全高度）");
 
         // 清源握手时继续持有预约，保证旧任务所有源写入结束前不会交给下一任务。
         // 内部逐点容错：清不掉只记警告、不影响本任务（最坏退回"残留 1"的旧行为）。
         ctx.LogStep(source, "中转：复位源设备握手位（双头镗/斜床/研磨机/打号机有效，料架无操作；避免残留 1 让下一轮上料收不到上升沿）");
-        //
+        //清除源设备plc点位信号
         if (_driverRegistry.GetDevice(source.Id) is { } sourceDriver)
         {
             //清除上位机写入设备的信息
@@ -344,10 +351,12 @@ public sealed class CraneStateMachine
                 .ConfigureAwait(false);
         }
 
-        // 源侧异步写入已全部结束，此时让出设备和区间，下一任务才可开始交互。
+        // 源侧异步写入已全部结束，此时让出设备和区间，下一任务才可开始交互。    缩小路权 释放源设备预约
         ctx.LogStep(target, "中转：源握手复位结束，释放源设备预约 + 路权缩小到目标车体区间");
+        //释放源设备预约
         _reservationManager.ReleaseSource(task.TaskId);
         var targetInterval = XInterval.FromTask(target.PositionX, target.PositionX, crane.Width);
+        //缩小路权
         if (_rightOfWayManager.Resize(task.TaskId, targetInterval))
         {
             // 大屏读取天车运行态；仅在调整成功后同步，避免显示未实际取得的区间。
@@ -375,6 +384,7 @@ public sealed class CraneStateMachine
         ctx.LogStep($"收尾：回本车安全位（X={crane.SafeX}、Z={crane.SafeZ}）");
         // 回到本车安全位 X（同一目标 Y、Z 取安全高度）
         var (_, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
+        //回安全位置 没有+偏移量  safez也是 没有+偏移量   正常状态机执行回safez也不加偏移量
         await ctx.MoveAbsoluteAsync(crane.SafeX, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
         // 只有正常完成与人工中止的最终提交互斥；原有运动和收尾内容不变。

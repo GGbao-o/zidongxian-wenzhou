@@ -739,9 +739,12 @@ public sealed class CraneService : ICraneDriver
         var feedback = false;
         var result = await ExecuteAsync(label, async () =>
         {
+            //手动模式
             await EnterManualAsync(cancellationToken).ConfigureAwait(false);
-            // 与其他手动脉冲共用写入封装，先完整复位再检查对应反馈，不轮询、不重试。
+            // 与其他手动脉冲共用写入封装，先完整复位再检查对应反馈，不轮询、不重试。  
+            //写2-200ms-写0
             await PulseAsync(trigger, true, 200, cancellationToken).ConfigureAwait(false);
+            //读线圈返回
             feedback = await _client.ReadCoilAsync(feedbackCoil, cancellationToken).ConfigureAwait(false);
         }).ConfigureAwait(false);
         if (!result.IsSuccess || feedback)

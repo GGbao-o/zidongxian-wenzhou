@@ -50,7 +50,17 @@ public sealed class ColdStartChecker : IColdStartChecker
         _logger = logger;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />  冷启动 检查现场设备 天车状态
+  /*
+    执行时机有两处：
+         - 程序打开时执行一次。
+         - 主页面每次点击“启动线路”时执行，包括暂停后重新启动。
+    它的实际作用边界是：
+            - 写入活动报警和报警日志。
+            - 不恢复工件数据，不创建搬运任务。
+            - 不清理信号、锁、路权，也不控制天车运动。
+            - 不阻止启动，不给设备或天车增加禁止调度状态。
+ */
     public async Task<IReadOnlyList<string>> CheckAsync(CancellationToken cancellationToken = default)
     {
         var found = new List<string>();

@@ -44,6 +44,7 @@ public class ConfigService : IConfigService
     }
 
     /// <summary>
+    /// 它获取的是配置系统内存里的数据，不会在每次调用时直接读取磁盘。
     /// 获取程序参数集合（读取 App 节点）。
     /// </summary>
     /// <returns>参数对象；缺省时返回带默认值的空对象，保证上层无需判空</returns>
@@ -55,7 +56,7 @@ public class ConfigService : IConfigService
     }
 
     /// <summary>
-    /// 把程序参数保存回 appsettings.json 的 App 节点。
+    /// 把程序参数保存回 appsettings.json 的 App 节点。  只负责写文件没有主动同步更新 _configuration
     /// </summary>
     /// <param name="options">待保存的参数集合</param>
     public void SaveAppOptions(AppOptions options)
@@ -72,6 +73,7 @@ public class ConfigService : IConfigService
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             WriteIndented = true
         };
+        // 更新 App 节点，保留连接串等其他节点
         root["App"] = JsonSerializer.SerializeToNode(options, naming);
 
         File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
