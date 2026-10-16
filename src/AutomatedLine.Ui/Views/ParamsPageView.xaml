@@ -23,7 +23,7 @@
             <TextBlock Style="{StaticResource CaptionText}" Text="点击分类卡片弹出该类别参数进行编辑，确定后写回 appsettings.json。" />
         </StackPanel>
 
-        <!-- 参数类别可能越来越多，分类卡片支持横竖滚动 -->
+        <!-- 分类固定两行，避免横向滚动容器把所有卡片排为一行；保留横竖滚动查看。 -->
         <ScrollViewer
             Grid.Row="1"
             HorizontalScrollBarVisibility="Auto"
@@ -31,7 +31,7 @@
             <ItemsControl ItemsSource="{Binding Categories}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal" />
+                        <UniformGrid Rows="2" HorizontalAlignment="Left" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
