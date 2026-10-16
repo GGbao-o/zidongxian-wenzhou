@@ -34,24 +34,12 @@ public static class BoringMachineAddress
     /// <summary>请求上料（R6103，双头镗→上位机，读）。</summary>
     public const int RequestLoad = 12207;
 
-    /// <summary>天车上料到位（R6104，上位机→双头镗，写1后等待夹紧）。</summary>
-    public const int LoadInPlace = 12209;
-
-    /// <summary>卡钳夹紧完成（R6105，双头镗→上位机，读1后允许退磁回升）。</summary>
-    public const int LoadLockDone = 12211;
-
-    /// <summary>天车上料退出完成（R6106，上位机→双头镗，退磁及回升成功后写1）。</summary>
+    /// <summary>天车上料完成（R6106，图纸称上料到位；退磁及Z回SafeZ成功后写1）。</summary>
     public const int LoadDone = 12213;
 
     /// <summary>请求下料（R6107，双头镗→上位机，读）。</summary>
     public const int RequestUnload = 12215;
 
-    /// <summary>天车下料到位（R6108，上位机→双头镗，充磁成功后写1）。</summary>
-    public const int UnloadInPlace = 12217;
-
-    /// <summary>卡钳松开完成（R6109，双头镗→上位机，读1后允许回升）。</summary>
-    public const int UnloadReleaseDone = 12219;
-
-    /// <summary>天车下料退出完成（R6110，上位机→双头镗，回升成功后写1）。</summary>
+    /// <summary>天车下料完成（R6110，上位机→双头镗，充磁及Z回SafeZ成功后写1）。</summary>
     public const int UnloadDone = 12221;
 }

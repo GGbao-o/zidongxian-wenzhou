@@ -11,17 +11,17 @@ namespace AutomatedLine.Tests;
 /// </summary>
 public class HandshakeResetTests
 {
-    /// <summary>双头镗：复位 5 个握手位，全部写 0。</summary>
+    /// <summary>双头镗：仅复位三个有效输出，全部写0。</summary>
     [Fact]
-    public async Task Boring_ClearsFivePointsToZero()
+    public async Task Boring_ClearsThreePointsToZero()
     {
         var driver = new FakeDeviceDriver(2);
 
         var cleared = await new BoringHandler()
             .ClearHandshakeAsync(driver, "双头镗", new TestLogger(), CancellationToken.None);
 
-        Assert.Equal(5, cleared);
-        Assert.Equal(new[] { "DataSentDone=0", "LoadInPlace=0", "LoadDone=0", "UnloadInPlace=0", "UnloadDone=0" }, driver.Writes);
+        Assert.Equal(3, cleared);
+        Assert.Equal(new[] { "DataSentDone=0", "LoadDone=0", "UnloadDone=0" }, driver.Writes);
     }
 
     /// <summary>研磨机：复位 5 个握手位，全部写 0。</summary>
@@ -135,7 +135,7 @@ public class HandshakeResetTests
         var cleared = await handler.ClearHandshakeAsync(driver, "设备", new TestLogger(), CancellationToken.None);
 
         Assert.Equal(0, cleared);
-        Assert.Equal(marker ? 2 : 5, driver.Attempts);
+        Assert.Equal(marker ? 2 : 3, driver.Attempts);
     }
 
     /// <summary>写必失败的驱动：验证"尽力清"的容错分支。</summary>

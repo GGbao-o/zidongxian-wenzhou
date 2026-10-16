@@ -33,9 +33,9 @@ public class CraneCoordinateTests
         Assert.Equal(1978, z);   // 2030 - Round(103.1/2)=2030-52
     }
 
-    /// <summary>其他设备：Z 下压 = Round((d/2)/0.9537 + (d/2)/0.866)。</summary>
+    /// <summary>带托料架双头镗与斜床相同，按半径下压，三轴偏移仍参与目标计算。</summary>
     [Fact]
-    public void ToAbsoluteTarget_Boring_Uses_TwoCoefficients()
+    public void ToAbsoluteTarget_Boring_Uses_HalfDiameter()
     {
         var crane = CraneWithOffset(10, -20, 30);
 
@@ -44,7 +44,7 @@ public class CraneCoordinateTests
 
         Assert.Equal(1010, x);
         Assert.Equal(180, y);
-        Assert.Equal(1916, z);   // 2030 - Round(51.55/0.9537 + 51.55/0.866)=2030-114
+        Assert.Equal(1978, z);   // 2030 - Round(103.1/2)=2030-52
     }
 
     /// <summary>Z 下压量单独可算（供测试/日志）。</summary>
@@ -53,6 +53,8 @@ public class CraneCoordinateTests
     {
         Assert.Equal(52d, CraneCoordinate.ZDrop(DeviceType.LatheMachine, 103.1));
         Assert.Equal(52d, CraneCoordinate.ZDrop(DeviceType.GrinderMachine, 103.1));
-        Assert.Equal(114d, CraneCoordinate.ZDrop(DeviceType.BoringMachine, 103.1));
+        Assert.Equal(52d, CraneCoordinate.ZDrop(DeviceType.BoringMachine, 103.1));
+        // 料架仍沿用支撑结构的双系数公式，双头镗调整不能改变料架取放高度。
+        Assert.Equal(114d, CraneCoordinate.ZDrop(DeviceType.LoadRack, 103.1));
     }
 }

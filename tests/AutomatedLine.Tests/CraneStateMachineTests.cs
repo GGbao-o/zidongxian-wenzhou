@@ -758,19 +758,23 @@ public class CraneStateMachineTests
         Assert.False(h.Reservations.IsReserved(target.Id));
     }
 
-    /// <summary>双头镗新增卡钳等待失败仍进入充磁后弃板，资源及内存引用由原协调器清理。</summary>
-    /// <param name="pick">卡钳松开发生于取料，夹紧发生于放料。</param>
+    /// <summary>双头镗取放完成写入失败仍按充磁后弃板，沿用原资源及内存清理。</summary>
+    /// <param name="pick">是否在取料完成时模拟写入失败，否则放料完成。</param>
     /// <returns>异步验证任务。</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task BoringFeedbackFailure_UsesExistingDiscardCleanup(bool pick)
+    public async Task BoringCompletionWriteFailure_UsesExistingDiscardCleanup(bool pick)
     {
         DeviceBase source = pick ? new BoringMachine(1, "源双头镗", 1000) : new LoadRack(1, "上料架", 1000);
         DeviceBase target = pick ? new UnloadRack(2, "下料架", 2000) : new BoringMachine(2, "目标双头镗", 2000);
         var h = new Harness(source, target, 0);
-        source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true), ("UnloadReleaseDone", false));
-        target.Signals = TestSignals.Of(("HasMaterial", false), ("RequestData", true), ("RequestLoad", true), ("LoadLockDone", false));
+        source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true));
+        target.Signals = TestSignals.Of(("HasMaterial", false), ("RequestData", true), ("RequestLoad", true));
+        var boringDriver = pick ? h.SourceDriver : h.TargetDriver;
+        var completionPoint = pick ? "UnloadDone" : "LoadDone";
+        boringDriver.OnWrite = (point, value, _) => point == completionPoint && Convert.ToInt32(value) == 1
+            ? Task.FromException(new IOException("模拟完成信号写入失败")) : Task.CompletedTask;
         var (wp, task) = h.NewTask();
         if (pick)
         {
@@ -789,8 +793,8 @@ public class CraneStateMachineTests
         Assert.False(h.Row.IsHeld(task.TaskId));
         Assert.False(h.Reservations.IsReserved(source.Id));
         Assert.False(h.Reservations.IsReserved(target.Id));
-        Assert.DoesNotContain("MAGNET_OFF", h.CraneDriver.Actions);
-        Assert.DoesNotContain(pick ? "UnloadDone=1" : "LoadDone=1", (pick ? h.SourceDriver : h.TargetDriver).Writes);
+        Assert.Equal(!pick, h.CraneDriver.Actions.Contains("MAGNET_OFF"));
+        Assert.Contains(completionPoint + "=1", boringDriver.Writes);
     }
 
     /// <summary>充磁后异常（目标未就绪）：Abort 弃板 + 暂停线路 + 释放全部。</summary>

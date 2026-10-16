@@ -10,10 +10,10 @@ namespace AutomatedLine.Application.Transfer;
 /// </summary>
 public static class CraneCoordinate
 {
-    /// <summary>Z 下压经验系数 1（非斜床/研磨设备）。</summary>
+    /// <summary>Z 下压经验系数 1（非斜床/研磨/双头镗设备）。</summary>
     public const double ZCoef1 = 0.9537;
 
-    /// <summary>Z 下压经验系数 2（非斜床/研磨设备）。</summary>
+    /// <summary>Z 下压经验系数 2（非斜床/研磨/双头镗设备）。</summary>
     public const double ZCoef2 = 0.866;
 
     /// <summary>设备基坐标 X = 设备 X + 本车 X 偏移。</summary>
@@ -35,7 +35,7 @@ public static class CraneCoordinate
     public static double BaseZ(double positionZ, Crane crane) => positionZ + crane.OffsetZ;
 
     /// <summary>
-    /// Z 下压量：斜床/研磨 = Round(d/2)，其余 = Round((d/2)/0.9537 + (d/2)/0.866)。
+    /// Z 下压量：斜床/研磨/双头镗 = Round(d/2)，其余 = Round((d/2)/0.9537 + (d/2)/0.866)。
     /// </summary>
     /// <param name="type">设备类型</param>
     /// <param name="diameter">当前工件直径</param>
@@ -43,7 +43,7 @@ public static class CraneCoordinate
     public static double ZDrop(DeviceType type, double diameter)
     {
         var half = diameter / 2.0;
-        var drop = type is DeviceType.LatheMachine or DeviceType.GrinderMachine
+        var drop = type is DeviceType.LatheMachine or DeviceType.GrinderMachine or DeviceType.BoringMachine
             ? half
             : half / ZCoef1 + half / ZCoef2;
         return Math.Round(drop);

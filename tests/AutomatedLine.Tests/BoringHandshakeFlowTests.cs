@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Application.Transfer;
@@ -9,25 +10,22 @@ using AutomatedLine.Tests.Fakes;
 
 namespace AutomatedLine.Tests;
 
-/// <summary>验证双头镗到位/卡钳反馈/退出完成的真实Handler顺序及失败、取消边界。</summary>
+/// <summary>验证带托料架双头镗取放顺序，回升失败或取消时禁止通知完成。</summary>
 public class BoringHandshakeFlowTests
 {
-    private static readonly TimeSpan Guard = TimeSpan.FromSeconds(5);
-
     private sealed class Harness
     {
-        /// <summary>被测试的双头镗，缓存由测试控制卡钳反馈。</summary>
+        /// <summary>仅提供新协议的三个请求输入，不模拟旧卡钳反馈。</summary>
         public BoringMachine Device { get; } = new(1, "双头镗", 1000);
-        /// <summary>记录参数及握手写入的设备桩。</summary>
+        /// <summary>记录设备写入。</summary>
         public FakeDeviceDriver Driver { get; } = new(1);
-        /// <summary>记录充退磁和运动顺序的天车桩。</summary>
+        /// <summary>记录运动及充退磁。</summary>
         public FakeCraneDriver Crane { get; } = new();
-        /// <summary>使用真实上下文等待和异常处理原语。</summary>
+        /// <summary>真实搬运上下文。</summary>
         public TransferContext Context { get; }
 
-        /// <summary>装配真实Handler所需上下文与可控缓存。</summary>
-        /// <param name="timeoutMs">设备握手等待期限，毫秒。</param>
-        public Harness(int timeoutMs = 10000)
+        /// <summary>装配真实上下文；零等待期限确保不会暗中依赖旧卡钳反馈。</summary>
+        public Harness()
         {
             var registry = new DriverRegistry();
             registry.RegisterDevice(Driver);
@@ -35,109 +33,112 @@ public class BoringHandshakeFlowTests
             var store = new FakeConfigurationStore();
             store.Devices.Add(new DeviceConfigDto { Id = 1, PositionX = 1000, PositionY = 0, PositionZ = 500 });
             var options = new AppOptions();
-            options.StateMachine.HandshakeTimeoutMs = timeoutMs;
+            options.StateMachine.HandshakeTimeoutMs = 0;
             var wp = new WorkpieceTask(new WorkpieceInfo { Length = 1200.4, Diameter = 180.6, PlugThickness = 12.7 });
             Context = new TransferContext(new Crane(1, 1, "天车1") { SafeZ = 500 }, wp, registry, store, options, new TestLogger());
-            SetFeedback(false);
+            SetRequests(true);
         }
 
-        /// <summary>只改变卡钳完成反馈，保持三个请求已满足。</summary>
-        /// <param name="ready">夹紧及松开反馈是否成立。</param>
-        public void SetFeedback(bool ready) => Device.Signals = TestSignals.Of(
-            ("RequestData", true), ("RequestLoad", true), ("RequestUnload", true),
-            ("LoadLockDone", ready), ("UnloadReleaseDone", ready));
+        /// <summary>同时设置三个设备请求。</summary>
+        /// <param name="ready">请求是否满足。</param>
+        public void SetRequests(bool ready) => Device.Signals = TestSignals.Of(
+            ("RequestData", ready), ("RequestLoad", ready), ("RequestUnload", ready));
 
-        /// <summary>执行取料或放料完整Handler。</summary>
+        /// <summary>执行真实取放料。</summary>
         /// <param name="pick">是否取料。</param>
-        /// <param name="token">当前搬运取消令牌。</param>
-        /// <returns>异步取放任务。</returns>
+        /// <param name="token">当前任务令牌。</param>
+        /// <returns>搬运步骤任务。</returns>
         public Task Run(bool pick, CancellationToken token) => pick
             ? new BoringHandler().PickAsync(Context, Device, token)
             : new BoringHandler().PlaceAsync(Context, Device, token);
     }
 
-    /// <summary>确认收到反馈前既不退磁/回升也不发退出完成，反馈通过后才完成动作。</summary>
-    /// <param name="pick">是否验证取料，否则验证放料。</param>
+    /// <summary>三个请求即可完成，完成通知必须晚于充退磁和安全回升。</summary>
+    /// <param name="pick">是否取料，否则放料。</param>
     /// <returns>异步验证任务。</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Feedback_GatesReleaseAndRise(bool pick)
+    public async Task Transfer_CompletesWithoutIntermediateHandshake(bool pick)
     {
         var h = new Harness();
-        var notified = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         h.Driver.OnWrite = (point, _, _) =>
         {
-            if (point == (pick ? "UnloadInPlace" : "LoadInPlace")) notified.TrySetResult();
+            if (point == (pick ? "UnloadDone" : "LoadDone"))
+            {
+                Assert.Contains(pick ? "MAGNET_ON" : "MAGNET_OFF", h.Crane.Actions);
+                Assert.Equal(pick ? 3 : 2, h.Crane.Actions.Count(a => a.StartsWith("MOVE(")));
+                Assert.EndsWith(",500)", h.Crane.Actions.Last());
+            }
             return Task.CompletedTask;
         };
-        var flow = h.Run(pick, CancellationToken.None);
-        await notified.Task.WaitAsync(Guard);
-        Assert.False(flow.IsCompleted);
-        Assert.DoesNotContain("MAGNET_OFF", h.Crane.Actions);
-        Assert.Equal(pick ? 2 : 1, h.Crane.Actions.Count(a => a.StartsWith("MOVE(")));
-        Assert.DoesNotContain(pick ? "UnloadDone=1" : "LoadDone=1", h.Driver.Writes);
-
-        h.SetFeedback(true);
-        await flow.WaitAsync(Guard);
+        await h.Run(pick, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(pick ? "UnloadDone=1" : "LoadDone=1", h.Driver.Writes.Last());
         Assert.Equal(pick, h.Context.MagnetCommandStarted);
-        Assert.EndsWith(",500)", h.Crane.Actions.Last());
-        if (!pick)
-        {
-            Assert.Equal(new[] { "Length", "Diameter", "PlugThickness", "DataSentDone", "LoadInPlace", "LoadDone" },
-                h.Driver.Writes.Select(w => w.Split('=')[0]));
-            Assert.Equal(1200.4, h.Context.Workpiece.Info.Length);
-            Assert.Equal(180.6, h.Context.Workpiece.Info.Diameter);
-            Assert.Equal(12.7, h.Context.Workpiece.Info.PlugThickness);
-            Assert.Equal("MAGNET_OFF", h.Crane.Actions[^2]);
-        }
+        Assert.Equal(pick ? new[] { "UnloadDone" } : new[] { "Length", "Diameter", "PlugThickness", "DataSentDone", "LoadDone" },
+            h.Driver.Writes.Select(w => w.Split('=')[0]));
+        Assert.Equal(1200.4, h.Context.Workpiece.Info.Length);
+        Assert.Equal(180.6, h.Context.Workpiece.Info.Diameter);
+        Assert.Equal(12.7, h.Context.Workpiece.Info.PlugThickness);
     }
 
-    /// <summary>缺少卡钳完成反馈时超时，不执行后续退磁/回升和完成通知。</summary>
-    /// <param name="pick">是否验证取料，否则验证放料。</param>
+    /// <summary>设备未请求时禁止动作，仍按原期限报错。</summary>
+    /// <param name="pick">是否取料。</param>
     /// <returns>异步验证任务。</returns>
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task FeedbackTimeout_StopsFollowingActions(bool pick)
+    public async Task RequestTimeout_StopsFollowingActions(bool pick)
     {
-        var h = new Harness(0);
+        var h = new Harness();
+        h.SetRequests(false);
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => h.Run(pick, CancellationToken.None));
-        Assert.Contains(pick ? "UnloadReleaseDone" : "LoadLockDone", error.Message);
-        Assert.DoesNotContain("MAGNET_OFF", h.Crane.Actions);
-        Assert.Equal(pick ? 2 : 1, h.Crane.Actions.Count(a => a.StartsWith("MOVE(")));
-        Assert.DoesNotContain(pick ? "UnloadDone=1" : "LoadDone=1", h.Driver.Writes);
+        Assert.Contains(pick ? "RequestUnload" : "RequestData", error.Message);
+        Assert.Empty(h.Crane.Actions);
+        Assert.Empty(h.Driver.Writes);
     }
 
-    /// <summary>在到位通知后取消当前流程，反馈等待传播取消且不继续动作。</summary>
-    /// <param name="pick">是否验证取料，否则验证放料。</param>
+    /// <summary>回升取消或失败时禁止完成通知，避免设备提前开始下一阶段。</summary>
+    /// <param name="pick">是否取料。</param>
+    /// <param name="cancel">是否模拟取消，否则运动超时。</param>
     /// <returns>异步验证任务。</returns>
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task CancellationAtFeedback_StopsFollowingActions(bool pick)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task RiseFailureOrCancellation_DoesNotPublishDone(bool pick, bool cancel)
     {
         var h = new Harness();
         using var cts = new CancellationTokenSource();
-        h.Driver.OnWrite = (point, _, _) =>
+        var moves = 0;
+        h.Crane.OnAbsoluteMove = (_, token) =>
         {
-            if (point == (pick ? "UnloadInPlace" : "LoadInPlace")) cts.Cancel();
-            return Task.CompletedTask;
+            if (++moves == (pick ? 3 : 2))
+            {
+                if (cancel)
+                {
+                    cts.Cancel();
+                    token.ThrowIfCancellationRequested();
+                }
+                return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Timeout, "模拟回升超时"));
+            }
+            return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok"));
         };
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Run(pick, cts.Token));
-        Assert.DoesNotContain("MAGNET_OFF", h.Crane.Actions);
-        Assert.Equal(pick ? 2 : 1, h.Crane.Actions.Count(a => a.StartsWith("MOVE(")));
+        if (cancel)
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Run(pick, cts.Token));
+        else
+            await Assert.ThrowsAsync<InvalidOperationException>(() => h.Run(pick, cts.Token));
+        Assert.Contains(pick ? "MAGNET_ON" : "MAGNET_OFF", h.Crane.Actions);
         Assert.DoesNotContain(pick ? "UnloadDone=1" : "LoadDone=1", h.Driver.Writes);
     }
 
-    /// <summary>参数写入失败不能发送数据完成或开始Z运动。</summary>
+    /// <summary>参数失败不能发送数据完成或开始运动。</summary>
     /// <returns>异步验证任务。</returns>
     [Fact]
     public async Task ParameterFailure_DoesNotPublishDataDone()
     {
         var h = new Harness();
-        h.SetFeedback(true);
         h.Driver.OnWrite = (point, _, _) => point == "Diameter"
             ? Task.FromException(new IOException("模拟参数写入失败")) : Task.CompletedTask;
         await Assert.ThrowsAsync<IOException>(() => h.Run(false, CancellationToken.None));
