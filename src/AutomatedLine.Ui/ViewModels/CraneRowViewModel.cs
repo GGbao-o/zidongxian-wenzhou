@@ -2,6 +2,7 @@ using System.Text;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Domain.Cranes;
 using AutomatedLine.Domain.Devices;
+using AutomatedLine.Domain.Workpieces;
 using AutomatedLine.Ui.Helpers;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -15,6 +16,33 @@ public partial class CraneRowViewModel : ObservableObject
 {
     /// <summary>设备查询委托，用于把任务的源/目标设备号解析成名称与位置。</summary>
     private readonly Func<int, DeviceBase?>? _deviceLookup;
+
+    /// <summary>由当前搬运查询工件，取料尚未完成时也能显示任务身份。</summary>
+    private readonly Func<Guid, WorkpieceTask?>? _workpieceLookup;
+
+    /// <summary>卡面任务工件身份，与天车是否已持板分开表达。</summary>
+    [ObservableProperty]
+    private string _workpieceText = "无";
+
+    /// <summary>当前任务工件尺寸。</summary>
+    [ObservableProperty]
+    private string _dimensionsText = "长度：—  直径：—";
+
+    /// <summary>仅来自Application发布的步骤说明，不解析日志或根据PLC信号猜动作。</summary>
+    [ObservableProperty]
+    private string _stageText = "无任务";
+
+    /// <summary>单行坐标；无有效快照时显示未知而非零坐标。</summary>
+    [ObservableProperty]
+    private string _coordinateText = "X：—  Y：—  Z：—";
+
+    /// <summary>内存持板引用状态，独立于X11现场反馈。</summary>
+    [ObservableProperty]
+    private string _holdingText = "内存持板：无";
+
+    /// <summary>有板、充退磁和报警的三态信号。</summary>
+    [ObservableProperty]
+    private IReadOnlyList<CardSignal> _keySignals = Array.Empty<CardSignal>();
 
     /// <summary>天车号。</summary>
     public int Id { get; }
@@ -89,10 +117,13 @@ public partial class CraneRowViewModel : ObservableObject
     /// <param name="crane">天车对象</param>
     /// <param name="deviceLookup">设备查询委托，可为空（列表页可不需要解析设备名）</param>
     /// <param name="status">共享有效天车状态；null 表示未采集、失败或过期。</param>
-    public CraneRowViewModel(Crane crane, Func<int, DeviceBase?>? deviceLookup = null, CraneStatusDto? status = null)
+    /// <param name="workpieceLookup">工件任务查询委托，可为空。</param>
+    public CraneRowViewModel(Crane crane, Func<int, DeviceBase?>? deviceLookup = null, CraneStatusDto? status = null,
+        Func<Guid, WorkpieceTask?>? workpieceLookup = null)
     {
         Id = crane.Id;
         _deviceLookup = deviceLookup;
+        _workpieceLookup = workpieceLookup;
         Refresh(crane, status);
     }
 
@@ -112,7 +143,10 @@ public partial class CraneRowViewModel : ObservableObject
         Y = status?.YDisplay ?? 0;
         Z = status?.ZDisplay ?? 0;
         HasAlarm = status?.HasAlarm == true;
-        AlarmText = HasAlarm ? "报警" : "正常";
+        AlarmText = status is null ? "未知" : HasAlarm ? "报警" : "正常";
+        CoordinateText = status is null ? "X：—  Y：—  Z：—" : $"X：{X:0.###}  Y：{Y:0.###}  Z：{Z:0.###}";
+        StageText = crane.Runtime.CurrentTask is null ? "无任务" : crane.Runtime.CurrentStep ?? "已分配，等待执行";
+        HoldingText = crane.CurrentWorkpiece is null ? "内存持板：无" : "内存持板：有";
 
         // 天车边框颜色优先级：读失败/报警(红) > 有任务(黄) > 空闲正常(绿)
         CardStatus = status is null || status.HasAlarm
@@ -121,7 +155,9 @@ public partial class CraneRowViewModel : ObservableObject
                 ? CardStatus.Reserved
                 : CardStatus.Normal;
 
-        var info = crane.CurrentWorkpiece?.Info;
+        var info = TaskWorkpiece(crane);
+        WorkpieceText = info?.ToString() ?? (crane.Runtime.CurrentTask is null ? "无" : "信息不可用");
+        DimensionsText = info is null ? "长度：—  直径：—" : $"长度：{info.Length:0.###}  直径：{info.Diameter:0.###}";
         WorkpieceInfoText = info is null
             ? "无工件"
             : $"版号：{info.PlateNo}  序号：{info.SerialNo}\n长度：{info.Length:0.###}  直径：{info.Diameter:0.###}";
@@ -133,6 +169,13 @@ public partial class CraneRowViewModel : ObservableObject
             : $"有板={Lvl(status.HasPlate)} 充磁={Lvl(status.MagnetizeFeedback)} 退磁={Lvl(status.DemagnetizeFeedback)} 下压={Lvl(status.PressureLimit)}";
 
         SignalText = BuildSignalText(status);
+        KeySignals = new[]
+        {
+            new CardSignal("有板", status?.HasPlate),
+            new CardSignal("充磁", status?.MagnetizeFeedback),
+            new CardSignal("退磁", status?.DemagnetizeFeedback),
+            new CardSignal("报警", status?.HasAlarm)
+        };
 
         TaskText = BuildTaskShort(crane);
         TooltipText = BuildTooltip(crane);
@@ -195,9 +238,10 @@ public partial class CraneRowViewModel : ObservableObject
         builder.AppendLine();
         builder.Append("连接：").Append(ConnectionText).Append("    路权：").Append(RightOfWayText);
         builder.AppendLine();
-        builder.Append("X：").Append(X.ToString("0.###"))
-            .Append("  Y：").Append(Y.ToString("0.###"))
-            .Append("  Z：").Append(Z.ToString("0.###"));
+        builder.Append(CoordinateText);
+        builder.AppendLine().Append("阶段：").Append(StageText);
+        builder.AppendLine().Append(HoldingText);
+        builder.AppendLine().Append("点位信号：").AppendLine().Append(SignalText);
 
         var task = crane.Runtime.CurrentTask;
         if (task is null)
@@ -212,8 +256,8 @@ public partial class CraneRowViewModel : ObservableObject
         builder.AppendLine();
         builder.Append("目标：").Append(DescribeDevice(task.TargetDeviceId, task.TargetX));
 
-        // 工件信息优先取天车当前持有；任务刚派发尚未取料时可能为空
-        var info = crane.CurrentWorkpiece?.Info;
+        // 任务关联工件与实际持板分别显示，去源取料途中也能识别本次搬运的工件。
+        var info = TaskWorkpiece(crane);
         if (info is not null)
         {
             builder.AppendLine();
@@ -226,6 +270,11 @@ public partial class CraneRowViewModel : ObservableObject
 
         return builder.ToString();
     }
+
+    // 优先按任务的运行期标识查总表；独立使用该行模型时仍允许回退到天车持板引用。
+    private WorkpieceInfo? TaskWorkpiece(Crane crane)
+        => (crane.Runtime.CurrentTask is { } task ? _workpieceLookup?.Invoke(task.WorkpieceRuntimeId)?.Info : null)
+           ?? crane.CurrentWorkpiece?.Info;
 
     /// <summary>解析设备名，找不到时返回"设备#id"。</summary>
     private string ResolveName(int deviceId)

@@ -108,7 +108,7 @@ public partial class ScreenViewModel : ObservableObject
         }
         try
         {
-            //读取天车信息
+            //刷新卡片信息
             await RefreshCoreAsync().ConfigureAwait(true);
         }
         finally
@@ -132,21 +132,35 @@ public partial class ScreenViewModel : ObservableObject
             .OrderBy(t => t.Runtime.QueueOrder)
             .FirstOrDefault();
 
-        //把界面绑定的 ObservableCollection<TItem> 集合，按数据源 source 的最新内容进行增量更新（增、删、改、排序），而不是清空重建。
-        // 工艺顺序优先；同类设备按Id稳定排列，未纳入路线的类型放最后，不能因数据库编号打乱工位组。
+        // 本轮预约快照关联当前搬运的天车，只用于卡面归属说明，不参与资源判断。
+        var craneList = _craneRegistry.Snapshot().OrderBy(c => c.No).ToList();
+        var reservations = _reservationManager.Snapshot();
+        var owners = craneList.Select(crane => (crane.Name, Task: crane.Runtime.CurrentTask))
+            .Where(entry => entry.Task is not null)
+            .GroupBy(entry => entry.Task!.TaskId)
+            .ToDictionary(group => group.Key, group => group.First().Name);
+        string? ReservationOwner(int deviceId) => reservations.TryGetValue(deviceId, out var taskId)
+            ? owners.GetValueOrDefault(taskId) : null;
+
+        // 设备注册表 _deviceRegistry → 获取设备快照 → 按工艺顺序排序 → 同步到 Devices 集合 → WPF 自动生成设备卡片。
         ObservableCollectionSync.SyncById(
+            // 1. 当前 UI 绑定的设备集合
             Devices,
+            // 2. 从设备注册表中获取最新设备，并排序   首先按照工艺流程中的设备类型排序，然后同类型设备按 Id 升序排列。
             _deviceRegistry.Snapshot()
                 .OrderBy(d => DeviceProcessOrder.GetValueOrDefault(d.Type, int.MaxValue))
                 .ThenBy(d => d.Id)
                 .ToList(),
+            // 3. 当前 UI 集合中每条记录的唯一 ID
             row => row.Id,
+            // 4. 原始设备对象的唯一 ID
             device => device.Id,
-            device => new DeviceRowViewModel(device, _reservationManager.IsReserved, DisplayWorkpiece(device, queueHead)),
-            (row, device) => row.Refresh(device, DisplayWorkpiece(device, queueHead)));
+            // 5. 新设备：创建一条 UI ViewModel
+            device => new DeviceRowViewModel(device, _reservationManager.IsReserved, DisplayWorkpiece(device, queueHead), ReservationOwner(device.Id)),
+            // 6. 已存在设备：更新 UI ViewModel
+            (row, device) => row.Refresh(device, DisplayWorkpiece(device, queueHead), ReservationOwner(device.Id)));
 
         // 两个页面共用后台快照；读取失败或过期时交给原卡片逻辑显示不可用。
-        var craneList = _craneRegistry.Snapshot().OrderBy(c => c.No).ToList();
         var statuses = craneList.ToDictionary(c => c.Id, c => _craneStates.GetFreshStatus(c.Id));
 
         ObservableCollectionSync.SyncById(
@@ -154,7 +168,7 @@ public partial class ScreenViewModel : ObservableObject
             craneList,
             row => row.Id,
             crane => crane.Id,
-            crane => new CraneRowViewModel(crane, _deviceRegistry.Get, statuses.GetValueOrDefault(crane.Id)),
+            crane => new CraneRowViewModel(crane, _deviceRegistry.Get, statuses.GetValueOrDefault(crane.Id), _taskManager.Get),
             (row, crane) => row.Refresh(crane, statuses.GetValueOrDefault(crane.Id)));
 
         // 顶部应用服务卡片：候选任务数、已派发任务数 + 悬浮详情

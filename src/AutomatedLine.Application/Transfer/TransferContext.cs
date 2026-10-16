@@ -195,6 +195,8 @@ public sealed class TransferContext
                 $"{Tag} 取料有板检查开始：最多追加下降{retryCount}次，每次{stepMm}mm，最大累计指令下降{(long)retryCount * stepMm}mm；原位及每次补降后均等待500ms");
             while (true)
             {
+                // 仅发布展示进度；X11判断和补降仍按原实时读取流程执行。
+                PublishStep($"取料：第{(long)completedDrops + 1}次检查有板（补降{completedDrops}/{retryCount}次）");
                 action = "等待信号稳定";
                 _logger.Info(LogCategory.StateMachine,
                     $"{Tag} 取料：检查第{(long)completedDrops + 1}次前等待500ms，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm");
@@ -350,12 +352,24 @@ public sealed class TransferContext
     /// <param name="device">当前操作的设备</param>
     /// <param name="action">步骤说明（如"取料：Z 下降到取料位"）</param>
     public void LogStep(DeviceBase device, string action)
-        => _logger.Info(LogCategory.StateMachine, $"{Tag} [{device.Name}] {action}");
+    {
+        PublishStep(action);
+        _logger.Info(LogCategory.StateMachine, $"{Tag} [{device.Name}] {action}");
+    }
 
     /// <summary>写一条**流程步骤**日志（不针对具体设备，如收尾阶段）。</summary>
     /// <param name="action">步骤说明</param>
     public void LogStep(string action)
-        => _logger.Info(LogCategory.StateMachine, $"{Tag} {action}");
+    {
+        PublishStep(action);
+        _logger.Info(LogCategory.StateMachine, $"{Tag} {action}");
+    }
+
+    // 不解析日志文本；沿用业务明确记录步骤的时机发布只读说明，任务释放后不复活旧步骤。
+    private void PublishStep(string action)
+    {
+        if (Crane.Runtime.CurrentTask is not null) Crane.Runtime.CurrentStep = action;
+    }
 
     /// <summary>
     /// 写一条**流程步骤警告**日志（同样自动带 天车 + 工件）——

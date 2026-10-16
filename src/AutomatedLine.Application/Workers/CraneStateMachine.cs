@@ -106,6 +106,7 @@ public sealed class CraneStateMachine
     {
         // 初始化也可能失败，先记录归属，确保充磁前故障能释放本次任务并保留工件。
         crane.Runtime.CurrentTask = task;
+        crane.Runtime.CurrentStep = "初始化";
         TransferContext? ctx = null;
         var route = $"设备{task.SourceDeviceId}→设备{task.TargetDeviceId}";
         var phase = "初始化";

@@ -20,11 +20,26 @@ public sealed class CraneRuntime
     /// <summary>天车状态 backing 字段（volatile）。</summary>
     private volatile CraneState _state = CraneState.Idle;
 
+    /// <summary>当前任务步骤的展示文本；跨线程可见，不参与动作、取消或调度判断。</summary>
+    private volatile string? _currentStep;
+
+    /// <summary>Application最近发布的执行步骤，供只读卡片展示。</summary>
+    public string? CurrentStep
+    {
+        get => _currentStep;
+        set => _currentStep = value;
+    }
+
     /// <summary>当前正式任务；无任务时为 null。</summary>
     public TransportTask? CurrentTask
     {
         get => _currentTask;
-        set => _currentTask = value;
+        set
+        {
+            _currentTask = value;
+            // 任务归属释放时同时清展示文本，完成、回滚和异常沿用已有清任务入口。
+            if (value is null) _currentStep = null;
+        }
     }
 
     /// <summary>天车状态。</summary>

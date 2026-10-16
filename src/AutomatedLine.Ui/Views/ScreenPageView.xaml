@@ -7,6 +7,36 @@
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
     d:DataContext="{d:DesignInstance Type=vm:ScreenViewModel}"
     mc:Ignorable="d">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="VisibleWhenTrue" />
+        <!-- 只在大屏微调卡片，保留全站浅色资源及其他页面样式。 -->
+        <Style x:Key="ScreenSignalChip" TargetType="Border">
+            <Setter Property="Background" Value="#F1F5F9" />
+            <Setter Property="TextElement.Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="CornerRadius" Value="5" />
+            <Setter Property="Padding" Value="6,4" />
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Value}" Value="True">
+                    <Setter Property="Background" Value="#ECFDF5" />
+                    <Setter Property="TextElement.Foreground" Value="#15803D" />
+                </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding Name}" Value="报警" />
+                        <Condition Binding="{Binding Value}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter Property="Background" Value="#FEF2F2" />
+                    <Setter Property="TextElement.Foreground" Value="{StaticResource StatusFaultBrush}" />
+                </MultiDataTrigger>
+            </Style.Triggers>
+        </Style>
+        <DataTemplate x:Key="ScreenSignalTemplate">
+            <Border Style="{StaticResource ScreenSignalChip}">
+                <TextBlock FontSize="12" Text="{Binding Text}" />
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
     <Grid Margin="24,12,24,24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -23,7 +53,7 @@
             <TextBlock Style="{StaticResource CaptionText}" Text="展示全部设备与天车的实时信号与内存数据；鼠标悬浮卡片查看详情；支持横竖滚动。" />
         </StackPanel>
 
-        <!-- 顶部应用服务卡片：展示调度过程的实时产物（P3 逐步填充） -->
+        <!--  顶部应用服务卡片：展示调度过程的实时产物（P3 逐步填充）  -->
         <StackPanel
             Grid.Row="1"
             Margin="0,0,0,12"
@@ -65,18 +95,19 @@
                     FontWeight="SemiBold"
                     Foreground="{StaticResource BrandGreenBrush}"
                     Text="设备" />
-
+                <!--  ItemsControl：负责把一个集合中的多个对象展示到 UI 上。ItemsSource="{Binding Devices}"：从当前 DataContext 中查找名为 Devices 的属性。  -->
                 <ItemsControl ItemsSource="{Binding Devices}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <UniformGrid Rows="2" HorizontalAlignment="Left" />
+                            <UniformGrid HorizontalAlignment="Left" Rows="2" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <!-- 悬浮显示加工状态/工件/信号；边框色：绿=已连接、黄=已预约、红=断开 -->
+                            <!--  悬浮显示加工状态/工件/信号；边框色：绿=已连接、黄=已预约、红=断开  -->
                             <Border
                                 Width="300"
+                                Padding="16"
                                 Margin="0,0,12,12"
                                 ToolTip="{Binding TooltipText}">
                                 <Border.Style>
@@ -94,18 +125,33 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel>
-                                    <TextBlock
-                                        FontSize="15"
-                                        FontWeight="SemiBold"
-                                        Foreground="{StaticResource TextPrimaryBrush}"
-                                        Text="{Binding Name}" />
-                                    <TextBlock Style="{StaticResource CaptionText}" Text="{Binding TypeText}" />
-                                    <TextBlock
-                                        Margin="0,4,0,0"
-                                        FontWeight="SemiBold"
-                                        Foreground="{StaticResource StatusRunningBrush}"
-                                        Text="{Binding MachiningText}" />
-                                    <!-- 工件信息与点位信号较多，移到悬浮框显示 -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextPrimaryBrush}"
+                                                   Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                   Style="{StaticResource CaptionText}" Text="{Binding ConnectionText}" />
+                                    </Grid>
+                                    <TextBlock Margin="0,4,0,0" Style="{StaticResource CaptionText}">
+                                        <Run Text="{Binding TypeText}" /><Run Text=" · " /><Run Text="{Binding WorkpieceStateText}" />
+                                    </TextBlock>
+                                    <TextBlock Margin="0,12,0,0" FontSize="13" FontWeight="SemiBold"
+                                               Text="{Binding WorkpieceCaptionText}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Margin="0,5,0,0" FontFamily="Consolas" FontSize="12" Text="{Binding DimensionsText}" />
+                                    <TextBlock Margin="0,6,0,0" Foreground="{StaticResource BrandBlueBrush}"
+                                               Visibility="{Binding HasMachiningStatus, Converter={StaticResource VisibleWhenTrue}}"
+                                               Text="{Binding MachiningText, StringFormat=PLC状态：{0}}" />
+                                    <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding KeySignals}"
+                                                  ItemTemplate="{StaticResource ScreenSignalTemplate}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                    <TextBlock Margin="0,4,0,0" Style="{StaticResource CaptionText}"
+                                               Text="{Binding ReservationText, StringFormat=预约：{0}}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
@@ -127,9 +173,10 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <!-- 悬浮显示任务/工件/路权；边框色：绿=空闲正常、黄=有任务、红=读失败/报警 -->
+                            <!--  悬浮显示任务/工件/路权；边框色：绿=空闲正常、黄=有任务、红=读失败/报警  -->
                             <Border
                                 Width="300"
+                                Padding="16"
                                 Margin="0,0,12,12"
                                 ToolTip="{Binding TooltipText}">
                                 <Border.Style>
@@ -147,25 +194,33 @@
                                     </Style>
                                 </Border.Style>
                                 <StackPanel>
-                                    <TextBlock
-                                        FontSize="15"
-                                        FontWeight="SemiBold"
-                                        Foreground="{StaticResource TextPrimaryBrush}"
-                                        Text="{Binding Name}" />
-                                    <TextBlock
-                                        Margin="0,4,0,0"
-                                        FontFamily="Consolas"
-                                        Text="{Binding X, StringFormat=X：{0:0.###}}" />
-                                    <TextBlock FontFamily="Consolas" Text="{Binding Y, StringFormat=Y：{0:0.###}}" />
-                                    <TextBlock FontFamily="Consolas" Text="{Binding Z, StringFormat=Z：{0:0.###}}" />
-                                    <TextBlock Margin="0,6,0,0" Style="{StaticResource CaptionText}" Text="{Binding TaskText, StringFormat=当前任务：{0}}" />
-                                    <TextBlock Margin="0,2,0,0" Style="{StaticResource CaptionText}" Text="{Binding RightOfWayText, StringFormat=路权：{0}}" />
-                                    <TextBlock
-                                        Margin="0,4,0,0"
-                                        FontWeight="SemiBold"
-                                        Foreground="{StaticResource StatusRunningBrush}"
-                                        Text="{Binding StateText}" />
-                                    <!-- 工件信息较多，移到悬浮框显示 -->
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                        <Border Grid.Column="1" Margin="8,0,0,0" Padding="8,3" CornerRadius="5" Background="#EFF6FF">
+                                            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource BrandBlueBrush}" Text="{Binding StateText}" />
+                                        </Border>
+                                    </Grid>
+                                    <TextBlock Margin="0,5,0,0" Style="{StaticResource CaptionText}" Text="{Binding ConnectionText}" />
+                                    <TextBlock Margin="0,10,0,0" FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"
+                                               Text="{Binding TaskText, StringFormat=任务：{0}}" />
+                                    <TextBlock Margin="0,6,0,0" FontSize="13" Text="{Binding WorkpieceText, StringFormat=任务工件：{0}}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Margin="0,5,0,0" FontFamily="Consolas" FontSize="12" Text="{Binding DimensionsText}" />
+                                    <TextBlock Margin="0,8,0,0" Foreground="{StaticResource BrandBlueBrush}" TextWrapping="Wrap"
+                                               MaxHeight="42" Text="{Binding StageText, StringFormat=阶段：{0}}" />
+                                    <TextBlock Margin="0,8,0,0" FontFamily="Consolas" FontSize="12" Text="{Binding CoordinateText}" />
+                                    <TextBlock Margin="0,5,0,0" Style="{StaticResource CaptionText}"
+                                               Text="{Binding RightOfWayText, StringFormat=路权：{0}}" />
+                                    <TextBlock Margin="0,5,0,0" Style="{StaticResource CaptionText}" Text="{Binding HoldingText}" />
+                                    <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding KeySignals}"
+                                                  ItemTemplate="{StaticResource ScreenSignalTemplate}">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                    </ItemsControl>
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
