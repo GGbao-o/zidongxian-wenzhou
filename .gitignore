@@ -11,7 +11,7 @@
 # 运行期日志（按天生成，不入库）
 Logs/
 
-# 含数据库连接串等敏感信息，不入库；模板见 appsettings.Example.json
+# 实际配置含数据库连接串等敏感信息，不入库；直接维护此文件及运行目录副本
 src/AutomatedLine.Ui/appsettings.json
 
 # 操作系统生成文件

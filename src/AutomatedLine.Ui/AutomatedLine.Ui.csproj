@@ -28,11 +28,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- appsettings.json 不提交（含连接串），运行时从输出目录读取；模板见 appsettings.Example.json -->
+    <!-- 直接维护实际appsettings.json，运行时读取输出目录副本；含连接串，不提交Git。 -->
     <None Update="appsettings.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="appsettings.Example.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

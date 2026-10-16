@@ -1,3 +1,8 @@
+## 配置维护规范
+
+- 新增或补全程序参数时，更新 `src/AutomatedLine.Ui/appsettings.json` 和实际运行目录（调试时为 `src/AutomatedLine.Ui/bin/Debug/.../appsettings.json`）的文件；分别保留两份文件已有参数和连接串，只补缺失项。
+- 不再创建或维护 `appsettings.Example.json`，不以修改模板代替更新实际配置。
+
 ## Git 提交规范
 
 每次生成 commit message 时，必须：
