@@ -4,6 +4,7 @@ using AutomatedLine.Application.Collection;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Devices;
+using AutomatedLine.Domain.Routing;
 using AutomatedLine.Domain.Workpieces;
 using AutomatedLine.Ui.Helpers;
 using AutomatedLine.Ui.Services;
@@ -18,6 +19,11 @@ namespace AutomatedLine.Ui.ViewModels;
 /// </summary>
 public partial class ScreenViewModel : ObservableObject
 {
+    /// <summary>复用业务工艺路线确定设备展示顺序，避免页面自行维护另一套工序排列。</summary>
+    private static readonly IReadOnlyDictionary<DeviceType, int> DeviceProcessOrder = ProcessRoute.CreateDefault().Nodes
+        .Select((node, index) => new { node.DeviceType, Order = index })
+        .ToDictionary(node => node.DeviceType, node => node.Order);
+
     /// <summary>设备注册表。</summary>
     private readonly DeviceRegistry _deviceRegistry;
 
@@ -127,9 +133,13 @@ public partial class ScreenViewModel : ObservableObject
             .FirstOrDefault();
 
         //把界面绑定的 ObservableCollection<TItem> 集合，按数据源 source 的最新内容进行增量更新（增、删、改、排序），而不是清空重建。
+        // 工艺顺序优先；同类设备按Id稳定排列，未纳入路线的类型放最后，不能因数据库编号打乱工位组。
         ObservableCollectionSync.SyncById(
             Devices,
-            _deviceRegistry.Snapshot().OrderBy(d => d.Id).ToList(),
+            _deviceRegistry.Snapshot()
+                .OrderBy(d => DeviceProcessOrder.GetValueOrDefault(d.Type, int.MaxValue))
+                .ThenBy(d => d.Id)
+                .ToList(),
             row => row.Id,
             device => device.Id,
             device => new DeviceRowViewModel(device, _reservationManager.IsReserved, DisplayWorkpiece(device, queueHead)),
