@@ -7,6 +7,9 @@ namespace AutomatedLine.Application.Configuration;
 /// </summary>
 public sealed class AppOptions
 {
+    /// <summary>ERP文件接收参数；只创建未启动工件，不控制线路。</summary>
+    public ErpImportOptions ErpImport { get; set; } = new();
+
     /// <summary>采集类参数。</summary>
     public CollectionOptions Collection { get; set; } = new();
 
@@ -24,6 +27,19 @@ public sealed class AppOptions
 
     /// <summary>日志类参数。</summary>
     public LoggingOptions Logging { get; set; } = new();
+}
+
+/// <summary>ERP批量任务文件的路径、检查节拍和文本编码，监听循环每轮读取最新值。</summary>
+public sealed class ErpImportOptions
+{
+    /// <summary>ERP写完一批后等待接收的TXT完整路径。</summary>
+    public string FilePath { get; set; } = @"D:\job1\job1.txt";
+
+    /// <summary>一轮处理结束后的等待时间，毫秒；默认500，非正值视为配置错误。</summary>
+    public int PollIntervalMs { get; set; } = 500;
+
+    /// <summary>文件编码名称；默认utf-8，也可配置gbk。</summary>
+    public string Encoding { get; set; } = "utf-8";
 }
 
 /// <summary>采集参数。决定状态刷新的实时性与通信压力。</summary>

@@ -59,6 +59,42 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
     }
 
     /// <inheritdoc />
+    public WorkpieceTask? TryAddImported(WorkpieceInfo info)
+        => TryAddImportedBatch(new[] { info })[0];
+
+    /// <inheritdoc />
+    public IReadOnlyList<WorkpieceTask?> TryAddImportedBatch(IReadOnlyList<WorkpieceInfo> infos)
+    {
+        var results = new WorkpieceTask?[infos.Count];
+        if (infos.Count == 0) return results;
+        var created = new List<(WorkpieceTask Task, int Count)>();
+        // 一批只持锁一次，现有身份和批内身份一起去重；页面通知在锁外、全批提交后执行。
+        lock (_sync)
+        {
+            var identities = _tasks.Select(t => (t.Info.PlateNo, t.Info.SerialNo)).ToHashSet();
+            for (var index = 0; index < infos.Count; index++)
+            {
+                var info = infos[index];
+                if (!identities.Add((info.PlateNo, info.SerialNo))) continue;
+                var task = new WorkpieceTask(info);
+                _tasks.Add(task);
+                results[index] = task;
+                created.Add((task, _tasks.Count));
+            }
+        }
+        if (created.Count == 0) return results;
+        foreach (var entry in created)
+        {
+            var info = entry.Task.Info;
+            _logger.Info(LogCategory.Task, $"ERP任务创建：工件 {info}（{Describe(info)}），状态=Created，当前共 {entry.Count} 个");
+        }
+        // 仍保留每件生命周期日志，只合并列表通知；通知失败不能改变已经提交的成功结果。
+        try { Changed?.Invoke(this, EventArgs.Empty); }
+        catch (Exception ex) { _logger.Warn(LogCategory.Operation, $"ERP批量{created.Count}件已添加，列表通知失败：{ex.Message}"); }
+        return results;
+    }
+
+    /// <inheritdoc />
     public bool Remove(Guid taskId)
     {
         bool removed;

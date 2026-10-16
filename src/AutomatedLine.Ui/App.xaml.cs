@@ -3,6 +3,8 @@ using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Collection;
 using AutomatedLine.Application.Generation;
+using AutomatedLine.Application.Erp;
+using AutomatedLine.Infrastructure.Erp;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Reservations;
 using AutomatedLine.Infrastructure.Manual;
@@ -43,9 +45,10 @@ public partial class App : System.Windows.Application
         base.OnStartup(e);
 
         // 以程序输出目录为内容根，保证发布后也能读到 appsettings.json 与 Logs 目录，
-        // 不受"从哪个工作目录启动"的影响
+        // 不受"从哪个工作目录启动"的影响   
+        //它默认加载 appsettings.json 并开启 reloadOnChange。这一步由 HostingHostBuilderExtensions 框架源码 完成。  文件监听的实际代码在框架的 FileConfigurationProvider 中
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
-        {
+        { 
             ContentRootPath = AppContext.BaseDirectory
         });
 
@@ -143,6 +146,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton(configuration);
         services.AddSingleton<IConfigService>(configService);
         services.AddSingleton<IAppLogger, FileAppLogger>();
+
+        // ERP默认暂停；按钮只切换这个宿主单例，页面切换不会新建循环或停止监听。
+        services.AddSingleton<IErpJobFile, ErpJobFile>();
+        services.AddSingleton<ErpImportService>();
+        services.AddSingleton<IErpImportService>(sp => sp.GetRequiredService<ErpImportService>());
+        services.AddHostedService(sp => sp.GetRequiredService<ErpImportService>());
 
         // 数据库：只存配置。运行时用 AutoDetect 探测服务器版本，兼容本地/远程、MySQL/MariaDB，
         // 不把版本写死；连接串完全来自 appsettings.json，部署到远程只改配置即可。

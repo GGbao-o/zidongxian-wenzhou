@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <!-- 直接编译真实客户端与设备/天车驱动，验证通信边界、料架地址及脉冲协议，避免加载 MySQL 或 FOCAS 原生依赖。 -->
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Erp\ErpJobFile.cs" Link="Infrastructure\ErpJobFile.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\ModbusTcpClient.cs" Link="Infrastructure\ModbusTcpClient.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\CraneService.cs" Link="Infrastructure\CraneService.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\CraneAddress.cs" Link="Infrastructure\CraneAddress.cs" />

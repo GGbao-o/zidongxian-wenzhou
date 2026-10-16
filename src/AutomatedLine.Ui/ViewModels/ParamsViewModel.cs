@@ -81,6 +81,7 @@ public partial class ParamsViewModel : ObservableObject
 
         try
         {
+            //配置进行保存
             _configService.SaveAppOptions(_options);
         }
         catch (Exception ex)
@@ -107,6 +108,12 @@ public partial class ParamsViewModel : ObservableObject
     private void RebuildCards()
     {
         Categories.Clear();
+
+        var erp = new ParamCategoryViewModel("ERP接收", "批量文件路径、检查间隔与文本编码；只添加未启动工件");
+        erp.Items.Add(TextItem("监听文件路径", () => _options.ErpImport.FilePath, v => _options.ErpImport.FilePath = v));
+        erp.Items.Add(IntItem("文件检查间隔(ms)", () => _options.ErpImport.PollIntervalMs, v => _options.ErpImport.PollIntervalMs = v));
+        erp.Items.Add(TextItem("文件编码", () => _options.ErpImport.Encoding, v => _options.ErpImport.Encoding = v));
+        Categories.Add(erp);
 
         var collection = new ParamCategoryViewModel("采集", "设备/天车采集周期与通信超时");
         collection.Items.Add(IntItem("设备采集周期(ms)", () => _options.Collection.DeviceIntervalMs, v => _options.Collection.DeviceIntervalMs = v));

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Media;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
+using AutomatedLine.Application.Erp;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Domain.Devices;
 using AutomatedLine.Domain.Line;
@@ -26,6 +27,17 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>工件任务内存总表。任务增删都经由它，保证唯一事实来源。</summary>
     private readonly IRuntimeTaskManager _taskManager;
+
+    /// <summary>ERP接收控制；与线路启停分别管理。</summary>
+    private readonly IErpImportService _erpImport;
+
+    /// <summary>按钮第一次开启持续监听，再次暂停后续批次。</summary>
+    [ObservableProperty]
+    private string _erpButtonText = "监听 ERP 工件";
+
+    /// <summary>监听状态与最近批次结果，文件错误不会故障暂停线路。</summary>
+    [ObservableProperty]
+    private string _erpStatusText = "ERP监听已暂停｜尚未开启";
 
     /// <summary>设备注册表。用于展示已装载设备数量。</summary>
     private readonly DeviceRegistry _deviceRegistry;
@@ -82,6 +94,7 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     /// <param name="configService">配置服务</param>
     /// <param name="taskManager">内存任务表</param>
+    /// <param name="erpImport">ERP批量文件接收控制</param>
     /// <param name="deviceRegistry">设备注册表</param>
     /// <param name="craneRegistry">天车注册表</param>
     /// <param name="dialogService">弹窗服务</param>
@@ -91,6 +104,7 @@ public partial class MainViewModel : ObservableObject
     public MainViewModel(
         IConfigService configService,
         IRuntimeTaskManager taskManager,
+        IErpImportService erpImport,
         DeviceRegistry deviceRegistry,
         CraneRegistry craneRegistry,
         IDialogService dialogService,
@@ -100,6 +114,9 @@ public partial class MainViewModel : ObservableObject
     {
         _configService = configService;
         _taskManager = taskManager;
+        _erpImport = erpImport;
+        _erpImport.StateChanged += (_, _) => RefreshErpState();
+        RefreshErpState();
         _deviceRegistry = deviceRegistry;
         _craneRegistry = craneRegistry;
         _dialogService = dialogService;
@@ -143,6 +160,24 @@ public partial class MainViewModel : ObservableObject
 
         _taskManager.Add(info);
         Console.WriteLine($"[MainViewModel] 已添加任务 {info}");
+    }
+
+    /// <summary>切换ERP持续监听；不会启动工件或改变线路状态。</summary>
+    [RelayCommand]
+    private void ToggleErpListening() => _erpImport.SetListening(!_erpImport.Status.IsListening);
+
+    // 状态来自宿主线程；异步切回UI，暂停按钮不等待当前文件批次，避免界面与后台互等。
+    private void RefreshErpState()
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            if (!dispatcher.HasShutdownStarted) dispatcher.BeginInvoke((Action)RefreshErpState);
+            return;
+        }
+        var state = _erpImport.Status;
+        ErpButtonText = state.IsListening ? "暂停 ERP 监听" : "监听 ERP 工件";
+        ErpStatusText = $"ERP监听{(state.IsListening ? "中" : "已暂停")}｜{state.Message}｜累计接收{state.ImportedCount}件";
     }
 
     /// <summary>

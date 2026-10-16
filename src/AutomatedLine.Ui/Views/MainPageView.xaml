@@ -78,6 +78,10 @@
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0" Margin="20,16,20,12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
                     <TextBlock
                         VerticalAlignment="Center"
                         FontSize="16"
@@ -93,9 +97,16 @@
                             Command="{Binding ToggleLineCommand}"
                             Content="{Binding LineButtonText}" />
                         <ui:Button
+                            Margin="0,0,12,0"
+                            Command="{Binding ToggleErpListeningCommand}"
+                            Content="{Binding ErpButtonText}" />
+                        <ui:Button
                             Command="{Binding AddTaskCommand}"
                             Content="添加任务" />
                     </StackPanel>
+                    <TextBlock Grid.Row="1" Margin="0,8,0,0"
+                               Style="{StaticResource CaptionText}" TextWrapping="Wrap"
+                               Text="{Binding ErpStatusText}" />
                 </Grid>
 
                 <!-- DataGrid 自带横竖滚动条，任务多时横向/纵向均可滚动 -->
