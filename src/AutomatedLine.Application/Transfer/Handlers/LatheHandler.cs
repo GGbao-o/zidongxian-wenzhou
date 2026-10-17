@@ -23,7 +23,7 @@ public sealed class LatheHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
-    /// <inheritdoc />  斜床取料
+    /// <inheritdoc />  斜床下料操作
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         ctx.LogStep(source, "取料：开始（等设备请求下料 RequestUnload=1）");
@@ -34,7 +34,7 @@ public sealed class LatheHandler : ITransferHandler
         var pickY = y - yOffset;   // 二次偏移位置
 
         ctx.LogStep(source, $"取料：XY → 设备上方并做 Y 二次偏移（X={x} Y={pickY}，Y偏移={yOffset}）");
-        //y到偏移位置
+        //y到偏移位置 绝对移动
         await ctx.MoveAbsoluteAsync(x, pickY, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
@@ -56,6 +56,7 @@ public sealed class LatheHandler : ITransferHandler
         await ctx.WaitDeviceAsync(source, "TailstockOpened", true, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(source, $"取料：Y 回工件中心（相对 +{yOffset}）");
+        //相对移动  走正数
         await ctx.MoveRelativeAsync(0, yOffset, 0, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(source, "取料：Z 回升到安全高度");
@@ -66,7 +67,7 @@ public sealed class LatheHandler : ITransferHandler
         ctx.LogStep(source, "取料：完成（可离开源设备）");
     }
 
-    /// <inheritdoc /> 斜床放料
+    /// <inheritdoc /> 斜床上料操作
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
         ctx.LogStep(target, "放料：开始（等设备请求数据 RequestData=1）");
@@ -87,6 +88,7 @@ public sealed class LatheHandler : ITransferHandler
         await ctx.WaitDeviceAsync(target, "RequestLoad", true, cancellationToken).ConfigureAwait(false);
 
         var (x, y, z) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
+        //计算相对移动的距离
         var yOffset = OffsetOf(ctx, target.Id);
 
         var zTarget = z - CraneCoordinate.ZDrop(target.Type, info.Diameter);
@@ -95,7 +97,7 @@ public sealed class LatheHandler : ITransferHandler
 
         // 目标特有：Y 二次偏移 → 发天车上料到位(#1102) → 尾座夹紧
         ctx.LogStep(target, $"放料：Y 二次偏移进入顶尖（相对 −{yOffset}）");
-        //相对移动 
+        // 上料是相对移动   下料这个步骤也是相对移动
         await ctx.MoveRelativeAsync(0, -yOffset, 0, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(target, "放料：写 天车上料到位=1（CraneLoadInPlace）");

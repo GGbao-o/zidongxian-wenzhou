@@ -5,6 +5,12 @@ using Microsoft.Extensions.Hosting;
 
 namespace AutomatedLine.Application.Collection;
 
+/*使用位置	用途
+大屏展示 ScreenViewModel	显示坐标、报警、有板、充退磁等信号
+手动操作页 ManualOperationViewModel	更新当前所选天车左侧的状态显示
+天车调度器 CraneScheduler	根据有效缓存中的报警、位置等信息选择天车
+冷启动检查 ColdStartChecker	程序启动及重新启动线路时，检查天车现场有板情况
+这四处共用 CraneStateStore，通过 GetFreshStatus() 获取有效状态。*/
 /// <summary>随宿主运行的天车状态采集服务；每车一个串行循环，跨车独立发布，暂停线路仍持续采集。</summary>
 /// 继承 BackgroundService   调用ExecuteAsync()
 public sealed class CraneStateCollector : BackgroundService

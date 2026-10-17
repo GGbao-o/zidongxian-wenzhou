@@ -104,6 +104,7 @@ public sealed class DeviceStateCollector : IDeviceStateCollector, IHostedService
     /// <param name="cancellationToken">取消令牌</param>
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        //获取参数
         var options = _configService.GetAppOptions().Collection;
         var deviceInterval = Math.Max(50, options.DeviceIntervalMs);
 

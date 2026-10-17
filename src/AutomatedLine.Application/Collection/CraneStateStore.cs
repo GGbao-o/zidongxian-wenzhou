@@ -36,7 +36,7 @@ public sealed class CraneStateStore : ICraneStateProvider
     /// <inheritdoc />   获取完整采集快照，包括 PLC 状态、采集时间、成功或失败原因、序号等。
     public CraneStateSnapshot? GetSnapshot(int craneId) => FindCurrent(craneId)?.Snapshot;
 
-    /// <inheritdoc />  只获取有效且没有过期的 PLC 状态，适合天车调度、运动控制前的状态判断
+    /// <inheritdoc />  只获取有效且没有过期的 PLC 状态，适合天车调度、运动控制前的状态判断   这个方法一共四个地方用 读取天车的快照
     public CraneStatusDto? GetFreshStatus(int craneId)
     {
         var entry = FindCurrent(craneId);

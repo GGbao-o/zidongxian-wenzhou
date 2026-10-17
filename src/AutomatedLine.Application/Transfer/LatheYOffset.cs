@@ -20,8 +20,9 @@ public static class LatheYOffset
     /// <returns>Y 偏移量（取整）</returns>
     public static int Compute(LatheTransferOptions options, int plugHole, double length)
     {
+        //70/100孔的偏移量
         var holeOffset = plugHole == BigHolePlug ? options.BigHoleOffset : options.SmallHoleOffset;
-        // 四舍五入（.5 进位），不用 Math.Round 默认的银行家舍入
+        // (顶尖中心距−工件长度)/2 + 孔径偏移；.5进位，不用Math.Round默认的银行家舍入。
         return (int)Math.Round((options.TailstockCenterDistance - length) / 2.0 + holeOffset, MidpointRounding.AwayFromZero);
     }
 }

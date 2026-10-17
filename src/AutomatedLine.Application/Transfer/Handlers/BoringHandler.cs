@@ -23,7 +23,7 @@ public sealed class BoringHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
-    /// <inheritdoc /> 取料操作
+    /// <inheritdoc /> 下料操作
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         ctx.LogStep(source, "取料：开始（等设备请求下料 RequestUnload，12215=1）");
@@ -59,7 +59,7 @@ public sealed class BoringHandler : ITransferHandler
         ctx.LogStep(source, "取料：完成（可离开源设备）");
     }
 
-    /// <inheritdoc />放料操作 
+    /// <inheritdoc />上料操作
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
         ctx.LogStep(target, "放料：开始（等设备请求数据 RequestData，12203=1）");

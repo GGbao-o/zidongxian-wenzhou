@@ -361,6 +361,7 @@ public sealed class TransferContext
     /// <param name="action">步骤说明</param>
     public void LogStep(string action)
     {
+        //更新天车字段CurrentStep  大屏展示页面会进行显示
         PublishStep(action);
         _logger.Info(LogCategory.StateMachine, $"{Tag} {action}");
     }
