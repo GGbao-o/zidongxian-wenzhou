@@ -15,7 +15,7 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!--  顶栏：PLC 按需刷新；任务状态另从内存读取  -->
+        <!--  顶栏：PLC 状态应用共享采集缓存；任务状态另从 Worker 内存读取。  -->
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
             <StackPanel
                 Orientation="Horizontal">
@@ -133,7 +133,7 @@
 
                 <!--  设置速度（绝对速度）  -->
                 <Border
-                    Width="330"
+                    Width="420"
                     Margin="0,0,12,0"
                     Style="{StaticResource CardBorder}">
                     <StackPanel>
@@ -141,38 +141,38 @@
                         <TextBlock Margin="0,8,0,0" Text="X 速度 / 加速 / 减速" />
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBox
-                                Width="70"
-                                Margin="0,0,4,0"
+                                Width="110"
+                                Margin="0,0,8,0"
                                 Text="{Binding SpeedX}" />
                             <ui:TextBox
-                                Width="70"
-                                Margin="0,0,4,0"
+                                Width="110"
+                                Margin="0,0,8,0"
                                 Text="{Binding AccelX}" />
-                            <ui:TextBox Width="70" Text="{Binding DecelX}" />
+                            <ui:TextBox Width="110" Text="{Binding DecelX}" />
                         </StackPanel>
                         <TextBlock Margin="0,8,0,0" Text="Y 速度 / 加速 / 减速" />
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBox
-                                Width="70"
-                                Margin="0,0,4,0"
+                                Width="110"
+                                Margin="0,0,8,0"
                                 Text="{Binding SpeedY}" />
                             <ui:TextBox
-                                Width="70"
-                                Margin="0,0,4,0"
+                                Width="110"
+                                Margin="0,0,8,0"
                                 Text="{Binding AccelY}" />
-                            <ui:TextBox Width="70" Text="{Binding DecelY}" />
+                            <ui:TextBox Width="110" Text="{Binding DecelY}" />
                         </StackPanel>
                         <TextBlock Margin="0,8,0,0" Text="Z 速度 / 加速 / 减速" />
                         <StackPanel Orientation="Horizontal">
                             <ui:TextBox
-                                Width="70"
-                                Margin="0,0,4,0"
+                                Width="110"
+                                Margin="0,0,8,0"
                                 Text="{Binding SpeedZ}" />
                             <ui:TextBox
-                                Width="70"
-                                Margin="0,0,4,0"
+                                Width="110"
+                                Margin="0,0,8,0"
                                 Text="{Binding AccelZ}" />
-                            <ui:TextBox Width="70" Text="{Binding DecelZ}" />
+                            <ui:TextBox Width="110" Text="{Binding DecelZ}" />
                         </StackPanel>
                         <ui:Button
                             Margin="0,12,0,0"
@@ -210,7 +210,7 @@
 
                 <!--  相对移动  -->
                 <Border
-                    Width="220"
+                    Width="240"
                     Margin="0,0,12,0"
                     Style="{StaticResource CardBorder}">
                     <StackPanel>
@@ -218,19 +218,25 @@
                         <TextBlock
                             Margin="0,8,0,0"
                             Style="{StaticResource CaptionText}"
-                            Text="以显示值为基准（0=该轴不动）"
+                            Text="以显示值为基准，每次点击移动一个步长"
                             TextWrapping="Wrap" />
-                        <TextBlock Margin="0,8,0,0" Text="X 相对值" />
-                        <ui:TextBox Text="{Binding RelX}" />
-                        <TextBlock Margin="0,6,0,0" Text="Y 相对值" />
-                        <ui:TextBox Text="{Binding RelY}" />
-                        <TextBlock Margin="0,6,0,0" Text="Z 相对值" />
-                        <ui:TextBox Text="{Binding RelZ}" />
-                        <ui:Button
-                            Margin="0,12,0,0"
-                            Appearance="Primary"
-                            Command="{Binding MoveRelativeCommand}"
-                            Content="相对移动" />
+                        <TextBlock Margin="0,8,0,0" Text="移动步长（mm，正整数）" />
+                        <ui:TextBox Text="{Binding RelativeStep, UpdateSourceTrigger=PropertyChanged}" />
+                        <!--  共用命令确保六个方向执行期间统一禁用，只向所选轴传入增量。  -->
+                        <UniformGrid Margin="0,12,0,0" Columns="2" Rows="3">
+                            <ui:Button Margin="0,0,8,8" HorizontalAlignment="Stretch"
+                                       Command="{Binding MoveRelativeCommand}" CommandParameter="X+" Content="X+" />
+                            <ui:Button Margin="0,0,0,8" HorizontalAlignment="Stretch"
+                                       Command="{Binding MoveRelativeCommand}" CommandParameter="X-" Content="X-" />
+                            <ui:Button Margin="0,0,8,8" HorizontalAlignment="Stretch"
+                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Y+" Content="Y+" />
+                            <ui:Button Margin="0,0,0,8" HorizontalAlignment="Stretch"
+                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Y-" Content="Y-" />
+                            <ui:Button Margin="0,0,8,0" HorizontalAlignment="Stretch"
+                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Z+" Content="Z+" />
+                            <ui:Button HorizontalAlignment="Stretch"
+                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Z-" Content="Z-" />
+                        </UniformGrid>
                     </StackPanel>
                 </Border>
 

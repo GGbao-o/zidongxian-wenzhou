@@ -166,33 +166,29 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>用户输入 Z 绝对值。</summary>
     [ObservableProperty] private int _absZ;
 
-    // ── 相对移动输入 ──
-    /// <summary>X 相对值。</summary>
-    [ObservableProperty] private int _relX;
-    /// <summary>Y 相对值。</summary>
-    [ObservableProperty] private int _relY;
-    /// <summary>Z 相对值。</summary>
-    [ObservableProperty] private int _relZ;
+    // 用文本保留未完成或非法输入，点击时再校验，避免解析失败后误用上一次有效步长。
+    /// <summary>六个单轴相对移动按钮共用的步长文本，单位mm，点击时要求为正整数。</summary>
+    [ObservableProperty] private string _relativeStep = "0";
 
     // ── 速度设置输入（绝对速度） ──
     /// <summary>X 速度。</summary>
     [ObservableProperty] private int _speedX = 100;
     /// <summary>X 加速度。</summary>
-    [ObservableProperty] private int _accelX = 100;
+    [ObservableProperty] private int _accelX = 40;
     /// <summary>X 减速度。</summary>
-    [ObservableProperty] private int _decelX = 100;
+    [ObservableProperty] private int _decelX = 20;
     /// <summary>Y 速度。</summary>
-    [ObservableProperty] private int _speedY = 100;
+    [ObservableProperty] private int _speedY = 60;
     /// <summary>Y 加速度。</summary>
-    [ObservableProperty] private int _accelY = 100;
+    [ObservableProperty] private int _accelY = 30;
     /// <summary>Y 减速度。</summary>
-    [ObservableProperty] private int _decelY = 100;
+    [ObservableProperty] private int _decelY = 20;
     /// <summary>Z 速度。</summary>
-    [ObservableProperty] private int _speedZ = 100;
+    [ObservableProperty] private int _speedZ = 80;
     /// <summary>Z 加速度。</summary>
-    [ObservableProperty] private int _accelZ = 100;
+    [ObservableProperty] private int _accelZ = 30;
     /// <summary>Z 减速度。</summary>
-    [ObservableProperty] private int _decelZ = 100;
+    [ObservableProperty] private int _decelZ = 20;
 
     /// <summary>
     /// 构造函数。
@@ -386,11 +382,35 @@ public partial class ManualOperationViewModel : ObservableObject
         await FinishAsync(result);
     }
 
-    /// <summary>相对移动。</summary>
+    /// <summary>把页面所选轴向和步长转为原相对移动服务的三轴增量，其他两轴传0。</summary>
+    /// <param name="direction">按钮轴向：X+、X-、Y+、Y-、Z+或Z-。</param>
     [RelayCommand]
-    private async Task MoveRelativeAsync()
+    private async Task MoveRelativeAsync(string? direction)
     {
-        var result = await WithCrane(id => _manualOperationService.MoveRelativeAsync(id, RelX, RelY, RelZ));
+        if (!int.TryParse(RelativeStep, out var step) || step <= 0)
+        {
+            Message = "请输入大于0的整数移动步长（mm）。";
+            return;
+        }
+
+        // 六个按钮共用一个异步命令，执行期间统一禁用；轴向只在UI层映射，不改变运动算法。
+        (int X, int Y, int Z)? offset = direction switch
+        {
+            "X+" => (step, 0, 0),
+            "X-" => (-step, 0, 0),
+            "Y+" => (0, step, 0),
+            "Y-" => (0, -step, 0),
+            "Z+" => (0, 0, step),
+            "Z-" => (0, 0, -step),
+            _ => null
+        };
+        if (offset is not { } delta)
+        {
+            Message = "请选择有效的相对移动方向。";
+            return;
+        }
+
+        var result = await WithCrane(id => _manualOperationService.MoveRelativeAsync(id, delta.X, delta.Y, delta.Z));
         await FinishAsync(result);
     }
 
