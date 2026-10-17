@@ -39,9 +39,12 @@ public static class DriverFactory
                 config.Id, config.IpAddress, GrinderMachineAddress.Port, GrinderMachineAddress.ResolveUnitId(config.IpAddress),
                 DeviceModbusMaps.Grinder(), logger, timeoutMs),
 
+            // 旧打号机正常FC04响应固定多发一个00；仅此类型在锁内消费尾字节，恢复连接复用。
             DeviceType.MarkerMachine => new ModbusDeviceDriver(
                 config.Id, config.IpAddress, MarkerMachineAddress.Port, MarkerMachineAddress.UnitId,
-                DeviceModbusMaps.Marker(), logger, timeoutMs),
+                DeviceModbusMaps.Marker(), logger, timeoutMs,
+                inputRegisterBlock: (MarkerMachineAddress.InputStart, MarkerMachineAddress.InputCount),
+                expectMarkerReadTrailingZero: true),
 
             DeviceType.LoadRack or DeviceType.UnloadRack => new ModbusDeviceDriver(
                 config.Id, config.IpAddress, RackAddress.Port, RackAddress.UnitId,

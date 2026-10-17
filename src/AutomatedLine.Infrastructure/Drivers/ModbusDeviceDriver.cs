@@ -51,6 +51,12 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
+    /// <summary>设备协议明确支持的 FC04 连续输入区；未指定时保持原逐点读取。</summary>
+    private readonly (int Start, int Count)? _inputRegisterBlock;
+
+    /// <summary>工厂仅为旧打号机启用FC04响应尾零适配，正常读写继续复用连接。</summary>
+    private readonly bool _expectMarkerReadTrailingZero;
+
     /// <summary>
     /// 构造函数。
     /// </summary>
@@ -61,12 +67,17 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
     /// <param name="points">点位表</param>
     /// <param name="logger">日志</param>
     /// <param name="timeoutMs">单次请求/连接超时（毫秒），来自配置 Collection.CommunicationTimeoutMs</param>
-    public ModbusDeviceDriver(int deviceId, string ip, int port, byte unitId, IReadOnlyList<ModbusPoint> points, IAppLogger logger, int timeoutMs = 3000)
+    /// <param name="inputRegisterBlock">可选的 FC04 连续输入区，打号机使用起点0、数量4；其他设备不指定</param>
+    /// <param name="expectMarkerReadTrailingZero">是否适配FC04正常响应末尾额外的一个00，默认false，仅旧打号机启用</param>
+    public ModbusDeviceDriver(int deviceId, string ip, int port, byte unitId, IReadOnlyList<ModbusPoint> points, IAppLogger logger, int timeoutMs = 3000,
+        (int Start, int Count)? inputRegisterBlock = null, bool expectMarkerReadTrailingZero = false)
     {
         DeviceId = deviceId;
         _points = points;
         _logger = logger;
-        _client = new ModbusTcpClient(ip, port, unitId, timeoutMs);
+        _inputRegisterBlock = inputRegisterBlock;
+        _expectMarkerReadTrailingZero = expectMarkerReadTrailingZero;
+        _client = new ModbusTcpClient(ip, port, unitId, timeoutMs, logger, expectMarkerReadTrailingZero);
     }
 
     /// <inheritdoc />
@@ -88,6 +99,19 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
     {
         // 只读**输入信号**（机床→上位机，均为 1/0 或状态字）；下发的加工参数与握手输出位只写不读。
         var result = new Dictionary<string, object?>();
+        // 打号机与现场工具保持同一请求形态：FC04(0,4)，四个状态来自同一次响应，失败不返回半份快照。
+        ushort[]? inputRegisters = null;
+        if (_inputRegisterBlock is { } block)
+        {
+            inputRegisters = await _client.ReadInputRegistersAsync(block.Start, block.Count, cancellationToken).ConfigureAwait(false);
+            if (_expectMarkerReadTrailingZero)
+            {
+                // 只在驱动返回后记录，说明尾字节已实际消费；保持抽样节流，不为500ms轮询逐次刷日志。
+                _logger.Sample(LogCategory.Communication, $"marker-read-trailer-{DeviceId}",
+                    $"设备[{DeviceId}] FC04尾字节适配采集完成：起始地址={block.Start}，数量={block.Count}，已消费并校验尾字节00，保留连接复用");
+            }
+        }
+
         foreach (var point in _points)
         {
             if (point.Writable)
@@ -95,7 +119,17 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
                 continue;
             }
 
-            result[point.Name] = await ReadPointAsync(point, cancellationToken).ConfigureAwait(false);
+            if (inputRegisters is not null && _inputRegisterBlock is { } range
+                && point.Area == ModbusArea.InputRegister
+                && point.Address >= range.Start && point.Address - range.Start < range.Count)
+            {
+                var raw = inputRegisters[point.Address - range.Start];
+                result[point.Name] = point.IsBool ? raw != 0 : (object)(raw / point.Scale);
+            }
+            else
+            {
+                result[point.Name] = await ReadPointAsync(point, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         return result;
@@ -104,6 +138,8 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
     /// <inheritdoc />
     public async Task WriteSignalAsync(string pointName, object? value, CancellationToken cancellationToken = default)
     {
+        // 写响应按标准长度处理；仅在收到应答后记录成功，不把“已发送”当成功。
+        var connectionSuffix = _expectMarkerReadTrailingZero ? "（打号机长连接：应答已接收）" : string.Empty;
         // 打号机打印内容：字节流按 FC16 写多寄存器
         if (pointName == "PrintContent")
         {
@@ -123,7 +159,7 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
             }
 
             await _client.WriteRegistersAsync(MarkerMachineAddress.PrintContentStart, registers, cancellationToken).ConfigureAwait(false);
-            _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] 写打印内容 {bytes.Length} 字节");
+            _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] 写打印内容 {bytes.Length} 字节{connectionSuffix}");
             return;
         }
 
@@ -141,7 +177,7 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
                 if (point.RoundViaInt32)
                 {
                     _logger.Info(LogCategory.Communication,
-                        $"设备[{DeviceId}] FC06写 {point.Name}，PDU={point.Address}，录入={value}，倍率={point.Scale}，Word={raw} 成功");
+                        $"设备[{DeviceId}] FC06写 {point.Name}，PDU={point.Address}，录入={value}，倍率={point.Scale}，Word={raw} 成功{connectionSuffix}");
                     return;
                 }
                 break;
@@ -149,7 +185,7 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
                 throw new NotSupportedException($"设备[{DeviceId}] 点名 {pointName} 所在区域不可写");
         }
 
-        _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] 写 {pointName}={value}");
+        _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] 写 {pointName}={value}{connectionSuffix}");
     }
 
     /// <summary>按点位读取单个值。</summary>

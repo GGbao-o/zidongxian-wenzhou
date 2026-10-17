@@ -135,7 +135,7 @@ public sealed class CraneService : ICraneDriver
         _positionTolerance = crane.PositionToleranceMm > 0 ? crane.PositionToleranceMm : FallbackPositionToleranceMm;
         _pressureTolerance = crane.PressureToleranceMm > 0 ? crane.PressureToleranceMm : FallbackPressureToleranceMm;
 
-        _client = new ModbusTcpClient(ip, PlcPort, UnitId);
+        _client = new ModbusTcpClient(ip, PlcPort, UnitId, logger: logger);
         _logger.Info(LogCategory.System,
             $"天车[{name}] 创建服务，IP={ip}:{PlcPort}（端口/协议固定），运动超时={_moveTimeoutMs}ms，到位容差={_positionTolerance}mm，下压容差={_pressureTolerance}mm");
     }
