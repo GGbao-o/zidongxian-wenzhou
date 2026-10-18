@@ -8,6 +8,142 @@
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
     d:DataContext="{d:DesignInstance Type=vm:ManualOperationViewModel}"
     mc:Ignorable="d">
+    <UserControl.Resources>
+        <!--  配色只作用于本页，用于区分操作用途，不表示PLC当前状态；命令及禁用条件仍由原绑定决定。  -->
+        <Style
+            x:Key="ManualButtonBase"
+            BasedOn="{StaticResource {x:Type ui:Button}}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <!--  显式绑定背景与文字，避免主题默认模板覆盖语义配色；沿用原按钮尺寸、字体和内边距。  -->
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ui:Button}">
+                        <Grid>
+                            <Border
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                                <Grid>
+                                    <!--  内容保留在边框内参与测量，沿用原按钮边框与Padding占用的尺寸。  -->
+                                    <Border
+                                        x:Name="InteractionShade"
+                                        Background="Black"
+                                        CornerRadius="5"
+                                        IsHitTestVisible="False"
+                                        Opacity="0" />
+                                    <ContentPresenter
+                                        Margin="{TemplateBinding Padding}"
+                                        HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                        Content="{TemplateBinding Content}"
+                                        ContentStringFormat="{TemplateBinding ContentStringFormat}"
+                                        ContentTemplate="{TemplateBinding ContentTemplate}"
+                                        RecognizesAccessKey="True"
+                                        TextElement.Foreground="{TemplateBinding Foreground}" />
+                                </Grid>
+                            </Border>
+                            <Border
+                                x:Name="KeyboardFocusRing"
+                                Margin="-3"
+                                BorderBrush="#1D4ED8"
+                                BorderThickness="2"
+                                CornerRadius="8"
+                                IsHitTestVisible="False"
+                                Opacity="0" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="InteractionShade" Property="Opacity" Value="0.07" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="InteractionShade" Property="Opacity" Value="0.16" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="KeyboardFocusRing" Property="Opacity" Value="1" />
+                            </Trigger>
+                            <!--  禁用态最后覆盖悬浮/按下效果，避免不可用按钮仍呈现可操作的颜色。  -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Background" Value="#E2E8F0" />
+                                <Setter Property="BorderBrush" Value="#CBD5E1" />
+                                <Setter Property="Foreground" Value="#64748B" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                                <Setter TargetName="InteractionShade" Property="Opacity" Value="0" />
+                                <Setter TargetName="KeyboardFocusRing" Property="Opacity" Value="0" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style
+            x:Key="ManualMotionButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#2563EB" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#1D4ED8" />
+        </Style>
+        <Style
+            x:Key="ManualDirectionButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#DBEAFE" />
+            <Setter Property="Foreground" Value="#1E40AF" />
+            <Setter Property="BorderBrush" Value="#93C5FD" />
+        </Style>
+        <Style
+            x:Key="ManualActivateButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#15803D" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#166534" />
+        </Style>
+        <Style
+            x:Key="ManualReleaseButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#FEF3C7" />
+            <Setter Property="Foreground" Value="#92400E" />
+            <Setter Property="BorderBrush" Value="#FCD34D" />
+        </Style>
+        <Style
+            x:Key="ManualAttentionButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#B45309" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#92400E" />
+        </Style>
+        <Style
+            x:Key="ManualEmergencyButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#DC2626" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderBrush" Value="#B91C1C" />
+        </Style>
+        <Style
+            x:Key="ManualAbortButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#FEE2E2" />
+            <Setter Property="Foreground" Value="#991B1B" />
+            <Setter Property="BorderBrush" Value="#DC2626" />
+        </Style>
+        <Style
+            x:Key="ManualRefreshButton"
+            BasedOn="{StaticResource ManualButtonBase}"
+            TargetType="{x:Type ui:Button}">
+            <Setter Property="Background" Value="#E2E8F0" />
+            <Setter Property="Foreground" Value="#334155" />
+            <Setter Property="BorderBrush" Value="#CBD5E1" />
+        </Style>
+    </UserControl.Resources>
     <Grid Margin="24,12,24,24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -17,8 +153,7 @@
 
         <!--  顶栏：PLC 状态应用共享采集缓存；任务状态另从 Worker 内存读取。  -->
         <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <StackPanel
-                Orientation="Horizontal">
+            <StackPanel Orientation="Horizontal">
                 <TextBlock
                     Margin="0,0,8,0"
                     VerticalAlignment="Center"
@@ -32,7 +167,8 @@
                 <ui:Button
                     Margin="8,0,0,0"
                     Command="{Binding RefreshCommand}"
-                    Content="刷新" />
+                    Content="刷新"
+                    Style="{StaticResource ManualRefreshButton}" />
                 <Border
                     Margin="12,0,0,0"
                     Padding="12,4"
@@ -46,12 +182,19 @@
                 </Border>
             </StackPanel>
             <WrapPanel Margin="0,8,0,0">
-                <TextBlock Margin="0,0,12,0" VerticalAlignment="Center"
-                           Text="{Binding CurrentTaskText}" />
-                <ui:Button Command="{Binding AbortCurrentTaskCommand}" Content="中止当前任务" />
-                <TextBlock Margin="12,0,0,0" VerticalAlignment="Center"
-                           Foreground="{StaticResource TextPrimaryBrush}"
-                           Text="中止将弃板并暂停线路；现场负责停止天车。" />
+                <TextBlock
+                    Margin="0,0,12,0"
+                    VerticalAlignment="Center"
+                    Text="{Binding CurrentTaskText}" />
+                <ui:Button
+                    Command="{Binding AbortCurrentTaskCommand}"
+                    Content="中止当前任务"
+                    Style="{StaticResource ManualAbortButton}" />
+                <TextBlock
+                    Margin="12,0,0,0"
+                    VerticalAlignment="Center"
+                    Foreground="{StaticResource TextPrimaryBrush}"
+                    Text="中止将弃板并暂停线路；现场负责停止天车。" />
             </WrapPanel>
         </StackPanel>
 
@@ -64,7 +207,7 @@
 
                 <!--  状态显示  -->
                 <Border
-                    Width="330"
+                    Width="280"
                     Margin="0,0,12,0"
                     Style="{StaticResource CardBorder}">
                     <StackPanel>
@@ -176,9 +319,73 @@
                         </StackPanel>
                         <ui:Button
                             Margin="0,12,0,0"
-                            Appearance="Primary"
                             Command="{Binding SetSpeedCommand}"
-                            Content="设置速度" />
+                            Content="设置速度"
+                            Style="{StaticResource ManualMotionButton}" />
+                    </StackPanel>
+                </Border>
+
+                <!--  相对移动  -->
+                <Border
+                    Width="240"
+                    Margin="0,0,12,0"
+                    Style="{StaticResource CardBorder}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource CardTitle}" Text="相对移动" />
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            Style="{StaticResource CaptionText}"
+                            Text="以显示值为基准，每次点击移动一个步长"
+                            TextWrapping="Wrap" />
+                        <TextBlock Margin="0,8,0,0" Text="移动步长（mm，正整数）" />
+                        <ui:TextBox Text="{Binding RelativeStep, UpdateSourceTrigger=PropertyChanged}" />
+                        <!--  共用命令确保六个方向执行期间统一禁用，只向所选轴传入增量。  -->
+                        <UniformGrid
+                            Margin="0,12,0,0"
+                            Columns="2"
+                            Rows="3">
+                            <ui:Button
+                                Margin="0,0,8,8"
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="X+"
+                                Content="X+"
+                                Style="{StaticResource ManualDirectionButton}" />
+                            <ui:Button
+                                Margin="0,0,0,8"
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="X-"
+                                Content="X-"
+                                Style="{StaticResource ManualDirectionButton}" />
+                            <ui:Button
+                                Margin="0,0,8,8"
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Y+"
+                                Content="Y+"
+                                Style="{StaticResource ManualDirectionButton}" />
+                            <ui:Button
+                                Margin="0,0,0,8"
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Y-"
+                                Content="Y-"
+                                Style="{StaticResource ManualDirectionButton}" />
+                            <ui:Button
+                                Margin="0,0,8,0"
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Z+"
+                                Content="Z+"
+                                Style="{StaticResource ManualDirectionButton}" />
+                            <ui:Button
+                                HorizontalAlignment="Stretch"
+                                Command="{Binding MoveRelativeCommand}"
+                                CommandParameter="Z-"
+                                Content="Z-"
+                                Style="{StaticResource ManualDirectionButton}" />
+                        </UniformGrid>
                     </StackPanel>
                 </Border>
 
@@ -202,43 +409,12 @@
                         <ui:TextBox Text="{Binding AbsZ}" />
                         <ui:Button
                             Margin="0,12,0,0"
-                            Appearance="Primary"
                             Command="{Binding MoveAbsoluteCommand}"
-                            Content="绝对移动" />
+                            Content="绝对移动"
+                            Style="{StaticResource ManualMotionButton}" />
                     </StackPanel>
                 </Border>
 
-                <!--  相对移动  -->
-                <Border
-                    Width="240"
-                    Margin="0,0,12,0"
-                    Style="{StaticResource CardBorder}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource CardTitle}" Text="相对移动" />
-                        <TextBlock
-                            Margin="0,8,0,0"
-                            Style="{StaticResource CaptionText}"
-                            Text="以显示值为基准，每次点击移动一个步长"
-                            TextWrapping="Wrap" />
-                        <TextBlock Margin="0,8,0,0" Text="移动步长（mm，正整数）" />
-                        <ui:TextBox Text="{Binding RelativeStep, UpdateSourceTrigger=PropertyChanged}" />
-                        <!--  共用命令确保六个方向执行期间统一禁用，只向所选轴传入增量。  -->
-                        <UniformGrid Margin="0,12,0,0" Columns="2" Rows="3">
-                            <ui:Button Margin="0,0,8,8" HorizontalAlignment="Stretch"
-                                       Command="{Binding MoveRelativeCommand}" CommandParameter="X+" Content="X+" />
-                            <ui:Button Margin="0,0,0,8" HorizontalAlignment="Stretch"
-                                       Command="{Binding MoveRelativeCommand}" CommandParameter="X-" Content="X-" />
-                            <ui:Button Margin="0,0,8,8" HorizontalAlignment="Stretch"
-                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Y+" Content="Y+" />
-                            <ui:Button Margin="0,0,0,8" HorizontalAlignment="Stretch"
-                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Y-" Content="Y-" />
-                            <ui:Button Margin="0,0,8,0" HorizontalAlignment="Stretch"
-                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Z+" Content="Z+" />
-                            <ui:Button HorizontalAlignment="Stretch"
-                                       Command="{Binding MoveRelativeCommand}" CommandParameter="Z-" Content="Z-" />
-                        </UniformGrid>
-                    </StackPanel>
-                </Border>
 
                 <!--  动作  -->
                 <Border Width="300" Style="{StaticResource CardBorder}">
@@ -248,39 +424,48 @@
                             <ui:Button
                                 Margin="0,0,6,6"
                                 Command="{Binding ClearAlarmCommand}"
-                                Content="清除报警" />
+                                Content="清除报警"
+                                Style="{StaticResource ManualAttentionButton}" />
                             <ui:Button
                                 Margin="0,0,0,6"
                                 Command="{Binding EmergencyStopCommand}"
-                                Content="急停" />
+                                Content="急停"
+                                Style="{StaticResource ManualEmergencyButton}" />
                             <ui:Button
                                 Margin="0,0,6,6"
                                 Command="{Binding SlowStopCommand}"
-                                Content="减速停止" />
+                                Content="减速停止"
+                                Style="{StaticResource ManualAttentionButton}" />
                             <ui:Button
                                 Margin="0,0,0,6"
                                 Command="{Binding ServoOnCommand}"
-                                Content="伺服通电" />
+                                Content="伺服通电"
+                                Style="{StaticResource ManualActivateButton}" />
                             <ui:Button
                                 Margin="0,0,6,6"
                                 Command="{Binding ServoOffCommand}"
-                                Content="伺服断电" />
+                                Content="伺服断电"
+                                Style="{StaticResource ManualReleaseButton}" />
                             <ui:Button
                                 Margin="0,0,0,6"
                                 Command="{Binding MagnetOnCommand}"
-                                Content="充磁" />
+                                Content="充磁"
+                                Style="{StaticResource ManualActivateButton}" />
                             <ui:Button
                                 Margin="0,0,6,6"
                                 Command="{Binding MagnetOffCommand}"
-                                Content="放磁" />
+                                Content="放磁"
+                                Style="{StaticResource ManualReleaseButton}" />
                             <ui:Button
                                 Margin="0,0,0,6"
                                 Command="{Binding DrainOpenCommand}"
-                                Content="接液盘打开" />
+                                Content="接液盘打开"
+                                Style="{StaticResource ManualActivateButton}" />
                             <ui:Button
                                 Margin="0,0,6,0"
                                 Command="{Binding DrainCloseCommand}"
-                                Content="接液盘关闭" />
+                                Content="接液盘关闭"
+                                Style="{StaticResource ManualReleaseButton}" />
                         </UniformGrid>
 
                         <TextBlock
@@ -292,16 +477,19 @@
                                 Margin="0,0,6,0"
                                 Command="{Binding HomeAxisCommand}"
                                 CommandParameter="X"
-                                Content="X 回原点" />
+                                Content="X 回原点"
+                                Style="{StaticResource ManualMotionButton}" />
                             <ui:Button
                                 Margin="0,0,6,0"
                                 Command="{Binding HomeAxisCommand}"
                                 CommandParameter="Y"
-                                Content="Y 回原点" />
+                                Content="Y 回原点"
+                                Style="{StaticResource ManualMotionButton}" />
                             <ui:Button
                                 Command="{Binding HomeAxisCommand}"
                                 CommandParameter="Z"
-                                Content="Z 回原点" />
+                                Content="Z 回原点"
+                                Style="{StaticResource ManualMotionButton}" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -331,7 +519,8 @@
                             Margin="0,10,0,0"
                             HorizontalAlignment="Left"
                             Command="{Binding ClearHandshakeCommand}"
-                            Content="清握手位" />
+                            Content="清握手位"
+                            Style="{StaticResource ManualAttentionButton}" />
                     </StackPanel>
                 </Border>
             </StackPanel>
