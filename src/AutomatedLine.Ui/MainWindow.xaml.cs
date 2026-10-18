@@ -1,4 +1,6 @@
-using Wpf.Ui.Controls;
+using System.ComponentModel;
+using System.Windows;
+using FluentWindow = Wpf.Ui.Controls.FluentWindow;
 
 namespace AutomatedLine.Ui;
 
@@ -15,5 +17,19 @@ public partial class MainWindow : FluentWindow
     public MainWindow()
     {
         InitializeComponent();
+    }
+
+    /// <summary>关闭窗口前确认，避免误触关闭按钮而停止后台服务。</summary>
+    /// <param name="e">关闭事件参数；用户取消时阻止本次关闭。</param>
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        base.OnClosing(e);
+        if (e.Cancel) return;
+
+        // 在窗口真正关闭、触发宿主退出前询问；默认选择取消，避免误按回车退出。
+        var result = System.Windows.MessageBox.Show(this,
+            "确定要关闭程序吗？", "关闭程序",
+            MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel);
+        e.Cancel = result != MessageBoxResult.OK;
     }
 }

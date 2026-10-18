@@ -6,7 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
-    Title="车间自动化调度系统"
+    Title="超运车间自动化调度系统"
     Width="1400"
     Height="860"
     d:DataContext="{d:DesignInstance Type=vm:ShellViewModel}"
@@ -22,10 +22,10 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Fluent 自绘标题栏 -->
-        <ui:TitleBar Grid.Row="0" Title="车间自动化调度系统" />
+        <!--  Fluent 自绘标题栏  -->
+        <ui:TitleBar Title="车间自动化调度系统" Grid.Row="0" />
 
-        <!-- 顶部导航栏：点击切换页面 -->
+        <!--  顶部导航栏：点击切换页面  -->
         <Border
             Grid.Row="1"
             Background="{StaticResource CardBackgroundBrush}"
@@ -54,7 +54,7 @@
             </ListBox>
         </Border>
 
-        <!-- 内容区：由 DataTemplate 按当前页面 ViewModel 渲染对应 View -->
+        <!--  内容区：由 DataTemplate 按当前页面 ViewModel 渲染对应 View  -->
         <ContentControl Grid.Row="2" Content="{Binding CurrentPage}" />
     </Grid>
 </ui:FluentWindow>
