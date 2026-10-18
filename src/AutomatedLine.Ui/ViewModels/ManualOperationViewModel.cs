@@ -50,6 +50,12 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>只通过 Worker 中止当前搬运，不取消宿主或直接写 PLC。</summary>
     private readonly CraneWorker _craneWorker;
 
+    /// <summary>每次点击读取最新绝对移动确认密码；不缓存验证结果。</summary>
+    private readonly IConfigService _configService;
+
+    /// <summary>复用页面弹窗抽象，密码输入不进入运动驱动。</summary>
+    private readonly IDialogService _dialogService;
+
     // 保存界面实际显示的搬运 ID，按钮不能在刷新间隔内误中止下一单。
     private Guid? _displayedTaskId;
 
@@ -174,9 +180,9 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>X 速度。</summary>
     [ObservableProperty] private int _speedX = 100;
     /// <summary>X 加速度。</summary>
-    [ObservableProperty] private int _accelX = 40;
+    [ObservableProperty] private int _accelX = 50;
     /// <summary>X 减速度。</summary>
-    [ObservableProperty] private int _decelX = 20;
+    [ObservableProperty] private int _decelX = 30;
     /// <summary>Y 速度。</summary>
     [ObservableProperty] private int _speedY = 60;
     /// <summary>Y 加速度。</summary>
@@ -184,9 +190,9 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>Y 减速度。</summary>
     [ObservableProperty] private int _decelY = 20;
     /// <summary>Z 速度。</summary>
-    [ObservableProperty] private int _speedZ = 80;
+    [ObservableProperty] private int _speedZ = 40;
     /// <summary>Z 加速度。</summary>
-    [ObservableProperty] private int _accelZ = 30;
+    [ObservableProperty] private int _accelZ = 20;
     /// <summary>Z 减速度。</summary>
     [ObservableProperty] private int _decelZ = 20;
 
@@ -198,13 +204,17 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <param name="craneStates">全线共享的有效天车状态</param>
     /// <param name="craneWorker">当前搬运执行器</param>
     /// <param name="ticker">UI 内存状态刷新节拍，不触发 PLC 读取</param>
+    /// <param name="configService">读取绝对移动密码的配置服务</param>
+    /// <param name="dialogService">绝对移动密码确认弹窗服务</param>
     public ManualOperationViewModel(IConfigurationStore configurationStore, IManualOperationService manualOperationService, ICraneStateProvider craneStates,
-        CraneWorker craneWorker, IRuntimeTicker ticker)
+        CraneWorker craneWorker, IRuntimeTicker ticker, IConfigService configService, IDialogService dialogService)
     {
         _configurationStore = configurationStore;
         _manualOperationService = manualOperationService;
         _craneStates = craneStates;
         _craneWorker = craneWorker;
+        _configService = configService;
+        _dialogService = dialogService;
         ticker.Tick += (_, _) => { RefreshCurrentTask(); RefreshStatus(); };
         _ = LoadCranesAsync();
         _ = LoadHandshakeDevicesAsync();
@@ -373,11 +383,35 @@ public partial class ManualOperationViewModel : ObservableObject
         await FinishAsync(result);
     }
 
-    /// <summary>绝对移动。</summary>
+    /// <summary>每次通过密码确认后执行所选天车绝对移动；取消、输错或缺少配置不下发运动。</summary>
     [RelayCommand]
     private async Task MoveAbsoluteAsync()
     {
-        var result = await WithCrane(id => _manualOperationService.MoveAbsoluteAsync(id, AbsX, AbsY, AbsZ));
+        var crane = SelectedCrane;
+        if (crane is null)
+        {
+            Message = "请先选择天车";
+            return;
+        }
+
+        var password = _configService.GetAppOptions().ManualOperation?.AbsoluteMovePassword;
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            Message = "未配置绝对移动确认密码，本次未执行。";
+            return;
+        }
+
+        // 固定本次确认的车与坐标，保证弹窗说明和最终发送一致；每次点击都重新确认，不保留授权。
+        var (x, y, z) = (AbsX, AbsY, AbsZ);
+        //弹出绝对移动密码确认框；每次重新输入，只有密码匹配且确认才放行动作。
+        if (!_dialogService.ShowAbsoluteMovePasswordDialog(
+                $"天车：{crane.Config.Name}\n目标编码器坐标：X={x}，Y={y}，Z={z}\n请输入密码，确认后执行本次绝对移动。", password))
+        {
+            Message = "已取消绝对移动，本次未执行。";
+            return;
+        }
+
+        var result = await _manualOperationService.MoveAbsoluteAsync(crane.Id, x, y, z);
         //刷新选中天车状态
         await FinishAsync(result);
     }

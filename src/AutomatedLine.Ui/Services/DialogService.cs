@@ -11,6 +11,16 @@ namespace AutomatedLine.Ui.Services;
 public class DialogService : IDialogService
 {
     /// <inheritdoc />
+    public bool ShowAbsoluteMovePasswordDialog(string message, string expectedPassword)
+    {
+        var dialog = new AbsoluteMovePasswordDialog(message, expectedPassword)
+        {
+            Owner = System.Windows.Application.Current?.MainWindow
+        };
+        return dialog.ShowDialog() == true;
+    }
+
+    /// <inheritdoc />
     public WorkpieceInfo? ShowAddWorkpieceDialog()
     {
         // 弹窗 ViewModel 无外部依赖，直接构造即可；若后续依赖增多再改为 DI 解析

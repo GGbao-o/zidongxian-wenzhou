@@ -7,6 +7,9 @@ namespace AutomatedLine.Application.Configuration;
 /// </summary>
 public sealed class AppOptions
 {
+    /// <summary>手动操作的确认参数；不在参数管理页面展示。</summary>
+    public ManualOperationOptions ManualOperation { get; set; } = new();
+
     /// <summary>ERP文件接收参数；只创建未启动工件，不控制线路。</summary>
     public ErpImportOptions ErpImport { get; set; } = new();
 
@@ -27,6 +30,13 @@ public sealed class AppOptions
 
     /// <summary>日志类参数。</summary>
     public LoggingOptions Logging { get; set; } = new();
+}
+
+/// <summary>手动操作防误触参数，仅用于页面确认，不改变自动搬运或底层运动。</summary>
+public sealed class ManualOperationOptions
+{
+    /// <summary>绝对移动的确认密码；由JSON配置，未配置或空白时禁止本页绝对移动。</summary>
+    public string AbsoluteMovePassword { get; set; } = string.Empty;
 }
 
 /// <summary>ERP批量任务文件的路径、检查节拍和文本编码，监听循环每轮读取最新值。</summary>
