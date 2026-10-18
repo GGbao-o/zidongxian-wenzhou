@@ -203,7 +203,7 @@ public sealed class TransportTaskGenerator : IHostedService
             .OrderBy(t => t.Runtime.QueueOrder)
             .FirstOrDefault();
 
-        // 上料队头描述：开始/完成两条日志共用，避免两处各算一次
+        // 上料队头描述：开始/完成两条日志共用，避免两处各算一次  只是用于日志输出 不管
         var headText = queueHead is null ? "无" : Describe(queueHead);
 
         if (verbose)
@@ -215,6 +215,7 @@ public sealed class TransportTaskGenerator : IHostedService
         // 只遍历入线任务（已过滤掉未启动/暂停/派发/完成等）
         foreach (var task in lineTasks)
         {
+            //得到入线工件的运行状态
             var runtime = task.Runtime;
 
             //解析工件的源设备并校验源就绪
@@ -281,7 +282,7 @@ public sealed class TransportTaskGenerator : IHostedService
                     + (matched == 0 ? "（本道无可用目标）" : $"（另有 {matched} 台可用，已生成候选）"));
             }
         }
-
+        //用新一批候选任务整体替换旧内容（Rebuild）。
         _candidatePool.Replace(candidates);
 
         if (verbose)
