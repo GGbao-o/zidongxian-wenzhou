@@ -19,9 +19,9 @@ public class CraneCoordinateTests
         return crane;
     }
 
-    /// <summary>斜床/研磨：Z 下压 = Round(d/2)；X/Y 加偏移。</summary>
+    /// <summary>斜床：半径按0.9537换算后取整，三轴偏移仍参与目标计算。</summary>
     [Fact]
-    public void ToAbsoluteTarget_Lathe_Uses_HalfDiameter()
+    public void ToAbsoluteTarget_Lathe_Uses_SingleCoefficient()
     {
         var crane = CraneWithOffset(10, -20, 30);
 
@@ -30,12 +30,12 @@ public class CraneCoordinateTests
 
         Assert.Equal(1010, x);
         Assert.Equal(180, y);
-        Assert.Equal(1978, z);   // 2030 - Round(103.1/2)=2030-52
+        Assert.Equal(1976, z);   // 2030 - Round(51.55/0.9537)=2030-54
     }
 
-    /// <summary>带托料架双头镗与斜床相同，按半径下压，三轴偏移仍参与目标计算。</summary>
+    /// <summary>双头镗采用双系数补偿，避免仍沿用斜床分支或旧半径公式。</summary>
     [Fact]
-    public void ToAbsoluteTarget_Boring_Uses_HalfDiameter()
+    public void ToAbsoluteTarget_Boring_Uses_TwoCoefficients()
     {
         var crane = CraneWithOffset(10, -20, 30);
 
@@ -44,17 +44,21 @@ public class CraneCoordinateTests
 
         Assert.Equal(1010, x);
         Assert.Equal(180, y);
-        Assert.Equal(1978, z);   // 2030 - Round(103.1/2)=2030-52
+        Assert.Equal(1916, z);   // 2030 - Round(51.55/0.9537+51.55/0.866)=2030-114
     }
 
-    /// <summary>Z 下压量单独可算（供测试/日志）。</summary>
-    [Fact]
-    public void ZDrop_Matches_Formulas()
+    /// <summary>逐类核对固定直径的取整补偿，覆盖两类公式和双头镗所属分支。</summary>
+    /// <param name="type">当前自动搬运支持的设备类型。</param>
+    /// <param name="expectedDrop">直径103.1时的预期补偿。</param>
+    [Theory]
+    [InlineData(DeviceType.LatheMachine, 54d)]
+    [InlineData(DeviceType.GrinderMachine, 54d)]
+    [InlineData(DeviceType.BoringMachine, 114d)]
+    [InlineData(DeviceType.LoadRack, 114d)]
+    [InlineData(DeviceType.MarkerMachine, 114d)]
+    [InlineData(DeviceType.UnloadRack, 114d)]
+    public void ZDrop_Matches_DeviceFormula(DeviceType type, double expectedDrop)
     {
-        Assert.Equal(52d, CraneCoordinate.ZDrop(DeviceType.LatheMachine, 103.1));
-        Assert.Equal(52d, CraneCoordinate.ZDrop(DeviceType.GrinderMachine, 103.1));
-        Assert.Equal(52d, CraneCoordinate.ZDrop(DeviceType.BoringMachine, 103.1));
-        // 料架仍沿用支撑结构的双系数公式，双头镗调整不能改变料架取放高度。
-        Assert.Equal(114d, CraneCoordinate.ZDrop(DeviceType.LoadRack, 103.1));
+        Assert.Equal(expectedDrop, CraneCoordinate.ZDrop(type, 103.1));
     }
 }
