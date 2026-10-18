@@ -39,16 +39,16 @@ public static class CraneAddress
     /// <summary>D5018~D5019 X 显示值坐标（DINT）。</summary>
     public const int XPosition = 5018;
 
-    /// <summary>D5020 Y 绝对编码器值。</summary>
+    /// <summary>D5020 Y 绝对编码器值（16 位有符号 INT）。</summary>
     public const int YEncoder = 5020;
 
-    /// <summary>D5022 Y 显示值坐标。</summary>
+    /// <summary>D5022 Y 显示值坐标（16 位有符号 INT）。</summary>
     public const int YPosition = 5022;
 
-    /// <summary>D5023 Z 绝对编码器值。</summary>
+    /// <summary>D5023 Z 绝对编码器值（16 位有符号 INT）。</summary>
     public const int ZEncoder = 5023;
 
-    /// <summary>D5025 Z 显示值坐标。</summary>
+    /// <summary>D5025 Z 显示值坐标（16 位有符号 INT）。</summary>
     public const int ZPosition = 5025;
 
     // 注意：D5029 经现场确认**不是**有板信号，已不再使用；有板一律取 X11 线圈（见下方 X11_HasPlate）。

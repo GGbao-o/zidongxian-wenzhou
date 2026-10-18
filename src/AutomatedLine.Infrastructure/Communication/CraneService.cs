@@ -180,10 +180,11 @@ public sealed class CraneService : ICraneDriver
             PlcAlarm = r[13],
             XEncoder = Combine(r[14], r[15]),
             XPosition = Combine(r[18], r[19]),
-            YEncoder = r[20],
-            YPosition = r[22],
-            ZEncoder = r[23],
-            ZPosition = r[25],
+            // PLC 的 Y/Z 反馈是单 Word 有符号 INT；先按 short 解释补码再扩展为 int，保留负坐标。
+            YEncoder = unchecked((short)r[20]),
+            YPosition = unchecked((short)r[22]),
+            ZEncoder = unchecked((short)r[23]),
+            ZPosition = unchecked((short)r[25]),
             XSpeed = spd[0],
             XAccel = spd[1],
             XDecel = spd[2],
@@ -433,6 +434,7 @@ public sealed class CraneService : ICraneDriver
     {
         try
         {
+            //判断是否为手动模式
             await EnterManualAsync(cancellationToken).ConfigureAwait(false);
 
             // 写目标（调用方按业务换算：相对运动写显示目标；绝对运动写 用户绝对值−编码器值+显示值）
