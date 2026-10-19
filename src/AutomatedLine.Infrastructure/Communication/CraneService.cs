@@ -104,6 +104,9 @@ public sealed class CraneService : ICraneDriver
     /// <summary>日志。</summary>
     private readonly IAppLogger _logger;
 
+    /// <summary>充退磁每次动作读取最新配置；已开始的动作固定本次反馈等待时间。</summary>
+    private readonly IConfigService _configService;
+
     /// <summary>是否已确认处于手动模式（缓存，避免重复写 D4001/D4500）。</summary>
     private bool _manualModeSet;
 
@@ -123,12 +126,13 @@ public sealed class CraneService : ICraneDriver
     /// <param name="name">天车名称（日志用）</param>
     /// <param name="ip">PLC IP（来自数据库）</param>
     /// <param name="logger">日志</param>
-    /// <param name="configService">程序配置：运动超时与到位/下压容差（来自 appsettings 的 App:Crane）</param>
+    /// <param name="configService">程序配置：运动超时、容差及充退磁反馈等待时间（App:Crane）。</param>
     public CraneService(int craneId, string name, string ip, IAppLogger logger, IConfigService configService)
     {
         CraneId = craneId;
         _name = name;
         _logger = logger;
+        _configService = configService;
 
         var crane = configService.GetAppOptions().Crane;
         _moveTimeoutMs = crane.MoveTimeoutMs > 0 ? crane.MoveTimeoutMs : FallbackMoveTimeoutMs;
@@ -560,15 +564,15 @@ public sealed class CraneService : ICraneDriver
         });
     }
 
-    /// <summary>充磁：D4510=2 → 1000ms → D4510=0 → 读取一次 X6，直接返回结果。</summary>
+    /// <summary>充磁：D4510=2 → 200ms → D4510=0 → 等待配置时长（默认1000ms）→ 单读X6。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>X6=1 返回成功；X6=0 或通信失败返回失败结果</returns>
+    /// <returns>X6=1返回成功；X6=0、配置非法或通信失败返回失败结果。</returns>
     public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default)
         => PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, "X6", "充磁", cancellationToken);
 
-    /// <summary>退磁：D4511=2 → 1000ms → D4511=0 → 读取一次 X7，直接返回结果。</summary>
+    /// <summary>退磁：D4511=2 → 200ms → D4511=0 → 等待配置时长（默认1000ms）→ 单读X7。</summary>
     /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>X7=1 返回成功；X7=0 或通信失败返回失败结果</returns>
+    /// <returns>X7=1返回成功；X7=0、配置非法或通信失败返回失败结果。</returns>
     public Task<CraneCommandResult> MagnetOffAsync(CancellationToken cancellationToken = default)
         => PulseMagnetAsync(CraneAddress.ManualMagnetOff, CraneAddress.X7_DemagnetizeOk, "X7", "退磁", cancellationToken);
 
@@ -730,7 +734,7 @@ public sealed class CraneService : ICraneDriver
         }
     }
 
-    /// <summary>磁铁单次脉冲：写 2 → 1000ms → 写 0，再读一次反馈，失败交给上层处理。</summary>
+    /// <summary>磁铁保持200ms脉冲，写0后按本次配置等待，再单读反馈；非法等待时间拒绝执行。</summary>
     /// <param name="trigger">触发寄存器</param>
     /// <param name="feedbackCoil">反馈线圈</param>
     /// <param name="feedbackName">反馈信号名，用于失败提示</param>
@@ -739,14 +743,26 @@ public sealed class CraneService : ICraneDriver
     /// <returns>反馈为 1 返回 Completed；为 0 返回 Rejected；通信失败沿用通用命令结果</returns>
     private async Task<CraneCommandResult> PulseMagnetAsync(int trigger, int feedbackCoil, string feedbackName, string label, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        // 每次动作固定反馈等待时长，重载只影响下一动作；负数不能传入Delay造成异常或无限等待。
+        var feedbackDelayMs = _configService.GetAppOptions().Crane.MagnetFeedbackDelayMs;
+        if (feedbackDelayMs < 0)
+        {
+            var detail = $"天车[{_name}] {label}未执行：充退磁反馈等待时间MagnetFeedbackDelayMs={feedbackDelayMs}ms，必须为非负整数";
+            _logger.Warn(LogCategory.Operation, detail);
+            return CraneCommandResult.Fail(CraneCommandCode.Rejected, detail);
+        }
         var feedback = false;
         var result = await ExecuteAsync(label, async () =>
         {
+            _logger.Info(LogCategory.Operation,
+                $"天车[{_name}] {label}开始：D{trigger}=2→200ms→0，复位后等待{feedbackDelayMs}ms，再单读{feedbackName}反馈");
             //手动模式
             await EnterManualAsync(cancellationToken).ConfigureAwait(false);
             // 与其他手动脉冲共用写入封装，先完整复位再检查对应反馈，不轮询、不重试。  
-            // 充磁和退磁单独保持1000ms；其他动作继续使用各自原有脉冲时长。
-            await PulseAsync(trigger, true, 1000, cancellationToken).ConfigureAwait(false);
+            // 写2到写0始终保持200ms；仅充退磁在清0完成后额外等待，再读取对应反馈。
+            await PulseAsync(trigger, true, 200, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(feedbackDelayMs, cancellationToken).ConfigureAwait(false);
             //读线圈返回
             feedback = await _client.ReadCoilAsync(feedbackCoil, cancellationToken).ConfigureAwait(false);
         }).ConfigureAwait(false);

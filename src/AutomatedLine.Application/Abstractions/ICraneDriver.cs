@@ -69,12 +69,12 @@ public interface ICraneDriver : IPlcDriver
         int speedY, int accelY, int decelY, int speedZ, int accelZ, int decelZ,
         CancellationToken cancellationToken = default);
 
-    /// <summary>充磁：触发位写 2，保持 1000ms 后写 0，再读取一次 X6 反馈并返回结果。</summary>
+    /// <summary>充磁：写2保持200ms后写0，按配置等待（默认1000ms），再单读X6反馈并返回结果。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>结果</returns>
     Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>退磁：触发位写 2，保持 1000ms 后写 0，再读取一次 X7 反馈并返回结果。</summary>
+    /// <summary>退磁：写2保持200ms后写0，按配置等待（默认1000ms），再单读X7反馈并返回结果。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>结果</returns>
     Task<CraneCommandResult> MagnetOffAsync(CancellationToken cancellationToken = default);

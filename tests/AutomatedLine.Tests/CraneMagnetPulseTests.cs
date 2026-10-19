@@ -48,7 +48,7 @@ public class CraneMagnetPulseTests
         }
     }
 
-    /// <summary>充退磁写2后保持1000ms，写0后只读对应反馈，直接返回成功或失败。</summary>
+    /// <summary>充退磁脉冲固定200ms，清0后默认等1000ms才单读对应反馈。</summary>
     /// <param name="magnetOn">是否验证充磁，否则验证退磁</param>
     /// <param name="feedback">PLC 返回的对应反馈值</param>
     /// <returns>异步验证任务</returns>
@@ -76,6 +76,7 @@ public class CraneMagnetPulseTests
             using var peer = await listener.AcceptTcpClientAsync(deadline.Token);
             var stream = peer.GetStream();
             var pulse = new Stopwatch();
+            var feedbackWait = new Stopwatch();
             var writes = new[] { (CraneAddress.ModeCmd, 2), (CraneAddress.ManualMode, 2), (trigger, 2), (trigger, 0) };
             foreach (var (address, value) in writes)
             {
@@ -86,7 +87,8 @@ public class CraneMagnetPulseTests
                 Assert.Equal(value, (request[10] << 8) | request[11]);
                 if (address == trigger && value == 0)
                 {
-                    Assert.True(pulse.ElapsedMilliseconds >= 990, $"充退磁脉冲应保持1000ms，实际过短：{pulse.ElapsedMilliseconds}ms");
+                    Assert.InRange(pulse.ElapsedMilliseconds, 190, 900);
+                    feedbackWait.Start();
                 }
                 await stream.WriteAsync(request, deadline.Token);
                 if (address == trigger && value == 2)
@@ -97,6 +99,7 @@ public class CraneMagnetPulseTests
 
             var read = new byte[12];
             await stream.ReadExactlyAsync(read, deadline.Token);
+            Assert.InRange(feedbackWait.ElapsedMilliseconds, 990, 1900);
             Assert.Equal(1, read[7]);
             Assert.Equal(coil, (read[8] << 8) | read[9]);
             Assert.Equal(1, (read[10] << 8) | read[11]);
@@ -117,5 +120,128 @@ public class CraneMagnetPulseTests
         {
             listener.Stop();
         }
+    }
+
+    /// <summary>每次动作读取新配置；当前动作即使配置再次变化，仍使用开始时固定的反馈等待。</summary>
+    /// <returns>异步通信验证任务。</returns>
+    [Fact]
+    public async Task FeedbackDelay_UsesLatestConfig_PerAction()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var client = new ModbusTcpClient("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port);
+        var config = new FakeConfigService();
+        var logger = new TestLogger();
+        var service = new CraneService(1, "测试天车", "127.0.0.1", logger, config);
+        var field = typeof(CraneService).GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        ((ModbusTcpClient)field.GetValue(service)!).Dispose();
+        field.SetValue(service, client);
+        TcpClient? peer = null;
+        try
+        {
+            foreach (var (on, delay) in new[] { (true, 80), (false, 150), (true, 0) })
+            {
+                // 使用新对象模拟配置系统重载，证明驱动不依赖构造时保存的参数对象。
+                config.Options = new() { Crane = new() { MagnetFeedbackDelayMs = delay } };
+                var needsMode = peer is null;
+                var command = on ? service.MagnetOnAsync(deadline.Token) : service.MagnetOffAsync(deadline.Token);
+                peer ??= await listener.AcceptTcpClientAsync(deadline.Token);
+                var stream = peer.GetStream();
+                var trigger = on ? CraneAddress.ManualMagnetOn : CraneAddress.ManualMagnetOff;
+                var writes = needsMode
+                    ? new[] { (CraneAddress.ModeCmd, 2), (CraneAddress.ManualMode, 2), (trigger, 2), (trigger, 0) }
+                    : new[] { (trigger, 2), (trigger, 0) };
+                var pulse = new Stopwatch();
+                var feedbackWait = new Stopwatch();
+                foreach (var (address, value) in writes)
+                {
+                    var request = new byte[12];
+                    await stream.ReadExactlyAsync(request, deadline.Token);
+                    Assert.Equal(6, request[7]);
+                    Assert.Equal(address, (request[8] << 8) | request[9]);
+                    Assert.Equal(value, (request[10] << 8) | request[11]);
+                    if (address == trigger && value == 2)
+                    {
+                        pulse.Start();
+                        config.Options = new() { Crane = new() { MagnetFeedbackDelayMs = 5000 } };
+                    }
+                    if (address == trigger && value == 0)
+                    {
+                        Assert.InRange(pulse.ElapsedMilliseconds, 190, 900);
+                        feedbackWait.Start();
+                    }
+                    await stream.WriteAsync(request, deadline.Token);
+                }
+                var read = new byte[12];
+                await stream.ReadExactlyAsync(read, deadline.Token);
+                Assert.InRange(feedbackWait.ElapsedMilliseconds, delay - 10, 700);
+                Assert.Equal(1, read[7]);
+                Assert.Equal(on ? CraneAddress.X6_MagnetizeOk : CraneAddress.X7_DemagnetizeOk, (read[8] << 8) | read[9]);
+                await stream.WriteAsync(new byte[] { read[0], read[1], 0, 0, 0, 4, read[6], 1, 1, 1 }, deadline.Token);
+                Assert.True((await command).IsSuccess);
+                Assert.Contains(logger.Messages, m => m.Contains($"复位后等待{delay}ms"));
+            }
+        }
+        finally
+        {
+            peer?.Dispose();
+            listener.Stop();
+        }
+    }
+
+    /// <summary>非法等待时间在任何PLC写入前拒绝，避免Task.Delay负数引入异常或无限等待。</summary>
+    /// <param name="on">是否充磁，否则退磁。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task NegativeFeedbackDelay_DoesNotSendCommand(bool on)
+    {
+        var config = new FakeConfigService { Options = new() { Crane = new() { MagnetFeedbackDelayMs = -1 } } };
+        var service = new CraneService(1, "测试天车", "127.0.0.1", new TestLogger(), config);
+        var result = on ? await service.MagnetOnAsync() : await service.MagnetOffAsync();
+        Assert.Equal(CraneCommandCode.Rejected, result.Code);
+        Assert.Contains("MagnetFeedbackDelayMs=-1", result.Message);
+        Assert.False(service.IsConnected);
+    }
+
+    /// <summary>清0后的反馈等待支持当前任务取消，取消后不能再发送反馈读取。</summary>
+    /// <param name="on">是否充磁，否则退磁。</param>
+    /// <returns>异步通信验证任务。</returns>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CancellationDuringFeedbackWait_DoesNotReadCoil(bool on)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var currentTask = new CancellationTokenSource();
+        using var client = new ModbusTcpClient("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port);
+        var service = new CraneService(1, "测试天车", "127.0.0.1", new TestLogger(), new FakeConfigService());
+        var field = typeof(CraneService).GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        ((ModbusTcpClient)field.GetValue(service)!).Dispose();
+        field.SetValue(service, client);
+        try
+        {
+            var command = on ? service.MagnetOnAsync(currentTask.Token) : service.MagnetOffAsync(currentTask.Token);
+            using var peer = await listener.AcceptTcpClientAsync(deadline.Token);
+            var stream = peer.GetStream();
+            var trigger = on ? CraneAddress.ManualMagnetOn : CraneAddress.ManualMagnetOff;
+            foreach (var (address, value) in new[] { (CraneAddress.ModeCmd, 2), (CraneAddress.ManualMode, 2), (trigger, 2), (trigger, 0) })
+            {
+                var request = new byte[12];
+                await stream.ReadExactlyAsync(request, deadline.Token);
+                Assert.Equal(6, request[7]);
+                Assert.Equal(address, (request[8] << 8) | request[9]);
+                Assert.Equal(value, (request[10] << 8) | request[11]);
+                await stream.WriteAsync(request, deadline.Token);
+            }
+            currentTask.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => command.WaitAsync(deadline.Token));
+            Assert.Equal(0, peer.Available);
+        }
+        finally { listener.Stop(); }
     }
 }

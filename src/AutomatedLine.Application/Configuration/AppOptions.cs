@@ -19,7 +19,7 @@ public sealed class AppOptions
     /// <summary>调度类参数。</summary>
     public SchedulingOptions Scheduling { get; set; } = new();
 
-    /// <summary>天车运动类参数（超时与容差）。</summary>
+    /// <summary>天车动作参数（运动超时、容差与充退磁反馈等待时间）。</summary>
     public CraneOptions Crane { get; set; } = new();
 
     /// <summary>搬运流程参数（斜床 Y 二次偏移等）。</summary>
@@ -79,11 +79,14 @@ public sealed class SchedulingOptions
 }
 
 /// <summary>
-/// 天车运动参数。
-/// 运动超时与到位/下压容差都由配置文件提供（不再放数据库），手动页与自动引擎共用同一套。
+/// 天车运动与磁铁动作参数。
+/// 运动超时、到位/下压容差及充退磁反馈等待时间由配置文件提供，手动页与自动引擎共用同一套。
 /// </summary>
 public sealed class CraneOptions
 {
+    /// <summary>充退磁写0后到单读反馈前的等待时间（毫秒），须为非负整数；默认1000，每次动作开始读取。</summary>
+    public int MagnetFeedbackDelayMs { get; set; } = 1000;
+
     /// <summary>运动到位超时（毫秒）。超过即判 Timeout。默认 60s。</summary>
     public int MoveTimeoutMs { get; set; } = 60000;
 
