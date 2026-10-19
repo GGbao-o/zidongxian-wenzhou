@@ -1,4 +1,5 @@
 using System.Text;
+using AutomatedLine.Application.Generation;
 using AutomatedLine.Domain.Devices;
 using AutomatedLine.Domain.Signals;
 using AutomatedLine.Domain.Workpieces;
@@ -214,14 +215,26 @@ public partial class DeviceRowViewModel : ObservableObject
     /// <returns>多行文本</returns>
     private static string BuildSignalText(DeviceBase device, Domain.Signals.SignalSnapshot? signals)
     {
+        var modeLine = device.Type == DeviceType.GrinderMachine
+            ? $"{DisplayText.SignalNameText("AutoMode")}：{FormatAutomaticMode(signals)}" : null;
         if (signals is null || signals.Values.Count == 0)
         {
-            return "无数据";
+            return modeLine is null ? "无数据" : modeLine + Environment.NewLine + "无数据";
         }
 
-        return string.Join(Environment.NewLine,
+        var lines =
             signals.Values.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                .Select(kv => $"{DisplayText.SignalNameText(kv.Key)}={FormatValue(kv.Value)}"));
+                .Where(kv => modeLine is null || kv.Key != "AutoMode")
+                .Select(kv => $"{DisplayText.SignalNameText(kv.Key)}={FormatValue(kv.Value)}");
+        return string.Join(Environment.NewLine, modeLine is null ? lines : lines.Prepend(modeLine));
+    }
+
+    // 与派发规则共用有效快照及严格数值1判定；缺失或失效明确显示未知，不冒充模式0。
+    private static string FormatAutomaticMode(SignalSnapshot? signals)
+    {
+        if (signals is null || !signals.Values.TryGetValue("AutoMode", out var raw) || raw is null) return "未知";
+        var automatic = DeviceHandshakeRules.IsAutomaticMode(signals);
+        return $"{FormatValue(raw)}（{(automatic ? "允许自动派发" : "不允许自动派发")}）";
     }
 
     /// <summary>
@@ -257,18 +270,8 @@ public partial class DeviceRowViewModel : ObservableObject
 
         builder.AppendLine();
         builder.Append("点位信号：");
-        if (signals is null || signals.Values.Count == 0)
-        {
-            builder.Append("无数据");
-        }
-        else
-        {
-            foreach (var kv in signals.Values.OrderBy(kv => kv.Key, StringComparer.Ordinal))
-            {
-                builder.AppendLine();
-                builder.Append("  ").Append(DisplayText.SignalNameText(kv.Key)).Append('=').Append(FormatValue(kv.Value));
-            }
-        }
+        builder.AppendLine().Append("  ").Append(BuildSignalText(device, signals)
+            .Replace(Environment.NewLine, Environment.NewLine + "  "));
 
         return builder.ToString();
     }

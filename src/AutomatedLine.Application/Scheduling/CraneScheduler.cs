@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Collection;
+using AutomatedLine.Application.Generation;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Logging;
 using AutomatedLine.Application.Reservations;
@@ -285,6 +286,17 @@ public sealed class CraneScheduler : IHostedService
                     Priority = candidate.Priority
                 };
 
+                // 候选生成后采集器可能发布了新模式；入队前再读源/目标缓存，禁止旧候选绕过研磨机模式条件。
+                var modeBlocked = DeviceHandshakeRules.AutomaticModeBlockReason(candidate.Source) is { } sourceMode
+                    ? $"源设备 {candidate.Source.Name}：{sourceMode}"
+                    : DeviceHandshakeRules.AutomaticModeBlockReason(candidate.Target) is { } targetMode
+                        ? $"目标设备 {candidate.Target.Name}：{targetMode}" : null;
+                if (modeBlocked is not null)
+                {
+                    blockReason = modeBlocked;
+                    break; // 模式是设备条件，换一台天车也不能执行；工件仍保持Waiting。
+                }
+
                 // 【原子占位】Waiting → Assigned 只成功一次（防止同一任务被并发派发）   将这个任务已派发     仅当当前状态 == Waiting 时，才把它改成 Assigned已派发，返回 true；否则返回 false，不改动。
                 if (!task.Runtime.TryTransition(WorkpieceState.Waiting, WorkpieceState.Assigned))
                 {
@@ -312,7 +324,7 @@ public sealed class CraneScheduler : IHostedService
                 // 有可执行天车，但路权/预约全冲突：本周期不派发，下轮用最新状态重算
                 var blockedReason = blockReason ?? "无可执行天车";
                 _reasonLog.Report($"sched-blocked-{task.Id}", $"候选 {Describe(candidate)}", blockedReason,
-                    $"候选 {Describe(candidate)} 暂未派发：{blockedReason}（{eligible.Count} 台可执行天车均冲突，下轮重试）");
+                    $"候选 {Describe(candidate)} 暂未派发：{blockedReason}（可选天车{eligible.Count}台，下轮重试）");
             }
         }
 

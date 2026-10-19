@@ -103,6 +103,7 @@ public static class DisplayText
         "Machining" => "加工中",
         "SafetyDoor" => "安全门",
         "RunState" => "运行状态",
+        "AutoMode" => "手自动模式（12063）",
         "LoadLockDone" => "锁紧完成上料退出",
         "UnloadReleaseDone" => "松开完成下料退出",
         "TailstockClamped" => "尾座夹紧到位",

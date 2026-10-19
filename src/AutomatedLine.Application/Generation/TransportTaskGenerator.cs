@@ -373,6 +373,7 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <summary>把"源未就绪"翻译成具体缺失的握手信号名，便于日志排查。</summary>
     private static string ProvideHint(DeviceBase device) => device.Type switch
     {
+        DeviceType.GrinderMachine when DeviceHandshakeRules.AutomaticModeBlockReason(device) is { } reason => reason,
         DeviceType.LoadRack => "HasMaterial=false",
         DeviceType.BoringMachine or DeviceType.LatheMachine or DeviceType.GrinderMachine => "RequestUnload=false",
         DeviceType.MarkerMachine => "ProcessDone=false",
@@ -382,6 +383,7 @@ public sealed class TransportTaskGenerator : IHostedService
     /// <summary>把"目标不可放料"翻译成具体缺失的握手信号名，便于日志排查。</summary>
     private static string ReceiveHint(DeviceBase device) => device.Type switch
     {
+        DeviceType.GrinderMachine when DeviceHandshakeRules.AutomaticModeBlockReason(device) is { } reason => reason,
         DeviceType.BoringMachine or DeviceType.LatheMachine or DeviceType.GrinderMachine => "RequestData=false",
         DeviceType.MarkerMachine => "Busy=true（设备忙碌）",
         DeviceType.UnloadRack => "有板（不可放）或无采集数据",

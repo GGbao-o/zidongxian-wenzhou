@@ -33,6 +33,8 @@ public static class DeviceModbusMaps
     public static IReadOnlyList<ModbusPoint> Grinder() => new List<ModbusPoint>
     {
         // 读：输入信号
+        // 模式必须保留原始数值，不能用非零即true，否则2等值也会错误允许派发。
+        new("AutoMode", ModbusArea.HoldingRegister, GrinderMachineAddress.AutoMode, false, false, 1),
         new("RequestData", ModbusArea.HoldingRegister, GrinderMachineAddress.RequestData, false, true),
         new("RequestLoad", ModbusArea.HoldingRegister, GrinderMachineAddress.RequestLoad, false, true),
         new("LoadLockDone", ModbusArea.HoldingRegister, GrinderMachineAddress.LoadLockDone, false, true),

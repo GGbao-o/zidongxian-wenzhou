@@ -33,6 +33,9 @@ public static class GrinderMachineAddress
     }
 
     // ── 输入信号（机床→上位机，读，FC03）──
+    /// <summary>手自动模式（PDU地址12063，只有原始值1允许自动派发）。</summary>
+    public const int AutoMode = 12063;
+
     /// <summary>请求数据（R7301）。</summary>
     public const int RequestData = 14603;
 
