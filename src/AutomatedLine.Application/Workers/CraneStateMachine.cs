@@ -387,8 +387,7 @@ public sealed class CraneStateMachine
         var (_, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         //回安全位置 没有+偏移量  safez也是 没有+偏移量   正常状态机执行回safez也不加偏移量
         await ctx.MoveAbsoluteAsync(crane.SafeX, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
-
-        // 清理期间仍持有目标预约与路权，避免旧任务清零覆盖新任务的握手写入。
+        // 清理期间仍持有目标预约与路权，避免旧任务清零覆盖新任务的握手写入。   就是因为上料完成也需要清一下 目标设备都是上料的 
         ctx.LogStep(target, "收尾：已回安全位，复位目标设备握手位（清理结束后再释放预约）");
         if (_driverRegistry.GetDevice(target.Id) is { } targetDriver)
         {

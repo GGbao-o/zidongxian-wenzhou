@@ -20,25 +20,7 @@ public interface ICraneDriver : IPlcDriver
     /// <returns>X11=1 返回 true，X11=0 返回 false</returns>
     Task<bool> ReadHasPlateAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// 执行绝对/相对运动：写目标 → 按 Z 方向脉冲触发 → 轮询到位。
-    /// 采用 <paramref name="pollEncoder"/> 指定用绝对编码器还是显示值判定到位。
-    /// Z 下降时叠加 X2 下压保护（下压到位也视为成功）。
-    /// </summary>
-    /// <param name="writeX">写入 X 目标的值（调用方按业务换算）</param>
-    /// <param name="writeY">写入 Y 目标的值</param>
-    /// <param name="writeZ">写入 Z 目标的值</param>
-    /// <param name="targetX">X 到位目标（轮询比较用）</param>
-    /// <param name="targetY">Y 到位目标</param>
-    /// <param name="targetZ">Z 到位目标</param>
-    /// <param name="pollEncoder">true=轮询绝对编码器、false=轮询显示值</param>
-    /// <param name="zDirection">Z 方向：1=下降 2=上升 0=不动</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>InPosition / PressureReached 为成功；Timeout / PressureOutOfRange 等为失败</returns>
-    Task<CraneCommandResult> MoveAsync(int writeX, int writeY, int writeZ,
-        int targetX, int targetY, int targetZ,
-        bool pollEncoder, int zDirection, CancellationToken cancellationToken = default);
-
+    
     /// <summary>PLC 原生相对运动（点动）：只下发，不等到位。</summary>
     /// <param name="axis">轴：'X'/'Y'/'Z'</param>
     /// <param name="distance">距离（正数）</param>

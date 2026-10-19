@@ -164,6 +164,14 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>X11 检测有版。</summary>
     [ObservableProperty] private string _x11HasPlateText = "—";
 
+    // Busy与其他只读状态共用有效快照，不能把单点读取失败或过期显示为停止。
+    /// <summary>B531（12819）X轴运动中状态文本。</summary>
+    [ObservableProperty] private string _xBusyText = "—";
+    /// <summary>B536（12824）Y轴运动中状态文本。</summary>
+    [ObservableProperty] private string _yBusyText = "—";
+    /// <summary>B541（12829）Z轴运动中状态文本。</summary>
+    [ObservableProperty] private string _zBusyText = "—";
+
     // ── 绝对移动输入 ──
     /// <summary>用户输入 X 绝对值。</summary>
     [ObservableProperty] private int _absX;
@@ -355,6 +363,9 @@ public partial class ManualOperationViewModel : ObservableObject
         X6MagnetizeText = FormatLevel(status?.MagnetizeFeedback);
         X7DemagnetizeText = FormatLevel(status?.DemagnetizeFeedback);
         X11HasPlateText = FormatLevel(status?.HasPlate);
+        XBusyText = FormatBusy(status?.XBusy);
+        YBusyText = FormatBusy(status?.YBusy);
+        ZBusyText = FormatBusy(status?.ZBusy);
 
         if (SelectedCrane is null)
         {
@@ -373,6 +384,10 @@ public partial class ManualOperationViewModel : ObservableObject
             if (showMessage) Message = "已显示最新有效采集状态。";
         }
     }
+
+    // 同时显示PLC原始电平和含义，未知值保持独立，避免误以为轴已经停止。
+    private static string FormatBusy(bool? value)
+        => value switch { true => "1（运动中）", false => "0（停止）", null => "—" };
 
     /// <summary>设置三轴绝对速度。</summary>
     [RelayCommand]

@@ -28,6 +28,7 @@ public static class DeviceHandshakeRules
     /// <returns>其他设备或研磨机有效模式为1时返回null；否则返回具体阻塞原因。</returns>
     public static string? AutomaticModeBlockReason(DeviceBase device)
     {
+        //设备不是研磨机 返回null
         if (device.Type != DeviceType.GrinderMachine) return null;
         var signals = device.Signals;
         if (signals is not { IsConnected: true, Quality: SignalQuality.Good }
@@ -81,6 +82,7 @@ public static class DeviceHandshakeRules
     public static bool CanReceive(DeviceBase device) => device.Type switch
     {
         DeviceType.BoringMachine or DeviceType.LatheMachine => GetBool(device, "RequestData"),
+        //研磨机条件 
         DeviceType.GrinderMachine => AutomaticModeBlockReason(device) is null && GetBool(device, "RequestData"),
         // 打号机：0001 的 0 才是"空闲"；且必须有采集数据（无快照视为未知，不能当空闲）
         DeviceType.MarkerMachine => device.Signals is not null && !device.Signals.GetBool("Busy"),

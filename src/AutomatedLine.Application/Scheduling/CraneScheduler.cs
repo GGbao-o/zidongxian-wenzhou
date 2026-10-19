@@ -252,6 +252,7 @@ public sealed class CraneScheduler : IHostedService
                 continue;
             }
 
+            
             // 逐台车尝试（**换车**）：某台车判断不通过就试下一台，绝不死等  找到一台能执行任务的天车
             var dispatched = false;
             string? blockReason = null;
@@ -288,9 +289,12 @@ public sealed class CraneScheduler : IHostedService
 
                 // 候选生成后采集器可能发布了新模式；入队前再读源/目标缓存，禁止旧候选绕过研磨机模式条件。
                 var modeBlocked = DeviceHandshakeRules.AutomaticModeBlockReason(candidate.Source) is { } sourceMode
+                    //modeBlocked为true   
                     ? $"源设备 {candidate.Source.Name}：{sourceMode}"
+                    //modeBlocked为false   
                     : DeviceHandshakeRules.AutomaticModeBlockReason(candidate.Target) is { } targetMode
                         ? $"目标设备 {candidate.Target.Name}：{targetMode}" : null;
+                //说明源设备或者目标设备有一个是研磨机而且研磨机不是自动模式
                 if (modeBlocked is not null)
                 {
                     blockReason = modeBlocked;

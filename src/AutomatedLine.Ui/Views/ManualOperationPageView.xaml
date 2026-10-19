@@ -245,6 +245,14 @@
                         <TextBlock
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
+                            Text="三轴运动中 Busy" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding XBusyText, StringFormat=X B531（12819）：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding YBusyText, StringFormat=Y B536（12824）：{0}}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ZBusyText, StringFormat=Z B541（12829）：{0}}" />
+
+                        <TextBlock
+                            Margin="0,8,0,0"
+                            FontWeight="SemiBold"
                             Text="回原点" />
                         <TextBlock FontFamily="Consolas" Text="{Binding XHome, StringFormat=X 已回原点：{0}, TargetNullValue=—}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding YHome, StringFormat=Y 已回原点：{0}, TargetNullValue=—}" />

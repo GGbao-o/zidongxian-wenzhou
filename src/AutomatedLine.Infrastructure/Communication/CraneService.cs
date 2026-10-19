@@ -90,7 +90,7 @@ public sealed class CraneService : ICraneDriver
     private const int FallbackMoveTimeoutMs = 60_000;
 
     /// <summary>到位容差兜底值（mm）。</summary>
-    private const int FallbackPositionToleranceMm = 5;
+    private const int FallbackPositionToleranceMm = 30;
 
     /// <summary>下压容差兜底值（mm）。</summary>
     private const int FallbackPressureToleranceMm = 15;
@@ -227,7 +227,7 @@ public sealed class CraneService : ICraneDriver
             return null;
         }
 
-        // 第二段：X 区线圈逐个读。单点失败只把该点标记为 null（未知），不拖垮整块状态。
+        // 第二段：X区和Busy线圈逐点读，单点失败仅该点为未知；后台快照只用于展示，运动判定仍现场读Busy。
         return new CraneStatusDto
         {
             XDisplay = s.XPosition,
@@ -259,13 +259,15 @@ public sealed class CraneService : ICraneDriver
             DrainClose = await ReadCoilOrNullAsync(CraneAddress.X1_DrainClose, "X1 接液盘门关到位", cancellationToken).ConfigureAwait(false),
             PhysicalHomeX = await ReadCoilOrNullAsync(CraneAddress.X3_HomeX, "X3 X 轴物理原点", cancellationToken).ConfigureAwait(false),
             PhysicalHomeY = await ReadCoilOrNullAsync(CraneAddress.X4_HomeY, "X4 Y 轴物理原点", cancellationToken).ConfigureAwait(false),
-            PhysicalHomeZ = await ReadCoilOrNullAsync(CraneAddress.X5_HomeZ, "X5 Z 轴物理原点", cancellationToken).ConfigureAwait(false)
+            PhysicalHomeZ = await ReadCoilOrNullAsync(CraneAddress.X5_HomeZ, "X5 Z 轴物理原点", cancellationToken).ConfigureAwait(false),
+            XBusy = await ReadCoilOrNullAsync(CraneAddress.XBusy, "B531 X轴运动中 Busy", cancellationToken).ConfigureAwait(false),
+            YBusy = await ReadCoilOrNullAsync(CraneAddress.YBusy, "B536 Y轴运动中 Busy", cancellationToken).ConfigureAwait(false),
+            ZBusy = await ReadCoilOrNullAsync(CraneAddress.ZBusy, "B541 Z轴运动中 Busy", cancellationToken).ConfigureAwait(false)
         };
     }
 
     /// <summary>
-    /// 读单个 X 线圈，失败返回 null（未知）并记一条含点名的日志，**绝不按 0 处理**——
-    /// 否则通信故障会被误读成"无板 / 未下压"。
+    /// 展示用单线圈读取：失败返回null并记录点名，避免通信故障被显示成无板、未下压或轴已停止。
     /// </summary>
     /// <param name="address">线圈地址</param>
     /// <param name="name">点位名（日志用）</param>
@@ -420,7 +422,7 @@ public sealed class CraneService : ICraneDriver
 
     /// <summary>
     /// 执行绝对/相对运动：写目标 D3102~D3107 → 按 Z 方向脉冲触发 → 轮询到位。
-    /// 传值 -1 表示该轴不参与。Z 下降时叠加 X2 下压保护。
+    /// 传值-1表示该轴不参与；普通到位须参与轴误差在配置容差内且Busy=0。Z下降仍叠加X2下压保护。
     /// </summary>
     /// <param name="writeX">写入 X 目标的值（调用方按业务换算）</param>
     /// <param name="writeY">写入 Y 目标的值</param>
@@ -776,7 +778,7 @@ public sealed class CraneService : ICraneDriver
         return CraneCommandResult.Fail(CraneCommandCode.Rejected, message);
     }
 
-    /// <summary>轮询指定轴到位（-1 表示跳过该轴）。不抛超时异常，超时以结果码返回。</summary>
+    /// <summary>实时确认参与轴的位置误差和Busy=0（-1跳过且不读Busy）；超时以结果码返回，X2下压分支保持原规则。</summary>
     /// <param name="targetX">X 到位目标</param>
     /// <param name="targetY">Y 到位目标</param>
     /// <param name="targetZ">Z 到位目标</param>
@@ -787,6 +789,7 @@ public sealed class CraneService : ICraneDriver
     private async Task<CraneCommandResult> PollAxesAsync(int targetX, int targetY, int targetZ, bool pollEncoder, bool watchPressure, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(_moveTimeoutMs);
+        var lastState = "尚未完成位置及Busy读取";
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -796,8 +799,6 @@ public sealed class CraneService : ICraneDriver
             var x = pollEncoder ? status.XEncoder : status.XPosition;
             var y = pollEncoder ? status.YEncoder : status.YPosition;
             var z = pollEncoder ? status.ZEncoder : status.ZPosition;
-
-            _logger.Sample(LogCategory.Communication, $"{_name}-pos", $"天车[{_name}] 坐标 X={x} Y={y} Z={z}");
 
             // Z 下降叠加下压保护：压到 X2 即收尾（急停 + 清报警），再按 Z 与目标差是否在下压容差内判定成功/失败。
             if (watchPressure && await IsPressureLimitOnAsync(cancellationToken).ConfigureAwait(false))
@@ -811,19 +812,30 @@ public sealed class CraneService : ICraneDriver
                         $"天车[{_name}] 下压触发但未到目标 Z={z} 目标={targetZ} 差={delta}mm（>{_pressureTolerance}）");
             }
 
-            var xOk = targetX == -1 || Math.Abs(x - targetX) <= _positionTolerance;
-            var yOk = targetY == -1 || Math.Abs(y - targetY) <= _positionTolerance;
-            var zOk = targetZ == -1 || Math.Abs(z - targetZ) <= _positionTolerance;
+            // 容差范围内仍可能在减速；每个参与轴必须即时确认Busy=0才能进入下一阶段。
+            // 跳过轴不读线圈；读取失败直接向上传播，不能按已停止处理，也不使用展示缓存。
+            var xBusy = targetX != -1 && await _client.ReadCoilAsync(CraneAddress.XBusy, cancellationToken).ConfigureAwait(false);
+            var yBusy = targetY != -1 && await _client.ReadCoilAsync(CraneAddress.YBusy, cancellationToken).ConfigureAwait(false);
+            var zBusy = targetZ != -1 && await _client.ReadCoilAsync(CraneAddress.ZBusy, cancellationToken).ConfigureAwait(false);
+            var xBusyText = targetX == -1 ? "未参与" : xBusy ? "1" : "0";
+            var yBusyText = targetY == -1 ? "未参与" : yBusy ? "1" : "0";
+            var zBusyText = targetZ == -1 ? "未参与" : zBusy ? "1" : "0";
+            lastState = $"坐标X={x} Y={y} Z={z}；Busy X={xBusyText} Y={yBusyText} Z={zBusyText}";
+            _logger.Sample(LogCategory.Communication, $"{_name}-pos", $"天车[{_name}] {lastState}");
+
+            var xOk = targetX == -1 || Math.Abs(x - targetX) <= _positionTolerance && !xBusy;
+            var yOk = targetY == -1 || Math.Abs(y - targetY) <= _positionTolerance && !yBusy;
+            var zOk = targetZ == -1 || Math.Abs(z - targetZ) <= _positionTolerance && !zBusy;
             //成功到位
             if (xOk && yOk && zOk)
             {
-                _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位 X={x} Y={y} Z={z}（容差±{_positionTolerance}）");
-                return CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{_name}] 到位 X={x} Y={y} Z={z}");
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位：{lastState}（容差±{_positionTolerance}mm，参与轴Busy均为0）");
+                return CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{_name}] 到位：{lastState}");
             }
         }
         //到位失败  超时
         return CraneCommandResult.Fail(CraneCommandCode.Timeout,
-            $"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{_positionTolerance}）");
+            $"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{_positionTolerance}mm，参与轴须Busy=0；最后状态：{lastState}）");
     }
 
     /// <summary>

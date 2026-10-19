@@ -90,8 +90,8 @@ public sealed class CraneOptions
     /// <summary>运动到位超时（毫秒）。超过即判 Timeout。默认 60s。</summary>
     public int MoveTimeoutMs { get; set; } = 60000;
 
-    /// <summary>正常 XYZ 到位容差（mm）。默认 5。</summary>
-    public int PositionToleranceMm { get; set; } = 5;
+    /// <summary>正常XYZ到位容差（mm），默认30；参与轴还须实时确认对应Busy=0。</summary>
+    public int PositionToleranceMm { get; set; } = 30;
 
     /// <summary>下压容差（mm）：仅当 X2 下压触发时，用它判断 Z 是否真的到位。默认 15。</summary>
     public int PressureToleranceMm { get; set; } = 15;

@@ -262,8 +262,10 @@ public sealed class TransportTaskGenerator : IHostedService
                 if (target.Id == source.Id) { targetSkips.Add($"{target.Name}:与源相同"); continue; }
                 if (!target.IsConnected) { targetSkips.Add($"{target.Name}:未连接"); continue; }
                 if (_reservationManager.IsReserved(target.Id)) { targetSkips.Add($"{target.Name}:已被预约"); continue; }
+                //判断设备是否报警
                 if (DeviceHandshakeRules.IsAlarm(target)) { targetSkips.Add($"{target.Name}:报警"); continue; }
                 if (!target.CanProcess(info.Diameter, info.Length)) { targetSkips.Add($"{target.Name}:超出加工范围"); continue; }
+                //判断目标设备是否可以放料
                 if (!DeviceHandshakeRules.CanReceive(target)) { targetSkips.Add($"{target.Name}:{ReceiveHint(target)}"); continue; }
 
                 candidates.Add(new CandidateTask(task, source, target, priority: 100, targetProcess: next.Process));

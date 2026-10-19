@@ -21,10 +21,10 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <ui:TitleBar Grid.Row="0" Title="{Binding WindowTitle}" />
+        <ui:TitleBar Title="{Binding WindowTitle}" Grid.Row="0" />
 
         <StackPanel Grid.Row="1" Margin="24">
-            <!-- 两列布局：左边标签，右边输入框 -->
+            <!--  两列布局：左边标签，右边输入框  -->
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="110" />
@@ -41,13 +41,13 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- 版号：身份字段，编辑模式下只读 -->
+                <!--  版号：身份字段，编辑模式下只读  -->
                 <TextBlock
                     Grid.Row="0"
                     Grid.Column="0"
                     Margin="0,0,12,12"
                     VerticalAlignment="Center"
-                    Text="板号" />
+                    Text="版号" />
                 <ui:TextBox
                     Grid.Row="0"
                     Grid.Column="1"
@@ -56,7 +56,7 @@
                     PlaceholderText="必填"
                     Text="{Binding PlateNo, UpdateSourceTrigger=PropertyChanged}" />
 
-                <!-- 序号：身份字段，编辑模式下只读 -->
+                <!--  序号：身份字段，编辑模式下只读  -->
                 <TextBlock
                     Grid.Row="1"
                     Grid.Column="0"
@@ -132,7 +132,7 @@
                     Margin="0,0,0,12"
                     Text="{Binding PrintContent, UpdateSourceTrigger=PropertyChanged}" />
 
-                <!-- 斜床工艺：写入斜床宏 #909 加工模式，1~10 -->
+                <!--  斜床工艺：写入斜床宏 #909 加工模式，1~10  -->
                 <TextBlock
                     Grid.Row="7"
                     Grid.Column="0"

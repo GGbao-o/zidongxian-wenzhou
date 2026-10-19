@@ -81,6 +81,16 @@ public static class CraneAddress
     /// <summary>X11 检测有版（现场确认：这是唯一的有板信号，D5029 不是）。</summary>
     public const int X11_HasPlate = 63497;
 
+    // ── 各轴运动中（FC01 实时读线圈，仅参与当前运动阶段的轴需要确认已停止）──
+    /// <summary>B531 X轴运动中，Modbus地址12819；0表示已停止。</summary>
+    public const int XBusy = 12819;
+
+    /// <summary>B536 Y轴运动中，Modbus地址12824；0表示已停止。</summary>
+    public const int YBusy = 12824;
+
+    /// <summary>B541 Z轴运动中，Modbus地址12829；0表示已停止。</summary>
+    public const int ZBusy = 12829;
+
     // ── 速度/加减速：D2501~D2527（FC06）──
     /// <summary>X 绝对速度。</summary>
     public const int XAbsSpeed = 2501;

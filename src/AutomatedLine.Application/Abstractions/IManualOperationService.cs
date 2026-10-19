@@ -69,7 +69,7 @@ public sealed class CraneStatusDto
     /// <summary>Z 绝对减速度。</summary>
     public int ZDecel { get; init; }
 
-    // 以下 X 区线圈点位均为 bool?：true/false 为实际读到的电平，**null 表示该点读取失败（未知）**。
+    // 以下线圈（X区及各轴Busy）均为bool?：true/false为实读电平，null表示该点读取失败（未知）。
     // 之所以用可空类型，是因为"读不到"不能等同于"0/无板"——按 0 处理会把通信故障误判成现场状态。
 
     /// <summary>有版（X11 线圈 63497）。现场确认 D5029 不是有板信号。</summary>
@@ -98,6 +98,15 @@ public sealed class CraneStatusDto
 
     /// <summary>Z 轴物理原点输入（X5）。</summary>
     public bool? PhysicalHomeZ { get; init; }
+
+    /// <summary>X轴运动中（B531，FC01地址12819）；null为未知，不代表停止。</summary>
+    public bool? XBusy { get; init; }
+
+    /// <summary>Y轴运动中（B536，FC01地址12824）；null为未知，不代表停止。</summary>
+    public bool? YBusy { get; init; }
+
+    /// <summary>Z轴运动中（B541，FC01地址12829）；null为未知，不代表停止。</summary>
+    public bool? ZBusy { get; init; }
 
     /// <summary>是否任一报警非 0。</summary>
     public bool HasAlarm => ServoAlarm != 0 || PlcServoAlarm != 0 || PlcAlarm != 0;

@@ -49,7 +49,7 @@ public class CraneSignedCoordinateTests
             var read = service.ReadStatusAsync(deadline.Token);
             using var peer = await listener.AcceptTcpClientAsync(deadline.Token);
             var stream = peer.GetStream();
-            for (var i = 0; i < 11; i++)
+            for (var i = 0; i < 14; i++)
             {
                 var request = new byte[12];
                 await stream.ReadExactlyAsync(request, deadline.Token);
@@ -75,7 +75,8 @@ public class CraneSignedCoordinateTests
                 {
                     Assert.Equal(1, request[7]);
                     Assert.Equal(1, count);
-                    body = new byte[] { 1, 1, 0 };
+                    if (i >= 11) Assert.Equal(new[] { 12819, 12824, 12829 }[i - 11], address);
+                    body = new byte[] { 1, 1, i is 11 or 13 ? (byte)1 : (byte)0 };
                 }
                 var response = new byte[7 + body.Length];
                 request.AsSpan(0, 7).CopyTo(response);
@@ -95,6 +96,9 @@ public class CraneSignedCoordinateTests
             Assert.Equal(65535, status.ServoAlarm);
             Assert.Equal(40000, status.YSpeed);
             Assert.Equal(40000, status.ZSpeed);
+            Assert.True(status.XBusy);
+            Assert.False(status.YBusy);
+            Assert.True(status.ZBusy);
         }
         finally
         {

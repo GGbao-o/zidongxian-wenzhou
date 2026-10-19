@@ -14,7 +14,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- 概览卡片区 -->
+        <!--  概览卡片区  -->
         <UniformGrid
             Grid.Row="0"
             Margin="0,0,0,12"
@@ -47,8 +47,8 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource CardTitle}" Text="设备" />
                     <TextBlock
-                        Style="{StaticResource CardMetric}"
                         Foreground="{StaticResource BrandGreenBrush}"
+                        Style="{StaticResource CardMetric}"
                         Text="{Binding DeviceCount}" />
                     <TextBlock Style="{StaticResource CaptionText}" Text="已装载设备数" />
                 </StackPanel>
@@ -58,15 +58,15 @@
                 <StackPanel>
                     <TextBlock Style="{StaticResource CardTitle}" Text="天车" />
                     <TextBlock
-                        Style="{StaticResource CardMetric}"
                         Foreground="{StaticResource BrandBlueBrush}"
+                        Style="{StaticResource CardMetric}"
                         Text="{Binding CraneCount}" />
                     <TextBlock Style="{StaticResource CaptionText}" Text="已装载天车数" />
                 </StackPanel>
             </Border>
         </UniformGrid>
 
-        <!-- 任务列表卡片 -->
+        <!--  任务列表卡片  -->
         <Border
             Grid.Row="1"
             Padding="0"
@@ -88,9 +88,7 @@
                         FontWeight="SemiBold"
                         Foreground="{StaticResource TextPrimaryBrush}"
                         Text="工件任务列表" />
-                    <StackPanel
-                        HorizontalAlignment="Right"
-                        Orientation="Horizontal">
+                    <StackPanel HorizontalAlignment="Right" Orientation="Horizontal">
                         <ui:Button
                             Margin="0,0,12,0"
                             Appearance="Primary"
@@ -100,19 +98,21 @@
                             Margin="0,0,12,0"
                             Command="{Binding ToggleErpListeningCommand}"
                             Content="{Binding ErpButtonText}" />
-                        <ui:Button
-                            Command="{Binding AddTaskCommand}"
-                            Content="添加任务" />
+                        <ui:Button Command="{Binding AddTaskCommand}" Content="添加任务" />
                     </StackPanel>
-                    <TextBlock Grid.Row="1" Margin="0,8,0,0"
-                               Style="{StaticResource CaptionText}" TextWrapping="Wrap"
-                               Text="{Binding ErpStatusText}" />
+                    <TextBlock
+                        Grid.Row="1"
+                        Margin="0,8,0,0"
+                        Style="{StaticResource CaptionText}"
+                        Text="{Binding ErpStatusText}"
+                        TextWrapping="Wrap" />
                 </Grid>
 
-                <!-- DataGrid 自带横竖滚动条，任务多时横向/纵向均可滚动 -->
+                <!--  DataGrid 自带横竖滚动条，任务多时横向/纵向均可滚动  -->
                 <DataGrid
                     Grid.Row="1"
                     Margin="8,0,8,8"
+                    AlternatingRowBackground="#F8FAFC"
                     AutoGenerateColumns="False"
                     Background="Transparent"
                     CanUserAddRows="False"
@@ -121,23 +121,22 @@
                     HorizontalGridLinesBrush="{StaticResource CardBorderBrush}"
                     IsReadOnly="True"
                     ItemsSource="{Binding Tasks}"
-                    RowBackground="Transparent"
-                    AlternatingRowBackground="#F8FAFC">
+                    RowBackground="Transparent">
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="板号" Binding="{Binding PlateNo}" />
-                        <DataGridTextColumn Header="序号" Binding="{Binding SerialNo}" />
-                        <DataGridTextColumn Header="直径" Binding="{Binding Diameter}" />
-                        <DataGridTextColumn Header="长度" Binding="{Binding Length}" />
-                        <DataGridTextColumn Header="堵厚" Binding="{Binding PlugThickness}" />
-                        <DataGridTextColumn Header="堵孔" Binding="{Binding PlugHoleText}" />
-                        <DataGridTextColumn Header="打印内容" Binding="{Binding PrintContent}" />
-                        <DataGridTextColumn Header="斜床工艺" Binding="{Binding LatheMachiningModeText}" />
-                        <DataGridTextColumn Header="当前工序" Binding="{Binding ProcessText}" />
-                        <DataGridTextColumn Header="入线顺序" Binding="{Binding QueueOrderText}" />
-                        <DataGridTextColumn Header="当前位置" Binding="{Binding LocationText}" />
-                        <DataGridTextColumn Header="下一道工序" Binding="{Binding NextProcessText}" />
-                        <DataGridTextColumn Header="下一道工序位置" Binding="{Binding NextPositionText}" />
-                        <DataGridTextColumn Header="状态" Binding="{Binding StateText}" />
+                        <DataGridTextColumn Binding="{Binding PlateNo}" Header="版号" />
+                        <DataGridTextColumn Binding="{Binding SerialNo}" Header="序号" />
+                        <DataGridTextColumn Binding="{Binding Diameter}" Header="直径" />
+                        <DataGridTextColumn Binding="{Binding Length}" Header="长度" />
+                        <DataGridTextColumn Binding="{Binding PlugThickness}" Header="堵厚" />
+                        <DataGridTextColumn Binding="{Binding PlugHoleText}" Header="堵孔" />
+                        <DataGridTextColumn Binding="{Binding PrintContent}" Header="打印内容" />
+                        <DataGridTextColumn Binding="{Binding LatheMachiningModeText}" Header="斜床工艺" />
+                        <DataGridTextColumn Binding="{Binding ProcessText}" Header="当前工序" />
+                        <DataGridTextColumn Binding="{Binding QueueOrderText}" Header="入线顺序" />
+                        <DataGridTextColumn Binding="{Binding LocationText}" Header="当前位置" />
+                        <DataGridTextColumn Binding="{Binding NextProcessText}" Header="下一道工序" />
+                        <DataGridTextColumn Binding="{Binding NextPositionText}" Header="下一道工序位置" />
+                        <DataGridTextColumn Binding="{Binding StateText}" Header="状态" />
                         <DataGridTemplateColumn Header="操作">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
