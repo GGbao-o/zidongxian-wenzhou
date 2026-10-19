@@ -378,7 +378,7 @@ public sealed class CraneStateMachine
         ctx.LogStep(target, "中转：完成（已释放源预约、缩小路权、复位源与目标握手位）");
     }
 
-    /// <summary>完成：回安全位、释放天车/路权/目标预约、改进度。</summary>
+    /// <summary>完成：回安全位、保持目标预约复位握手，再释放天车/路权/目标预约并改进度。</summary>
     private async Task FinishAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase target, WorkpieceTask wp,
         CancellationToken cancellationToken, CraneTaskExecution? execution)
     {
@@ -388,7 +388,16 @@ public sealed class CraneStateMachine
         //回安全位置 没有+偏移量  safez也是 没有+偏移量   正常状态机执行回safez也不加偏移量
         await ctx.MoveAbsoluteAsync(crane.SafeX, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
-        // 只有正常完成与人工中止的最终提交互斥；原有运动和收尾内容不变。
+        // 清理期间仍持有目标预约与路权，避免旧任务清零覆盖新任务的握手写入。
+        ctx.LogStep(target, "收尾：已回安全位，复位目标设备握手位（清理结束后再释放预约）");
+        if (_driverRegistry.GetDevice(target.Id) is { } targetDriver)
+        {
+            await _handlers.Get(target.Type)
+                .ClearHandshakeAsync(targetDriver, target.Name, _logger, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // 异步清理在完成提交之前结束，保留正常完成与人工中止的原有互斥判断。
         if (execution is null) CommitCompletion();
         else execution.Complete(CommitCompletion);
 

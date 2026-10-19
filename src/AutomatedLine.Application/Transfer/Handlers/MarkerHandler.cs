@@ -15,7 +15,7 @@ public sealed class MarkerHandler : ITransferHandler
     public bool CanHandle(DeviceType type) => type == DeviceType.MarkerMachine;
 
     /// <inheritdoc />
-    /// <remarks>源侧取料后、目标侧放料前，将0005/0006（PDU4/5）写0；逐点容错和取消传播沿用统一实现。</remarks>
+    /// <remarks>源侧取料后中转清理、目标侧放料前及正常收尾回安全位后，将0005/0006（PDU4/5）写0；逐点容错和取消传播沿用统一实现。</remarks>
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 

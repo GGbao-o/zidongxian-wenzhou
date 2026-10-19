@@ -335,6 +335,136 @@ public class CraneStateMachineTests
         Assert.Contains("UnloadDone=0", targetWrites);
     }
 
+    /// <summary>收尾回安全位成功后才清目标握手；清理期间保留资源，正常完成或取消均沿用原状态处理。</summary>
+    /// <param name="cancelMode">0正常完成，1人工中止，2宿主取消。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Finish_ClearsTargetAfterSafeMoveBeforeReleasingResources(int cancelMode)
+    {
+        var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), 10000);
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (wp, task) = h.NewTask();
+        using var host = new CancellationTokenSource();
+        await using var execution = new CraneTaskExecution(task, host.Token);
+        var safeMoveStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowSafeMove = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clearStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowClear = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var safeMoveFinished = false;
+        h.CraneDriver.OnAbsoluteMove = async (x, token) =>
+        {
+            if (x == h.Crane.SafeX)
+            {
+                safeMoveStarted.TrySetResult();
+                await allowSafeMove.Task.WaitAsync(token);
+                safeMoveFinished = true;
+            }
+            return CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok");
+        };
+        h.TargetDriver.OnWrite = async (point, value, token) =>
+        {
+            // 中转清理发生在LoadDone=1之前；只阻塞放料完成后的第二次清理。
+            if (point == "DataSentDone" && value is int number && number == 0
+                && h.TargetDriver.Writes.Contains("LoadDone=1"))
+            {
+                Assert.True(safeMoveFinished);
+                clearStarted.TrySetResult();
+                await allowClear.Task.WaitAsync(token);
+            }
+        };
+        var flow = h.Machine.RunFlowAsync(h.Crane, task, execution.Token, execution);
+        var competitor = Guid.NewGuid();
+        try
+        {
+            await safeMoveStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Single(h.TargetDriver.Writes.Where(w => w == "DataSentDone=0"));
+            Assert.False(clearStarted.Task.IsCompleted);
+            allowSafeMove.TrySetResult();
+            await clearStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(h.Reservations.IsReserved(h.Target.Id));
+            Assert.True(h.Row.IsHeld(task.TaskId));
+            Assert.Same(task, h.Crane.Runtime.CurrentTask);
+            Assert.Equal(WorkpieceState.Running, wp.Runtime.TaskState);
+            Assert.Same(wp, h.Target.CurrentWorkpiece);
+            Assert.False(h.Reservations.TryReserve(competitor, 99, h.Target.Id));
+
+            if (cancelMode == 0)
+            {
+                allowClear.TrySetResult();
+                await flow.WaitAsync(TimeSpan.FromSeconds(5));
+                Assert.Equal(new[] { "DataSentDone=0", "LoadDone=0", "UnloadDone=0" }, h.TargetDriver.Writes.TakeLast(3));
+                Assert.Same(wp, h.Target.CurrentWorkpiece);
+                Assert.Equal(WorkpieceLocation.AtDevice(h.Target.Id), wp.Runtime.CurrentLocation);
+                Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+                Assert.Equal(LineState.Running, h.Line.State);
+            }
+            else
+            {
+                if (cancelMode == 1)
+                {
+                    var request = typeof(CraneTaskExecution).GetMethod("TryRequestManualAbort",
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+                    Assert.True((bool)request.Invoke(execution, new object[] { (Action)h.Line.EnterFaultPause })!);
+                }
+                else host.Cancel();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => flow.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.Equal(WorkpieceState.Discarded, wp.Runtime.TaskState);
+                Assert.Null(h.Target.CurrentWorkpiece);
+                Assert.Equal(LineState.PausedByFault, h.Line.State);
+            }
+            Assert.True(h.Crane.IsIdle);
+            Assert.False(h.Row.IsHeld(task.TaskId));
+            Assert.False(h.Reservations.IsReserved(h.Target.Id));
+            Assert.True(h.Reservations.TryReserve(competitor, 99, h.Target.Id));
+        }
+        finally
+        {
+            allowSafeMove.TrySetResult();
+            allowClear.TrySetResult();
+            try { await flow.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) when (execution.Token.IsCancellationRequested) { }
+            h.Reservations.Release(competitor);
+        }
+    }
+
+    /// <summary>回安全位失败不清目标；收尾单点写失败沿用尽力清理，不改变已交付工件。</summary>
+    /// <param name="failSafeMove">是否让回安全位失败，否则仅让收尾首个握手写入失败。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Finish_PreservesExistingMotionAndBestEffortFailurePolicies(bool failSafeMove)
+    {
+        var h = new Harness(new LoadRack(1, "上料架", 1000), new BoringMachine(2, "双头镗", 2000), 10000);
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (wp, task) = h.NewTask();
+        if (failSafeMove) h.CraneDriver.FailAbsoluteMoveX = (int)h.Crane.SafeX;
+        h.TargetDriver.OnWrite = (point, value, _) =>
+        {
+            if (!failSafeMove && point == "DataSentDone" && value is int number && number == 0
+                && h.TargetDriver.Writes.Contains("LoadDone=1"))
+                throw new IOException("模拟收尾握手复位失败");
+            return Task.CompletedTask;
+        };
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Equal(failSafeMove ? 1 : 2, h.TargetDriver.Writes.Count(w => w == "DataSentDone=0"));
+        Assert.Equal(failSafeMove ? 1 : 2, h.TargetDriver.Writes.Count(w => w == "LoadDone=0"));
+        Assert.Equal(failSafeMove ? 1 : 2, h.TargetDriver.Writes.Count(w => w == "UnloadDone=0"));
+        Assert.Equal(failSafeMove ? WorkpieceState.Discarded : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Same(failSafeMove ? null : wp, h.Target.CurrentWorkpiece);
+        Assert.Equal(failSafeMove ? LineState.PausedByFault : LineState.Running, h.Line.State);
+        Assert.True(h.Crane.IsIdle);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+    }
+
     /// <summary>源握手清理尚未完成时保持预约；清理结束或取消后均能释放全部资源。</summary>
     /// <param name="cancelDuringClear">是否在源握手清理期间取消本次搬运</param>
     /// <returns>异步验证任务</returns>
@@ -745,7 +875,7 @@ public class CraneStateMachineTests
         {
             Assert.Equal(new[] { "LoadDone=0", "UnloadDone=0" }, markerDriver.Writes.Take(2));
             Assert.StartsWith("PrintContent=", markerDriver.Writes[2]);
-            Assert.Equal("LoadDone=1", markerDriver.Writes.Last());
+            Assert.Equal(new[] { "LoadDone=1", "LoadDone=0", "UnloadDone=0" }, markerDriver.Writes.TakeLast(3));
         }
         Assert.Same(wp, target.CurrentWorkpiece);
         Assert.Null(source.CurrentWorkpiece);
