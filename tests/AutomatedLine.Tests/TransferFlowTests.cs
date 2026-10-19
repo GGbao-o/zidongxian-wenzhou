@@ -92,9 +92,10 @@ public class TransferFlowTests
         Assert.Contains("CraneLoadDone=1", targetDriver.Writes);
     }
 
-    /// <summary>下料架放料：无需参数/请求上料，只放磁。</summary>
+    /// <summary>下料架放料：Z回安全高度后发完成脉冲，保持1秒并复位。</summary>
+    /// <returns>异步流程验证任务。</returns>
     [Fact]
-    public async Task UnloadRack_Place_Only_MagnetOff()
+    public async Task UnloadRack_Place_PulsesDoneAfterSafeRise()
     {
         var source = new GrinderMachine(6, "研磨机", 6000);
         var target = new UnloadRack(9, "下料架", 9000);
@@ -105,6 +106,6 @@ public class TransferFlowTests
         await new UnloadRackHandler().PlaceAsync(ctx, target, CancellationToken.None);
 
         Assert.Contains("MAGNET_OFF", craneDriver.Actions);
-        Assert.Empty(targetDriver.Writes);   // 无参数、无上料完成
+        Assert.Equal(new[] { "PlaceDone=1", "PlaceDone=0" }, targetDriver.Writes);
     }
 }

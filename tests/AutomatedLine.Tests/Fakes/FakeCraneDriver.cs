@@ -35,6 +35,9 @@ public sealed class FakeCraneDriver : ICraneDriver
     /// <summary>充磁指令开始下发后的异常，用于验证通信异常与宿主取消的分支。</summary>
     public Exception? MagnetException { get; set; }
 
+    /// <summary>退磁指令失败，用于验证放料尚未完成时不能通知下料架转动。</summary>
+    public Exception? MagnetOffException { get; set; }
+
     /// <summary>单次 X11 读取异常，用于验证充磁前通信失败。</summary>
     public Exception? HasPlateException { get; set; }
 
@@ -117,7 +120,9 @@ public sealed class FakeCraneDriver : ICraneDriver
     public Task<CraneCommandResult> MagnetOffAsync(CancellationToken ct = default)
     {
         Actions.Add("MAGNET_OFF");
-        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, "ok"));
+        return MagnetOffException is null
+            ? Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, "ok"))
+            : Task.FromException<CraneCommandResult>(MagnetOffException);
     }
 
     /// <inheritdoc />
