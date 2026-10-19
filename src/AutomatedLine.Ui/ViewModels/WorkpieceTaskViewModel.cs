@@ -54,7 +54,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private string _queueOrderText = "-";
 
-    /// <summary>下一道工序文本（由主 ViewModel 依据启用设备计算）。</summary>
+    /// <summary>下一道工序文本（已启动按工件快照，未启动仅预览最新模板）。</summary>
     [ObservableProperty]
     private string _nextProcessText = "-";
 

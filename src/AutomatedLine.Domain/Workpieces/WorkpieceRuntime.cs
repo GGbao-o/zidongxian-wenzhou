@@ -29,6 +29,20 @@ public sealed class WorkpieceRuntime
     /// <summary>位置唯一事实来源。只允许天车状态机在取放料确认成功时单点写入。</summary>
     public WorkpieceLocation CurrentLocation { get; set; } = WorkpieceLocation.Queue;
 
+    // 引用只发布一次；读者无需锁即可读取完整不可变路线。
+    private ProcessPlanSnapshot? _processPlan;
+
+    /// <summary>首次启动锁定的工艺；未启动时为空，暂停恢复和搬运回退均保留原对象。</summary>
+    public ProcessPlanSnapshot? ProcessPlan => Volatile.Read(ref _processPlan);
+
+    /// <summary>仅允许第一次绑定工艺，后续调用不能覆盖已经启动或在设备上的工件路线。</summary>
+    /// <param name="plan">首次启动捕获的独立路线快照。</param>
+    public void LockProcessPlan(ProcessPlanSnapshot plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        Interlocked.CompareExchange(ref _processPlan, plan, null);
+    }
+
     /// <summary>
     /// 任务状态。描述是否已启动/暂停/派发/执行中/完成/丢弃（架构文档 §11 WorkpieceState）。
     /// 初始为 <see cref="WorkpieceState.Created"/>（未启动，不生成候选）；人工启动或ERP自动入队后进入 <see cref="WorkpieceState.Waiting"/>。

@@ -19,8 +19,9 @@
                     FontSize="16"
                     FontWeight="SemiBold"
                     Foreground="{StaticResource TextPrimaryBrush}"
-                    Text="工艺路线（只读）" />
-                <TextBlock Style="{StaticResource CaptionText}" Text="顺序固定在代码中；某道工序是否参与由「该设备类型有没有启用设备」决定：没有设备的工序自动跳过，有设备的工序必经（设备离线时等它恢复，不会绕过去）。" />
+                    Text="新工件工艺设置" />
+                <TextBlock Style="{StaticResource CaptionText}" TextWrapping="Wrap" Text="勾选后参与工艺，取消则跳过。保存后仅影响之后首次启动的工件；已启动工件保持原工艺。上料、下料固定保留。" />
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Foreground="{StaticResource TextPrimaryBrush}" Text="{Binding RouteText}" />
             </StackPanel>
 
             <DataGrid
@@ -38,6 +39,17 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="顺序" Binding="{Binding Order}" />
                     <DataGridTextColumn Header="工序" Binding="{Binding ProcessText}" />
+                    <DataGridTemplateColumn Header="启用">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox Margin="8,4" VerticalAlignment="Center"
+                                          IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          IsEnabled="{Binding CanChange}"
+                                          Command="{Binding DataContext.ToggleProcessCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                          CommandParameter="{Binding}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
                     <DataGridTextColumn Header="设备类型" Binding="{Binding DeviceTypeText}" />
                     <DataGridTextColumn Header="工序状态" Binding="{Binding StateText}" />
                     <DataGridTextColumn Header="设备数量" Binding="{Binding DeviceCount}" />

@@ -164,6 +164,7 @@ public partial class App : System.Windows.Application
 
         // 运行态容器：全线唯一实例，跨页面/服务共享（架构文档 §7）
         services.AddSingleton<IRuntimeTaskManager, RuntimeTaskManager>();
+        services.AddSingleton<AutomatedLine.Application.Routing.IProcessPlanService, AutomatedLine.Application.Routing.ProcessPlanService>();
         services.AddSingleton<DeviceRegistry>();
         services.AddSingleton<CraneRegistry>();
         services.AddSingleton<DriverRegistry>();

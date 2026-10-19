@@ -30,7 +30,7 @@ public class CraneStateMachineTests
     {
         public DeviceRegistry Devices { get; } = new();
         public DriverRegistry Drivers { get; } = new();
-        public RuntimeTaskManager Tasks { get; } = new(new TestLogger());
+        public RuntimeTaskManager Tasks { get; } = new(new TestLogger(), TestProcessPlans.Create());
         public CraneRegistry Cranes { get; } = new();
         public RightOfWayManager Row { get; }
         public ResourceReservationManager Reservations { get; }

@@ -8,11 +8,14 @@ namespace AutomatedLine.Infrastructure.Config;
 
 /// <summary>
 /// 基于 appsettings.json 的配置读写实现（架构文档 §9.3）。
-/// 读取经 IConfiguration；写回只更新 App 节点，保留连接串等其他节点。
-/// 宿主配置开启了 reloadOnChange，写盘后 IConfiguration 会自动重载。
+/// 读取经 IConfiguration；普通参数更新 App 节点但保留独立维护的工艺，工艺保存只更新 processPlan。
+/// 写盘后同步重载，使保存后紧接着的首次启动能获取最新工艺。
 /// </summary>
 public class ConfigService : IConfigService
 {
+    // 参数编辑和工艺勾选共用写锁，防止互相覆盖刚保存的配置。
+    private readonly object _saveSync = new();
+    private readonly string _settingsPath;
     /// <summary>配置根对象，由 DI 注入。</summary>
     private readonly IConfiguration _configuration;
 
@@ -20,9 +23,11 @@ public class ConfigService : IConfigService
     /// 构造函数。
     /// </summary>
     /// <param name="configuration">配置根对象</param>
-    public ConfigService(IConfiguration configuration)
+    /// <param name="settingsPath">实际配置文件路径；默认使用程序运行目录，测试可指定独立临时文件。</param>
+    public ConfigService(IConfiguration configuration, string? settingsPath = null)
     {
         _configuration = configuration;
+        _settingsPath = settingsPath ?? Path.Combine(AppContext.BaseDirectory, "appsettings.json");
     }
 
     /// <summary>
@@ -50,33 +55,62 @@ public class ConfigService : IConfigService
     /// <returns>参数对象；缺省时返回带默认值的空对象，保证上层无需判空</returns>
     public AppOptions GetAppOptions()
     {
-        // Bind 到强类型对象，缺省项使用 AppOptions 的默认值
-        var options = _configuration.GetSection("App").Get<AppOptions>();
-        return options ?? new AppOptions();
+        lock (_saveSync)
+        {
+            var options = _configuration.GetSection("App").Get<AppOptions>();
+            return options ?? new AppOptions();
+        }
     }
 
     /// <summary>
-    /// 把程序参数保存回 appsettings.json 的 App 节点。  只负责写文件没有主动同步更新 _configuration
+    /// 保存参数并同步重载；工艺节点单独管理，不能被尚未关闭的旧参数编辑窗口覆盖。
     /// </summary>
     /// <param name="options">待保存的参数集合</param>
     public void SaveAppOptions(AppOptions options)
     {
-        // 写回程序输出目录下的 appsettings.json，与宿主加载的是同一份文件
-        var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
-        var json = File.Exists(path) ? File.ReadAllText(path) : "{}";
-
-        // 用 JsonNode 局部更新，避免覆盖 ConnectionStrings 等不该由界面改动的节点
-        var root = JsonNode.Parse(json) as JsonObject ?? new JsonObject();
-
-        var naming = new JsonSerializerOptions
+        lock (_saveSync)
         {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = true
-        };
-        // 更新 App 节点，保留连接串等其他节点
-        root["App"] = JsonSerializer.SerializeToNode(options, naming);
+            var root = ReadRoot();
+            var plan = root["App"]?["processPlan"]?.DeepClone();
+            root["App"] = JsonSerializer.SerializeToNode(options, JsonOptions);
+            if (plan is not null) root["App"]!["processPlan"] = plan;
+            WriteRoot(root);
+        }
+    }
 
-        File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine("[ConfigService] 已保存程序参数到 appsettings.json");
+    /// <inheritdoc />
+    public void SaveProcessPlanOptions(ProcessPlanOptions options)
+    {
+        lock (_saveSync)
+        {
+            var root = ReadRoot();
+            if (root["App"] is not JsonObject) root["App"] = new JsonObject();
+            root["App"]!["processPlan"] = JsonSerializer.SerializeToNode(options, JsonOptions);
+            WriteRoot(root);
+        }
+    }
+
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
+
+    private JsonObject ReadRoot()
+        // 与IConfiguration一致忽略属性大小写，兼容现场使用App/ProcessPlan或camelCase的文件。
+        => JsonNode.Parse(File.Exists(_settingsPath) ? File.ReadAllText(_settingsPath) : "{}",
+            new JsonNodeOptions { PropertyNameCaseInsensitive = true }) as JsonObject
+            ?? throw new InvalidOperationException("程序配置必须为JSON对象");
+
+    // 原子替换避免文件监听读到半个JSON；同步重载保证保存成功后立即点击启动也读到新工艺。
+    private void WriteRoot(JsonObject root)
+    {
+        var temporary = _settingsPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, root.ToJsonString(JsonOptions));
+            File.Move(temporary, _settingsPath, overwrite: true);
+            if (_configuration is IConfigurationRoot configurationRoot) configurationRoot.Reload();
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
     }
 }

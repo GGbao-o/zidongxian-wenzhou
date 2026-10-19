@@ -3,10 +3,8 @@ using AutomatedLine.Domain.Devices;
 namespace AutomatedLine.Domain.Routing;
 
 /// <summary>
-/// 工艺路线：固定的工序顺序。
-/// 顺序**固定在内置代码中**，不进数据库。原因：车间排布一旦确定就不再调换设备，
-/// 仅坐标可能微调，而坐标由 DeviceConfig.PositionX 管理（架构文档 §6.5）。
-/// 下一工序现算，不持久化；若将来确需运行期调整顺序，再改为表驱动。
+/// 默认工序顺序及设备类型目录。应用层结合工序勾选和启用设备构建新工件路线，
+/// 首次启动后由ProcessPlanSnapshot固定，不能再用本目录的设备过滤方法改写老工件路线。
 /// </summary>
 public sealed class ProcessRoute
 {
@@ -29,9 +27,7 @@ public sealed class ProcessRoute
 
     /// <summary>
     /// 创建默认工艺路线（上料 → 双头镗 → 斜床 → 研磨 → 动平衡 → 打号 → 验点 → 下料）。
-    /// **这里只固定"顺序"**：某道工序是否真的参与工艺，由 <see cref="GetNextAvailable"/> 按
-    /// "该设备类型有没有启用设备"现算——没有设备的工序（如未上线的动平衡/验点）自动跳过；
-    /// 有设备的工序（如打号机）就是必经工序，设备离线时工件会等它，不会绕过去。
+    /// 此处只定义先后顺序；新工件实际参与项由应用层工艺模板确定并在首次启动冻结。
     /// </summary>
     /// <returns>默认工艺路线</returns>
     public static ProcessRoute CreateDefault() => new(new[]
@@ -47,9 +43,8 @@ public sealed class ProcessRoute
     });
 
     /// <summary>
-    /// 构造"某设备类型当前是否有启用设备"的判据——**工序是否参与工艺的唯一口径**。
-    /// 生成器、主页面"下一道工序"、工序展示页都从这里取，
-    /// 避免三处各写一遍导致"界面显示"与"实际调度"口径漂移。
+    /// 构造某设备类型当前是否有启用设备的判据，仅用于新工件模板和设备展示。
+    /// 已启动工件沿自身快照取下一工序，不得再次按此判据跳过必做工序。
     /// </summary>
     /// <param name="devices">设备注册表快照</param>
     /// <returns>判据：该类型有启用设备返回 true</returns>
@@ -73,9 +68,7 @@ public sealed class ProcessRoute
     }
 
     /// <summary>
-    /// 计算指定工序之后下一道**实际可执行**的工序：**跳过所有没有启用设备的工序节点**。
-    /// 即"实际工序由启用设备决定"——某道工序（如动平衡/打号/验点）没有启用设备时，
-    /// 工件直接进入再下一道，而不是卡死。返回 null 表示后面已无可执行工序（视为走完）。
+    /// 在默认目录中计算下一道具有设备的工序，保留用于目录预览；不用于已启动工件调度。
     /// </summary>
     /// <param name="current">当前工序</param>
     /// <param name="hasDevice">判断某设备类型当前是否有启用设备</param>

@@ -4,8 +4,7 @@ namespace AutomatedLine.Domain.Routing;
 
 /// <summary>
 /// 工艺路线节点：一个工序 + 它对应的设备类型。
-/// **是否参与工艺不由节点自己声明**，而是由"该设备类型当前有没有启用设备"决定
-/// （见 <see cref="ProcessRoute.GetNextAvailable"/>）：没有设备的工序自动跳过，有设备的工序必经。
+/// 是否参与由首次启动捕获的工艺快照决定；节点一旦进入工件快照便为必经工序。
 /// </summary>
 public sealed class ProcessNode
 {

@@ -7,6 +7,9 @@ namespace AutomatedLine.Application.Configuration;
 /// </summary>
 public sealed class AppOptions
 {
+    /// <summary>新工件首次启动时使用的工艺模板，已启动工件使用独立快照。</summary>
+    public ProcessPlanOptions ProcessPlan { get; set; } = new();
+
     /// <summary>手动操作的确认参数；不在参数管理页面展示。</summary>
     public ManualOperationOptions ManualOperation { get; set; } = new();
 

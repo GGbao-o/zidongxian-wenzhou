@@ -1,4 +1,5 @@
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Tests.Fakes;
 using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Tests;
@@ -13,7 +14,7 @@ public class RuntimeTaskManagerTests
     /// <returns>任务表与刚添加的任务</returns>
     private static (RuntimeTaskManager Manager, WorkpieceTask Task) CreateCreated()
     {
-        var manager = new RuntimeTaskManager(new TestLogger());
+        var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         var task = manager.Add(new WorkpieceInfo
         {
             PlateNo = "P1",
@@ -88,7 +89,7 @@ public class RuntimeTaskManagerTests
     /// <summary>任务不存在返回 false。</summary>
     [Fact]
     public void TryUpdate_UnknownTask_ReturnsFalse()
-        => Assert.False(new RuntimeTaskManager(new TestLogger())
+        => Assert.False(new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create())
             .TryUpdate(Guid.NewGuid(), new WorkpieceInfo { Diameter = 1 }));
 
     /// <summary>派发或执行已开始时，暂停失败且保留入线顺序。</summary>

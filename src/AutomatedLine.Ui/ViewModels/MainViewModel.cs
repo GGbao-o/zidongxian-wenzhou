@@ -4,6 +4,7 @@ using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Line;
 using AutomatedLine.Application.Erp;
 using AutomatedLine.Application.Runtime;
+using AutomatedLine.Application.Routing;
 using AutomatedLine.Domain.Devices;
 using AutomatedLine.Domain.Line;
 using AutomatedLine.Domain.Routing;
@@ -27,6 +28,7 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>工件任务内存总表。任务增删都经由它，保证唯一事实来源。</summary>
     private readonly IRuntimeTaskManager _taskManager;
+    private readonly IProcessPlanService _processPlans;
 
     /// <summary>ERP接收控制；与线路启停分别管理。</summary>
     private readonly IErpImportService _erpImport;
@@ -101,6 +103,7 @@ public partial class MainViewModel : ObservableObject
     /// <param name="coldStartChecker">冷启动核对</param>
     /// <param name="lineControl">线路控制服务</param>
     /// <param name="ticker">界面节拍器（每 1s），用于就地刷新任务行进度</param>
+    /// <param name="processPlans">新工件工艺预览；已启动工件只显示自身锁定路线。</param>
     public MainViewModel(
         IConfigService configService,
         IRuntimeTaskManager taskManager,
@@ -110,10 +113,12 @@ public partial class MainViewModel : ObservableObject
         IDialogService dialogService,
         IColdStartChecker coldStartChecker,
         LineControlService lineControl,
-        IRuntimeTicker ticker)
+        IRuntimeTicker ticker,
+        IProcessPlanService processPlans)
     {
         _configService = configService;
         _taskManager = taskManager;
+        _processPlans = processPlans;
         _erpImport = erpImport;
         _erpImport.StateChanged += (_, _) => RefreshErpState();
         RefreshErpState();
@@ -181,7 +186,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 启动任务命令：把未启动/已暂停的任务置为排队中（入队，参与候选生成）。
+    /// 启动任务命令：把未启动/已暂停的任务置为排队中（入队，参与候选生成）。   核心方法 这个是主页面启动按钮 调用这个方法 这个工件的工艺路线就定死了
     /// </summary>
     /// <param name="row">任务行</param>
     [RelayCommand]
@@ -192,10 +197,12 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        if (_taskManager.Start(row.TaskId))
+        try
         {
-            Console.WriteLine($"[MainViewModel] 已启动任务 {row.PlateNo}/{row.SerialNo}");
+            if (_taskManager.Start(row.TaskId))
+                Console.WriteLine($"[MainViewModel] 已启动任务 {row.PlateNo}/{row.SerialNo}");
         }
+        catch (InvalidOperationException ex) { _dialogService.ShowMessage(ex.Message, "工件无法启动"); }
     }
 
     /// <summary>
@@ -427,20 +434,28 @@ public partial class MainViewModel : ObservableObject
         return queuePositions;
     }
 
-    /// <summary>工艺路线（只读，用于展示"下一道工序/位置"）。</summary>
-    private static readonly ProcessRoute Route = ProcessRoute.CreateDefault();
-
     /// <summary>
-    /// 依据启用设备计算并填充"下一道工序 + 其目标设备位置"。
-    /// 队列中的新工件当前工序为 Unknown，等价"上料"，从它往后找第一道有启用设备的工序。
+    /// 已启动工件按自身快照显示下一工序；Created仅预览新模板，缺设备仍显示必做工序。
     /// </summary>
     /// <param name="row">行 VM</param>
     /// <param name="task">工件任务</param>
     /// <param name="devices">设备快照</param>
-    private static void FillNextProcess(WorkpieceTaskViewModel row, WorkpieceTask task, IReadOnlyList<DeviceBase> devices)
+    private void FillNextProcess(WorkpieceTaskViewModel row, WorkpieceTask task, IReadOnlyList<DeviceBase> devices)
     {
-        var current = task.Runtime.CurrentProcess == ProcessType.Unknown ? ProcessType.Loading : task.Runtime.CurrentProcess;
-        var next = Route.GetNextAvailable(current, ProcessRoute.AvailableDeviceFilter(devices));
+        ProcessNode? next;
+        try
+        {
+            var plan = task.Runtime.ProcessPlan;
+            if (plan is null && task.Runtime.TaskState == WorkpieceState.Created) plan = _processPlans.Preview();
+            if (plan is null) throw new InvalidOperationException("缺少原工艺快照");
+            next = plan.GetNext(task.Runtime.CurrentProcess);
+        }
+        catch (InvalidOperationException)
+        {
+            row.NextProcessText = "工艺异常，等待处理";
+            row.NextPositionText = "-";
+            return;
+        }
         if (next is null)
         {
             row.NextProcessText = "已完成";
@@ -453,7 +468,7 @@ public partial class MainViewModel : ObservableObject
             .Where(d => d.Type == next.DeviceType && d.IsEnabled)
             .Select(d => d.PositionX.ToString("0.###"))
             .ToList();
-        row.NextPositionText = positions.Count > 0 ? string.Join(", ", positions) : "-";
+        row.NextPositionText = positions.Count > 0 ? string.Join(", ", positions) : "无启用设备，等待";
     }
 
     /// <summary>

@@ -198,10 +198,13 @@ public class GrinderAutomaticModeTests
 
         public Harness(bool grinderSource)
         {
-            Tasks = new RuntimeTaskManager(Logger);
+            Tasks = new RuntimeTaskManager(Logger, TestProcessPlans.Create());
             Reservations = new ResourceReservationManager(Logger);
             Line = new LineControlService(Logger);
             Workpiece = Tasks.Add(new WorkpieceInfo { PlateNo = "MODE", SerialNo = 1, Diameter = 100, Length = 700 });
+            // 本夹具直接构造已启动场景，必须同时保留它启动时的研磨路线。
+            Workpiece.Runtime.LockProcessPlan(new ProcessPlanSnapshot(ProcessRoute.CreateDefault().Nodes
+                .Where(node => node.Process is ProcessType.Loading or ProcessType.Grinding or ProcessType.Unloading)));
             Workpiece.Runtime.TaskState = WorkpieceState.Waiting;
             Workpiece.Runtime.QueueOrder = 7;
             Grinder.Signals = Signals(1);

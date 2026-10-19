@@ -24,7 +24,7 @@ public interface IRuntimeTaskManager
     /// <returns>新增任务；业务身份重复返回null</returns>
     WorkpieceTask? TryAddImported(WorkpieceInfo info);
 
-    /// <summary>ERP整批原子去重并按文件行序启动入队；全批完成后只发一次Changed，避免逐行重建UI。</summary>
+    /// <summary>ERP整批原子去重，共用本批首次启动工艺快照，按文件行序入队；全批只通知一次。</summary>
     /// <param name="infos">按文件顺序解析出的工件；成功项分配递增QueueOrder并置Waiting，追加已有队尾</param>
     /// <returns>与输入长度/顺序一致的结果，重复身份对应null；无新增时不通知</returns>
     IReadOnlyList<WorkpieceTask?> TryAddImportedBatch(IReadOnlyList<WorkpieceInfo> infos);
@@ -37,7 +37,7 @@ public interface IRuntimeTaskManager
     bool Remove(Guid taskId);
 
     /// <summary>
-    /// 启动任务：未启动/已暂停 → 排队中，并分配**入线顺序号**（入队尾）。
+    /// 启动任务：首次启动锁定最新工艺，暂停恢复沿用原快照；转为排队中并分配入线顺序。
     /// </summary>
     /// <param name="taskId">任务标识</param>
     /// <returns>成功返回 true；任务不存在或状态不允许返回 false</returns>

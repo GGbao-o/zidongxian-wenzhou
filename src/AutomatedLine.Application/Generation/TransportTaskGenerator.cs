@@ -24,7 +24,7 @@ namespace AutomatedLine.Application.Generation;
 /// <list type="number">
 /// <item>只处理状态为 <see cref="WorkpieceState.Waiting"/> 的工件（未启动/暂停/已派发等一律跳过）；</item>
 /// <item>源 = 工件当前所在设备（队列中的工件**只取队头**，源为唯一上料架）；</item>
-/// <item>下一工序由 <see cref="ProcessRoute.GetNextAvailable"/> 现算（**跳过没有启用设备的节点**）；</item>
+/// <item>下一工序沿工件首次启动锁定的路线选择；缺设备或暂时不可用只等待，不跳过必做工序；</item>
 /// <item>目标 = 同类型设备中**全部**满足<连接/未预约/未报警/加工范围/放料就绪>者（全枚举，不预先选最优）。</item>
 /// </list>
 /// </para>
@@ -54,9 +54,6 @@ public sealed class TransportTaskGenerator : IHostedService
 
     /// <summary>"否决原因"变化日志：逐工件/逐设备的原因只在**变化**时落盘（避免 0.5s 一轮刷屏，又不漏"谁不行、为什么"）。</summary>
     private readonly ReasonChangeLog _reasonLog;
-
-    /// <summary>内置工艺路线。</summary>
-    private readonly ProcessRoute _route = ProcessRoute.CreateDefault();
 
     /// <summary>取消源。</summary>
     private CancellationTokenSource? _cts;
@@ -181,9 +178,6 @@ public sealed class TransportTaskGenerator : IHostedService
         var startedTimestamp = Stopwatch.GetTimestamp();
         var devices = _deviceRegistry.Snapshot();
 
-        // 工序是否参与工艺的唯一判据（与主页面"下一道工序"、工序展示页共用），本周期构造一次
-        var hasDevice = ProcessRoute.AvailableDeviceFilter(devices);
-
         // 内存任务表里**既有**"主页面添加但未启动"的任务，**也有**"已启动入线"的任务：
         //   · 添加（未启动 Created）→ 只是列表上展示，不入队、不生成任务；
         //   · 启动（Waiting）→ 才算"入线任务"，参与候选生成；
@@ -229,14 +223,22 @@ public sealed class TransportTaskGenerator : IHostedService
                 continue;
             }
 
-            // 下一道实际可执行工序（跳过没有启用设备的节点）。
-            // 队列中的新工件 CurrentProcess 还是 Unknown，等价于"处于上料工序"，从它往后找第一道可执行工序。
-            var currentProcess = runtime.CurrentProcess == ProcessType.Unknown ? ProcessType.Loading : runtime.CurrentProcess;
-            //GetNextAvailable 会跳过没有启用设备的工艺节点
-            var next = _route.GetNextAvailable(currentProcess, hasDevice);
+            // 只能读工件已锁定的路线；不能用当前全局开关或设备存在性重新过滤老工件。
+            ProcessNode? next;
+            try
+            {
+                var plan = runtime.ProcessPlan ?? throw new InvalidOperationException("已启动工件缺少原工艺快照，等待处理");
+                next = plan.GetNext(runtime.CurrentProcess);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _reasonLog.Report($"gen-plan-{task.Id}", $"工件 {Describe(task)}", ex.Message,
+                    $"工件 {Describe(task)} 工艺异常，保持原状态：{ex.Message}");
+                continue;
+            }
             if (next is null)
             {
-                // 后面已无可执行工序：视为走完
+                // 仅锁定路线的下料终点返回空，缺设备不能走入完成分支。
                 runtime.TaskState = WorkpieceState.Completed;
                 _logger.Info(LogCategory.Generation, $"工件 {Describe(task)} 已无可执行工序，标记完成");
                 // task.txt：另一条完成路径（线上已无该工件的下一道可执行工序）。

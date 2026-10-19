@@ -14,6 +14,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,6 +24,7 @@
 
   <ItemGroup>
     <!-- 直接编译真实客户端与设备/天车驱动；FOCAS通道注入测试会话，不调用原生DLL或现场设备。 -->
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Config\ConfigService.cs" Link="Infrastructure\ConfigService.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\FocasLatheChannel.cs" Link="Infrastructure\FocasLatheChannel.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\FocasSession.cs" Link="Infrastructure\FocasSession.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Erp\ErpJobFile.cs" Link="Infrastructure\ErpJobFile.cs" />

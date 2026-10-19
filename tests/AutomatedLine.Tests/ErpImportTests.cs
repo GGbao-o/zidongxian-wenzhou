@@ -83,7 +83,7 @@ public sealed class ErpImportTests
     [Fact]
     public async Task ImportedIdentity_IsAtomic_AndManualAddUnchanged()
     {
-        var manager = new RuntimeTaskManager(new TestLogger());
+        var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         var results = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() =>
             manager.TryAddImported(new WorkpieceInfo { PlateNo = "P", SerialNo = 1 }))));
         Assert.Single(results.Where(x => x is not null));
@@ -382,7 +382,7 @@ public sealed class ErpImportTests
     [Fact]
     public void BatchAdd_PreservesOrderAndDuplicateResults_AndNotifiesOnce()
     {
-        var manager = new RuntimeTaskManager(new TestLogger());
+        var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         var existing = manager.Add(Info(1));
         var notifications = 0;
         var observedCount = 0;
@@ -408,7 +408,7 @@ public sealed class ErpImportTests
     [Fact]
     public void BatchAdd_NoNewTask_DoesNotNotify()
     {
-        var manager = new RuntimeTaskManager(new TestLogger());
+        var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         manager.Add(Info(1));
         var notifications = 0;
         manager.Changed += (_, _) => notifications++;
@@ -422,7 +422,7 @@ public sealed class ErpImportTests
     [Fact]
     public async Task ConcurrentBatches_DoNotDuplicateIdentities()
     {
-        var manager = new RuntimeTaskManager(new TestLogger());
+        var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         var notifications = 0;
         manager.Changed += (_, _) => Interlocked.Increment(ref notifications);
         var results = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() =>
@@ -437,7 +437,7 @@ public sealed class ErpImportTests
     [Fact]
     public void ImportedBatch_AppendsAfterExistingQueue_AndSharesManualStartCounter()
     {
-        var manager = new RuntimeTaskManager(new TestLogger());
+        var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         var existing = manager.Add(Info(5));
         Assert.True(manager.Start(existing.Id));
         var manual = manager.Add(Info(6));
@@ -471,7 +471,7 @@ public sealed class ErpImportTests
     [Fact]
     public async Task ConcurrentDistinctBatches_KeepEachBatchQueueOrderContiguous()
     {
-        var manager = new RuntimeTaskManager(new TestLogger());
+        var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         var batches = await Task.WhenAll(Enumerable.Range(0, 16).Select(batch => Task.Run(() =>
             manager.TryAddImportedBatch(new[] { Info(batch * 3 + 2), Info(batch * 3), Info(batch * 3 + 1) }))));
 
@@ -551,7 +551,7 @@ public sealed class ErpImportTests
             Path = System.IO.Path.Combine(Directory, "job1.txt");
             Config.Options.ErpImport.FilePath = Path;
             Config.Options.ErpImport.PollIntervalMs = 50;
-            Manager = new RuntimeTaskManager(Logger);
+            Manager = new RuntimeTaskManager(Logger, TestProcessPlans.Create());
             Service = new ErpImportService(File, Manager, Config, Logger);
         }
 

@@ -1,5 +1,7 @@
 using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Application.Routing;
 using AutomatedLine.Domain.Diagnostics;
+using AutomatedLine.Domain.Routing;
 using AutomatedLine.Domain.Workpieces;
 
 namespace AutomatedLine.Application.Runtime;
@@ -22,14 +24,18 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
 
     /// <summary>日志。人工"编辑任务"要写 operation.txt，便于事后追溯"哪块板什么时候被谁改过"。</summary>
     private readonly IAppLogger _logger;
+    /// <summary>只在首次启动捕获模板，恢复时不覆盖工件原工艺。</summary>
+    private readonly IProcessPlanService _processPlans;
 
     /// <summary>
     /// 构造函数。
     /// </summary>
     /// <param name="logger">日志</param>
-    public RuntimeTaskManager(IAppLogger logger)
+    /// <param name="processPlans">首次启动捕获最新工艺的共享服务。</param>
+    public RuntimeTaskManager(IAppLogger logger, IProcessPlanService processPlans)
     {
         _logger = logger;
+        _processPlans = processPlans;
     }
 
     /// <inheritdoc />
@@ -72,11 +78,15 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         lock (_sync)
         {
             var identities = _tasks.Select(t => (t.Info.PlateNo, t.Info.SerialNo)).ToHashSet();
+            ProcessPlanSnapshot? batchPlan = null;
             for (var index = 0; index < infos.Count; index++)
             {
                 var info = infos[index];
                 if (!identities.Add((info.PlateNo, info.SerialNo))) continue;
+                // 第一件成功项才读取，整批共用不可变快照；全重复批次无需重新校验当前模板。
+                batchPlan ??= _processPlans.Capture();
                 var task = new WorkpieceTask(info);
+                task.Runtime.LockProcessPlan(batchPlan);
                 // 在发布到任务表前完成启动，生成器和界面不会观察到尚未入队的ERP任务。
                 task.Runtime.QueueOrder = Interlocked.Increment(ref _queueOrder);
                 task.Runtime.TaskState = WorkpieceState.Waiting;
@@ -89,7 +99,7 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         foreach (var entry in created)
         {
             var info = entry.Task.Info;
-            _logger.Info(LogCategory.Task, $"ERP任务创建并自动启动：工件 {info}（{Describe(info)}），入队状态=Waiting，入线顺序={entry.QueueOrder}，当前共 {entry.Count} 个");
+            _logger.Info(LogCategory.Task, $"ERP任务创建并自动启动：工件 {info}（{Describe(info)}），入队状态=Waiting，入线顺序={entry.QueueOrder}，当前共 {entry.Count} 个；锁定工艺={entry.Task.Runtime.ProcessPlan!.Version}，路线={entry.Task.Runtime.ProcessPlan.Description}");
         }
         // 仍保留每件生命周期日志，只合并列表通知；通知失败不能改变已经提交的成功结果。
         try { Changed?.Invoke(this, EventArgs.Empty); }
@@ -115,7 +125,7 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         return removed;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />  主页面对应工件启动按钮和新方法
     public bool Start(Guid taskId)
     {
         WorkpieceTask? task;
@@ -126,15 +136,22 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
             {
                 return false;
             }
-
-            // 入队尾：分配递增顺序号
+            //首次启动：锁定工艺快照（核心分支）
+            if (task.Runtime.ProcessPlan is null)
+            {
+                if (task.Runtime.TaskState != WorkpieceState.Created || task.Runtime.CurrentLocation.Kind != WorkpieceLocationKind.Queue)
+                    throw new InvalidOperationException("已启动或在设备上的工件缺少原工艺快照，不能使用新模板覆盖");
+                //_processPlans.Capture() 捕获当前最新工艺模板的快照；  LockProcessPlan 把它固化到该任务 Runtime 上（不可再变）；
+                task.Runtime.LockProcessPlan(_processPlans.Capture());
+            }
+            // 暂停恢复只重新排队，工艺沿用首次启动快照。
             task.Runtime.QueueOrder = Interlocked.Increment(ref _queueOrder);
             task.Runtime.TaskState = WorkpieceState.Waiting;
         }
 
         Console.WriteLine($"[RuntimeTaskManager] 启动任务 {taskId}，入线顺序 {task.Runtime.QueueOrder}");
         // task.txt：任务入线（Created/Paused → Waiting），并记录入线顺序，便于对照 scheduling.txt 的派发顺序
-        _logger.Info(LogCategory.Task, $"任务开始：工件 {task.Info}，入线顺序 {task.Runtime.QueueOrder}（状态 → Waiting）");
+        _logger.Info(LogCategory.Task, $"任务开始：工件 {task.Info}，入线顺序 {task.Runtime.QueueOrder}（状态 → Waiting）；锁定工艺={task.Runtime.ProcessPlan!.Version}，路线={task.Runtime.ProcessPlan.Description}");
         Changed?.Invoke(this, EventArgs.Empty);
         return true;
     }

@@ -459,7 +459,7 @@ public class CraneWorkerTests
         /// <param name="secondCrane">是否添加独立设备区间的第二台天车，用于验证中止隔离</param>
         public Harness(bool secondCrane = false)
         {
-            Tasks = new RuntimeTaskManager(Logger);
+            Tasks = new RuntimeTaskManager(Logger, TestProcessPlans.Create());
             Row = new RightOfWayManager(Logger);
             Reservations = new ResourceReservationManager(Logger);
             Line = new LineControlService(Logger);
@@ -493,6 +493,9 @@ public class CraneWorkerTests
         public (WorkpieceTask Workpiece, TransportTask Transport) NewTask()
         {
             var workpiece = Tasks.Add(new WorkpieceInfo { Diameter = 100, Length = 700 });
+            // 模拟已经派发的直送任务时，同时提供首次启动就已锁定的上下料路线。
+            workpiece.Runtime.LockProcessPlan(new ProcessPlanSnapshot(ProcessRoute.CreateDefault().Nodes
+                .Where(node => node.Process is ProcessType.Loading or ProcessType.Unloading)));
             workpiece.Runtime.TaskState = WorkpieceState.Assigned;
             return (workpiece, new TransportTask
             {
@@ -537,6 +540,9 @@ public class CraneWorkerTests
 
         /// <inheritdoc />
         public void SaveAppOptions(AppOptions options) => throw new NotSupportedException("测试不写配置");
+
+        /// <inheritdoc />
+        public void SaveProcessPlanOptions(ProcessPlanOptions options) => throw new NotSupportedException("测试不写工艺配置");
     }
 
     /// <summary>脚本化取料，仅隔离外部设备动作，保留状态机和资源管理流程。</summary>

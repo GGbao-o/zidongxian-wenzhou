@@ -26,4 +26,8 @@ public interface IConfigService
     /// </summary>
     /// <param name="options">待保存的参数集合</param>
     void SaveAppOptions(AppOptions options);
+
+    /// <summary>仅保存工艺模板并同步更新读取结果，保留文件中的其他参数及连接串。</summary>
+    /// <param name="options">工艺开关；仅影响后续首次启动的工件。</param>
+    void SaveProcessPlanOptions(ProcessPlanOptions options);
 }
