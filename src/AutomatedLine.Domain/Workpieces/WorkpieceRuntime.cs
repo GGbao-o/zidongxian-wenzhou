@@ -31,7 +31,7 @@ public sealed class WorkpieceRuntime
 
     /// <summary>
     /// 任务状态。描述是否已启动/暂停/派发/执行中/完成/丢弃（架构文档 §11 WorkpieceState）。
-    /// 初始为 <see cref="WorkpieceState.Created"/>（未启动，不生成候选）；人工点"启动"后才进入 <see cref="WorkpieceState.Waiting"/>。
+    /// 初始为 <see cref="WorkpieceState.Created"/>（未启动，不生成候选）；人工启动或ERP自动入队后进入 <see cref="WorkpieceState.Waiting"/>。
     /// </summary>
     public WorkpieceState TaskState
     {
@@ -51,7 +51,7 @@ public sealed class WorkpieceRuntime
 
     /// <summary>
     /// 入线顺序号（上料架取板顺序）。0 表示未入队（未启动/已暂停）；
-    /// 点"启动"时分配递增序号入队尾，点"暂停"时清零，再次启动重新入队尾。
+    /// 人工启动或ERP按文件行序自动入队时分配递增序号，点"暂停"时清零，再次启动重新入队尾。
     /// </summary>
     public int QueueOrder { get; set; }
 }

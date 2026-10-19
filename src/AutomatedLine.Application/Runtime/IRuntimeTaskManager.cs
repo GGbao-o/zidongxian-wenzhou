@@ -13,19 +13,19 @@ public interface IRuntimeTaskManager
     event EventHandler? Changed;
 
     /// <summary>
-    /// 新增一个工件任务，默认位于队列、未派发。
+    /// 人工新增一个工件任务，默认位于队列、状态Created，需另行启动。
     /// </summary>
     /// <param name="info">工件数据</param>
     /// <returns>创建好的任务</returns>
     WorkpieceTask Add(WorkpieceInfo info);
 
-    /// <summary>ERP专用原子添加：同版号和序号已存在时拒绝；成功仍为Created，不改变人工添加规则。</summary>
+    /// <summary>ERP专用原子添加并自动入队：同版号和序号已存在时拒绝；成功为Waiting，不改变人工添加规则。</summary>
     /// <param name="info">ERP工件原始数据</param>
     /// <returns>新增任务；业务身份重复返回null</returns>
     WorkpieceTask? TryAddImported(WorkpieceInfo info);
 
-    /// <summary>ERP整批原子去重并添加；全部添加完成后只发一次Changed，避免逐行重建UI。</summary>
-    /// <param name="infos">按文件顺序解析出的工件；不启动工件</param>
+    /// <summary>ERP整批原子去重并按文件行序启动入队；全批完成后只发一次Changed，避免逐行重建UI。</summary>
+    /// <param name="infos">按文件顺序解析出的工件；成功项分配递增QueueOrder并置Waiting，追加已有队尾</param>
     /// <returns>与输入长度/顺序一致的结果，重复身份对应null；无新增时不通知</returns>
     IReadOnlyList<WorkpieceTask?> TryAddImportedBatch(IReadOnlyList<WorkpieceInfo> infos);
 
@@ -52,7 +52,7 @@ public interface IRuntimeTaskManager
 
     /// <summary>
     /// 修改**未入线**任务的工件数据（"编辑任务"）。
-    /// **只有 `Created`（添加后从未点过启动）才允许**：一旦入线，工件可能已被取走或已按旧参数加工过，
+    /// **只有 `Created`（尚未启动入线）才允许**：一旦人工启动或ERP自动入队，工件可能已被取走或已按旧参数加工过，
     /// 此时改数据会造成"设备按旧参数加工、后续工序按新参数加工"的错配。
     /// 实现必须**原子整体替换**工件数据（不逐字段改），且沿用原 <c>RuntimeId</c>（任务身份不变）。
     /// </summary>

@@ -31,13 +31,13 @@ public partial class MainViewModel : ObservableObject
     /// <summary>ERP接收控制；与线路启停分别管理。</summary>
     private readonly IErpImportService _erpImport;
 
-    /// <summary>按钮第一次开启持续监听，再次暂停后续批次。</summary>
+    /// <summary>程序默认持续监听；按钮显示下一步暂停或继续监听的动作。</summary>
     [ObservableProperty]
-    private string _erpButtonText = "监听 ERP 工件";
+    private string _erpButtonText = "暂停 ERP 监听";
 
     /// <summary>监听状态与最近批次结果，文件错误不会故障暂停线路。</summary>
     [ObservableProperty]
-    private string _erpStatusText = "ERP监听已暂停｜尚未开启";
+    private string _erpStatusText = "ERP监听中｜等待接收";
 
     /// <summary>设备注册表。用于展示已装载设备数量。</summary>
     private readonly DeviceRegistry _deviceRegistry;
@@ -162,7 +162,7 @@ public partial class MainViewModel : ObservableObject
         Console.WriteLine($"[MainViewModel] 已添加任务 {info}");
     }
 
-    /// <summary>切换ERP持续监听；不会启动工件或改变线路状态。</summary>
+    /// <summary>切换ERP持续监听；接收成功的工件自动入队，按钮不改变线路状态。</summary>
     [RelayCommand]
     private void ToggleErpListening() => _erpImport.SetListening(!_erpImport.Status.IsListening);
 

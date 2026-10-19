@@ -6,7 +6,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace AutomatedLine.Application.Erp;
 
-/// <summary>ERP批次接收宿主服务；初始暂停，单循环串行接收，文件消费与线路控制相互独立。</summary>
+/// <summary>ERP批次接收宿主服务；默认持续监听，合法工件按文件顺序自动入队，线路开关仍独立控制。</summary>
 public sealed class ErpImportService : BackgroundService, IErpImportService
 {
     private readonly IErpJobFile _file;
@@ -15,7 +15,7 @@ public sealed class ErpImportService : BackgroundService, IErpImportService
     private readonly IAppLogger _logger;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _wake = new(0, 1);
-    private ErpImportStatus _status = new(false, "尚未开启", 0);
+    private ErpImportStatus _status = new(true, "等待接收", 0);
     // 清理失败时保留原批次与已接收行索引，暂停/继续也不丢回执；只在本进程有效。
     private readonly Dictionary<string, Receipt> _receipts = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _warnings = new();
@@ -61,6 +61,8 @@ public sealed class ErpImportService : BackgroundService, IErpImportService
     {
         try
         {
+            _logger.Info(LogCategory.Operation,
+                $"ERP接收服务启动：{(Status.IsListening ? "持续监听已开启" : "监听已暂停")}，合法工件按文件行序自动启动入队");
             while (!stoppingToken.IsCancellationRequested)
             {
                 if (!Status.IsListening)
@@ -146,13 +148,13 @@ public sealed class ErpImportService : BackgroundService, IErpImportService
             receipt.Accepted.Add(entry.Index);
             added++;
             _logger.Info(LogCategory.Operation,
-                $"ERP接收 {path} 第{entry.Index + 1}行：工件{entry.Info}，任务={task.Id}，状态=Created（未启动）");
+                $"ERP接收 {path} 第{entry.Index + 1}行：工件{entry.Info}，任务={task.Id}，入队状态=Waiting（已自动启动），入线顺序={task.Runtime.QueueOrder}");
         }
         // 校验错误和重复身份可能交错出现，回写和提示都按原文件行号排序，不改变剩余行顺序。
         var problems = failures.OrderBy(entry => entry.Key).Select(entry => entry.Value).ToList();
         for (var index = 0; index < lines.Length; index++)
             if (!receipt.Accepted.Contains(index) && !string.IsNullOrWhiteSpace(lines[index])) remaining.Add(lines[index]);
-        if (added > 0) Publish($"本批新增{added}件，正在清理已接收行", added);
+        if (added > 0) Publish($"本批新增并自动启动{added}件，正在清理已接收行", added);
         if (problems.Count > 0) WarnOnce("rows:" + path, $"ERP文件 {path} 保留{problems.Count}行：{string.Join("；", problems)}");
 
         if (remaining.Count == lines.Length)
@@ -176,7 +178,7 @@ public sealed class ErpImportService : BackgroundService, IErpImportService
         _logger.Info(LogCategory.Operation,
             $"ERP文件清理完成：{path}，已接收{receipt.Accepted.Count}行，保留{remaining.Count}行，忽略空行{lines.Count(string.IsNullOrWhiteSpace)}");
         if (problems.Count == 0) _warnings.Remove("rows:" + path);
-        Publish($"已接收{receipt.Accepted.Count}件（未启动），保留{remaining.Count}行"
+        Publish($"已接收{receipt.Accepted.Count}件（已自动启动入队），保留{remaining.Count}行"
             + (problems.Count > 0 ? $"；{problems[0]}" : ""));
     }
 

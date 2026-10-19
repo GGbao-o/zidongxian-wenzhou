@@ -147,7 +147,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IConfigService>(configService);
         services.AddSingleton<IAppLogger, FileAppLogger>();
 
-        // ERP默认暂停；按钮只切换这个宿主单例，页面切换不会新建循环或停止监听。
+        // ERP默认持续监听并自动入队；按钮只切换这个宿主单例，页面切换不会新建循环或停止监听。
         services.AddSingleton<IErpJobFile, ErpJobFile>();
         services.AddSingleton<ErpImportService>();
         services.AddSingleton<IErpImportService>(sp => sp.GetRequiredService<ErpImportService>());

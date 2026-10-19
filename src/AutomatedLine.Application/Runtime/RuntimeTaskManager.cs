@@ -17,7 +17,7 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
     /// <summary>并发保护锁。</summary>
     private readonly object _sync = new();
 
-    /// <summary>入线顺序号计数器（点"启动"时自增，作为入队尾的顺序）。</summary>
+    /// <summary>人工启动和ERP自动入队共用的顺序号计数器，保证新任务统一追加队尾。</summary>
     private int _queueOrder;
 
     /// <summary>日志。人工"编辑任务"要写 operation.txt，便于事后追溯"哪块板什么时候被谁改过"。</summary>
@@ -67,8 +67,8 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
     {
         var results = new WorkpieceTask?[infos.Count];
         if (infos.Count == 0) return results;
-        var created = new List<(WorkpieceTask Task, int Count)>();
-        // 一批只持锁一次，现有身份和批内身份一起去重；页面通知在锁外、全批提交后执行。
+        var created = new List<(WorkpieceTask Task, int Count, int QueueOrder)>();
+        // 一批只持锁一次：按文件行序去重并完成入队，避免并发批次/人工启动插入本批中间。
         lock (_sync)
         {
             var identities = _tasks.Select(t => (t.Info.PlateNo, t.Info.SerialNo)).ToHashSet();
@@ -77,16 +77,19 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
                 var info = infos[index];
                 if (!identities.Add((info.PlateNo, info.SerialNo))) continue;
                 var task = new WorkpieceTask(info);
+                // 在发布到任务表前完成启动，生成器和界面不会观察到尚未入队的ERP任务。
+                task.Runtime.QueueOrder = Interlocked.Increment(ref _queueOrder);
+                task.Runtime.TaskState = WorkpieceState.Waiting;
                 _tasks.Add(task);
                 results[index] = task;
-                created.Add((task, _tasks.Count));
+                created.Add((task, _tasks.Count, task.Runtime.QueueOrder));
             }
         }
         if (created.Count == 0) return results;
         foreach (var entry in created)
         {
             var info = entry.Task.Info;
-            _logger.Info(LogCategory.Task, $"ERP任务创建：工件 {info}（{Describe(info)}），状态=Created，当前共 {entry.Count} 个");
+            _logger.Info(LogCategory.Task, $"ERP任务创建并自动启动：工件 {info}（{Describe(info)}），入队状态=Waiting，入线顺序={entry.QueueOrder}，当前共 {entry.Count} 个");
         }
         // 仍保留每件生命周期日志，只合并列表通知；通知失败不能改变已经提交的成功结果。
         try { Changed?.Invoke(this, EventArgs.Empty); }
@@ -169,7 +172,7 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         {
             task = _tasks.FirstOrDefault(t => t.Id == taskId);
 
-            // 【准入判据】只允许"添加后从未启动"（Created）的任务改数据。
+            // 【准入判据】只允许尚未启动入线（Created）的任务改数据，ERP自动入队后也不允许编辑。
             // 一旦入线（Waiting/Paused/已派发/执行中…），工件可能已被取走、或已按旧参数加工过，
             // 再改数据会让"设备按旧参数加工、后续工序按新参数加工"错配。
             if (task is null || task.Runtime.TaskState != WorkpieceState.Created)

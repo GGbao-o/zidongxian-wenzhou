@@ -109,7 +109,7 @@ public partial class ParamsViewModel : ObservableObject
     {
         Categories.Clear();
 
-        var erp = new ParamCategoryViewModel("ERP接收", "批量文件路径、检查间隔与文本编码；只添加未启动工件");
+        var erp = new ParamCategoryViewModel("ERP接收", "批量文件路径、检查间隔与文本编码；合法工件按文件顺序自动启动入队");
         erp.Items.Add(TextItem("监听文件路径", () => _options.ErpImport.FilePath, v => _options.ErpImport.FilePath = v));
         erp.Items.Add(IntItem("文件检查间隔(ms)", () => _options.ErpImport.PollIntervalMs, v => _options.ErpImport.PollIntervalMs = v));
         erp.Items.Add(TextItem("文件编码", () => _options.ErpImport.Encoding, v => _options.ErpImport.Encoding = v));

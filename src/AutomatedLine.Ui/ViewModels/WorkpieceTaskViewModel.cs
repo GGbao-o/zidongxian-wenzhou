@@ -83,7 +83,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     private bool _canPause;
 
     /// <summary>
-    /// 是否允许"编辑"：**只有 `Created`（添加后从未点过启动）可编辑**。
+    /// 是否允许"编辑"：**只有 `Created`（尚未启动入线）可编辑，ERP自动入队后不允许编辑**。
     /// 一旦入线（Waiting/Paused/已派发/执行中…）就不再允许——工件可能已被取走或已按旧参数加工过，
     /// 此时改数据会造成"设备按旧参数加工、后续工序按新参数加工"的错配。
     /// 注意：这只是界面的软提示，最终由 <c>IRuntimeTaskManager.TryUpdate</c> 在服务端再判一次。

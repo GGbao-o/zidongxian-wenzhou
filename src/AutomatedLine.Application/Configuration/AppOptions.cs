@@ -10,7 +10,7 @@ public sealed class AppOptions
     /// <summary>手动操作的确认参数；不在参数管理页面展示。</summary>
     public ManualOperationOptions ManualOperation { get; set; } = new();
 
-    /// <summary>ERP文件接收参数；只创建未启动工件，不控制线路。</summary>
+    /// <summary>ERP文件接收参数；合法工件按文件行序自动启动入队，不改变线路开关。</summary>
     public ErpImportOptions ErpImport { get; set; } = new();
 
     /// <summary>采集类参数。</summary>

@@ -88,32 +88,61 @@ public sealed class ErpImportTests
             manager.TryAddImported(new WorkpieceInfo { PlateNo = "P", SerialNo = 1 }))));
         Assert.Single(results.Where(x => x is not null));
         Assert.Single(manager.Snapshot());
-        manager.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = 1 });
+        var manual = manager.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = 1 });
         Assert.Equal(2, manager.Snapshot().Count);
+        Assert.Equal(WorkpieceState.Created, manual.Runtime.TaskState);
+        Assert.Equal(0, manual.Runtime.QueueOrder);
     }
 
-    /// <summary>默认不读文件；开启后5行生成5个Created，按原顺序显示且清空为0字节。</summary>
+    /// <summary>宿主默认持续监听，无需点击即按文件从上到下自动入队，并清空已接收行。</summary>
+    /// <returns>异步默认监听与入队验证任务。</returns>
     [Fact]
-    public async Task FiveRows_AreCreatedWithoutStarting_AndFileConsumed()
+    public async Task Startup_ListensAndQueuesFileRowsWithoutClicking()
     {
         await using var fixture = new Fixture();
         var notifications = 0;
         fixture.Manager.Changed += (_, _) => Interlocked.Increment(ref notifications);
-        await File.WriteAllLinesAsync(fixture.Path, Enumerable.Range(1, 5).Select(Row));
+        var serials = new[] { 9, 0, 7, 2, 1 };
+        var path = System.IO.Path.Combine(fixture.Directory, "job");
+        fixture.Config.Options.ErpImport.FilePath = path;
+        await File.WriteAllLinesAsync(path, serials.Select(Row));
+        Assert.True(fixture.Service.Status.IsListening);
         await fixture.Service.StartAsync(default);
-        Assert.False(fixture.Service.Status.IsListening);
-        Assert.Equal(0, fixture.File.ReadCount);
-        fixture.Service.SetListening(true);
-        await Until(() => fixture.Manager.Snapshot().Count == 5 && new FileInfo(fixture.Path).Length == 0);
-        Assert.Equal(Enumerable.Range(1, 5), fixture.Manager.Snapshot().Select(t => t.Info.SerialNo));
+        await Until(() => fixture.Manager.Snapshot().Count == 5 && new FileInfo(path).Length == 0
+            && fixture.Service.Status.Message.Contains("已自动启动入队"));
+        Assert.True(fixture.Service.Status.IsListening);
+        Assert.Equal(serials, fixture.Manager.Snapshot().Select(t => t.Info.SerialNo));
+        Assert.Equal(Enumerable.Range(1, 5), fixture.Manager.Snapshot().Select(t => t.Runtime.QueueOrder));
         Assert.All(fixture.Manager.Snapshot(), t =>
         {
-            Assert.Equal(WorkpieceState.Created, t.Runtime.TaskState);
-            Assert.Equal(0, t.Runtime.QueueOrder);
+            Assert.Equal(WorkpieceState.Waiting, t.Runtime.TaskState);
             Assert.Equal(WorkpieceLocation.Queue, t.Runtime.CurrentLocation);
         });
         Assert.Equal(5, fixture.Service.Status.ImportedCount);
         Assert.Equal(1, notifications);
+        Assert.Contains("已自动启动入队", fixture.Service.Status.Message);
+        Assert.Contains(fixture.Logger.Messages, message => message.Contains("持续监听已开启"));
+        Assert.Contains(fixture.Logger.Messages, message => message.Contains("第2行") && message.Contains("工件P/0")
+            && message.Contains("入线顺序=2"));
+    }
+
+    /// <summary>默认开启仍可人工暂停，暂停前未开始的批次只能在继续后读取并入队。</summary>
+    /// <returns>异步暂停与恢复验证任务。</returns>
+    [Fact]
+    public async Task Startup_CanBePausedBeforeReading_AndResumed()
+    {
+        await using var fixture = new Fixture();
+        await File.WriteAllLinesAsync(fixture.Path, new[] { Row(0) });
+        fixture.Service.SetListening(false);
+        await fixture.Service.StartAsync(default);
+        Assert.False(fixture.Service.Status.IsListening);
+        Assert.Equal(0, fixture.File.ReadCount);
+        Assert.Empty(fixture.Manager.Snapshot());
+
+        fixture.Service.SetListening(true);
+        await Until(() => fixture.Manager.Snapshot().Count == 1 && new FileInfo(fixture.Path).Length == 0);
+        Assert.Equal(WorkpieceState.Waiting, fixture.Manager.Snapshot()[0].Runtime.TaskState);
+        Assert.Equal(1, fixture.Manager.Snapshot()[0].Runtime.QueueOrder);
     }
 
     /// <summary>正确行接收并删除，重复和非法行原样保留，既有任务不覆盖。</summary>
@@ -149,7 +178,8 @@ public sealed class ErpImportTests
         await fixture.Service.StopAsync(default);
 
         Assert.Equal(new[] { 0, 1 }, fixture.Manager.Snapshot().Select(task => task.Info.SerialNo));
-        Assert.All(fixture.Manager.Snapshot(), task => Assert.Equal(WorkpieceState.Created, task.Runtime.TaskState));
+        Assert.All(fixture.Manager.Snapshot(), task => Assert.Equal(WorkpieceState.Waiting, task.Runtime.TaskState));
+        Assert.Equal(new[] { 1, 2 }, fixture.Manager.Snapshot().Select(task => task.Runtime.QueueOrder));
         Assert.Equal(new[] { Row(0), Row(-1) }, await File.ReadAllLinesAsync(fixture.Path));
         Assert.Equal(2, fixture.Service.Status.ImportedCount);
         Assert.Contains(fixture.Logger.Messages, message => message.Contains("第2行") && message.Contains("重复"));
@@ -174,6 +204,8 @@ public sealed class ErpImportTests
         await Until(() => new FileInfo(fixture.Path).Length == 0);
         Assert.Equal(2, fixture.Manager.Snapshot().Count);
         Assert.Equal(2, fixture.Service.Status.ImportedCount);
+        Assert.Equal(new[] { 1, 2 }, fixture.Manager.Snapshot().Select(task => task.Runtime.QueueOrder));
+        Assert.All(fixture.Manager.Snapshot(), task => Assert.Equal(WorkpieceState.Waiting, task.Runtime.TaskState));
         Assert.DoesNotContain(fixture.Logger.Messages, m => m.Contains("版号和序号重复"));
     }
 
@@ -308,6 +340,7 @@ public sealed class ErpImportTests
         await Until(() => fixture.Manager.Snapshot().Count == 2 && new FileInfo(fixture.Path).Length == 0);
         Assert.True(fixture.Service.Status.IsListening);
         Assert.Equal(2, fixture.Service.Status.ImportedCount);
+        Assert.Equal(new[] { 1, 2 }, fixture.Manager.Snapshot().Select(task => task.Runtime.QueueOrder));
     }
 
     /// <summary>非法文件编码不能被当成空文件或删除；相同读取错误不刷日志。</summary>
@@ -365,7 +398,10 @@ public sealed class ErpImportTests
         Assert.Same(existing, manager.Snapshot()[0]);
         Assert.Equal(1, notifications);
         Assert.Equal(3, observedCount);
-        Assert.All(manager.Snapshot(), t => Assert.Equal(WorkpieceState.Created, t.Runtime.TaskState));
+        Assert.Equal(WorkpieceState.Created, existing.Runtime.TaskState);
+        Assert.Equal(0, existing.Runtime.QueueOrder);
+        Assert.All(result.Where(task => task is not null), task => Assert.Equal(WorkpieceState.Waiting, task!.Runtime.TaskState));
+        Assert.Equal(new[] { 1, 2 }, result.Where(task => task is not null).Select(task => task!.Runtime.QueueOrder));
     }
 
     /// <summary>空批次与全部重复都不产生集合变更通知。</summary>
@@ -394,6 +430,59 @@ public sealed class ErpImportTests
         Assert.Equal(2, results.Sum(batch => batch.Count(task => task is not null)));
         Assert.Equal(2, manager.Snapshot().Count);
         Assert.Equal(1, notifications);
+        Assert.Equal(new[] { 1, 2 }, manager.Snapshot().Select(task => task.Runtime.QueueOrder));
+    }
+
+    /// <summary>ERP批次接在已有队尾，共用人工启动的顺序号；只通知完整Waiting批次，不按序号大小重排。</summary>
+    [Fact]
+    public void ImportedBatch_AppendsAfterExistingQueue_AndSharesManualStartCounter()
+    {
+        var manager = new RuntimeTaskManager(new TestLogger());
+        var existing = manager.Add(Info(5));
+        Assert.True(manager.Start(existing.Id));
+        var manual = manager.Add(Info(6));
+        var notifications = 0;
+        var observed = Array.Empty<(int Serial, WorkpieceState State, int Order)>();
+        manager.Changed += (_, _) =>
+        {
+            notifications++;
+            // 保存通知时的值，不能仅保存对象引用后再读，否则会漏掉通知后才启动的错误实现。
+            observed = manager.Snapshot().Select(task => (task.Info.SerialNo, task.Runtime.TaskState, task.Runtime.QueueOrder)).ToArray();
+        };
+
+        var result = manager.TryAddImportedBatch(new[] { Info(9), Info(0), Info(9), Info(2) });
+
+        Assert.Equal(1, notifications);
+        Assert.Equal(5, observed.Length);
+        Assert.Null(result[2]);
+        Assert.Equal(new[] { 5, 9, 0, 2 }, observed.Where(task => task.State == WorkpieceState.Waiting)
+            .OrderBy(task => task.Order).Select(task => task.Serial));
+        Assert.Equal(new[] { 1, 2, 3, 4 }, observed.Where(task => task.State == WorkpieceState.Waiting)
+            .Select(task => task.Order));
+        Assert.Equal(WorkpieceState.Created, manual.Runtime.TaskState);
+        Assert.Equal(0, manual.Runtime.QueueOrder);
+        Assert.False(manager.Start(result[0]!.Id));
+        Assert.True(manager.Start(manual.Id));
+        Assert.Equal(5, manual.Runtime.QueueOrder);
+    }
+
+    /// <summary>不同批次并发导入时整批连续入队，顺序号唯一递增且各批内部保持文件行序。</summary>
+    /// <returns>异步并发入队验证任务。</returns>
+    [Fact]
+    public async Task ConcurrentDistinctBatches_KeepEachBatchQueueOrderContiguous()
+    {
+        var manager = new RuntimeTaskManager(new TestLogger());
+        var batches = await Task.WhenAll(Enumerable.Range(0, 16).Select(batch => Task.Run(() =>
+            manager.TryAddImportedBatch(new[] { Info(batch * 3 + 2), Info(batch * 3), Info(batch * 3 + 1) }))));
+
+        Assert.Equal(Enumerable.Range(1, 48), manager.Snapshot().Select(task => task.Runtime.QueueOrder));
+        Assert.All(batches, batch =>
+        {
+            Assert.All(batch, task => Assert.NotNull(task));
+            var firstOrder = batch[0]!.Runtime.QueueOrder;
+            Assert.Equal(Enumerable.Range(firstOrder, 3), batch.Select(task => task!.Runtime.QueueOrder));
+            Assert.All(batch, task => Assert.Equal(WorkpieceState.Waiting, task!.Runtime.TaskState));
+        });
     }
 
     /// <summary>已有200件时从真实文件再接50件，也只发一次通知且保持所有既有任务。</summary>
