@@ -21,7 +21,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 直接编译真实客户端与设备/天车驱动，验证通信边界、料架地址及脉冲协议，避免加载 MySQL 或 FOCAS 原生依赖。 -->
+    <!-- 直接编译真实客户端与设备/天车驱动；FOCAS通道注入测试会话，不调用原生DLL或现场设备。 -->
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\FocasLatheChannel.cs" Link="Infrastructure\FocasLatheChannel.cs" />
+    <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\FocasSession.cs" Link="Infrastructure\FocasSession.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Erp\ErpJobFile.cs" Link="Infrastructure\ErpJobFile.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\ModbusTcpClient.cs" Link="Infrastructure\ModbusTcpClient.cs" />
     <Compile Include="..\..\src\AutomatedLine.Infrastructure\Communication\CraneService.cs" Link="Infrastructure\CraneService.cs" />
@@ -37,6 +39,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AutomatedLine.Domain\AutomatedLine.Domain.csproj" />
     <ProjectReference Include="..\..\src\AutomatedLine.Application\AutomatedLine.Application.csproj" />
+    <ProjectReference Include="..\..\src\AutomatedLine.Focas\AutomatedLine.Focas.csproj" />
   </ItemGroup>
 
 </Project>

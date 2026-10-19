@@ -31,14 +31,21 @@ namespace FanucFocas
             }
         }
 
-        /// <summary>断开</summary>
+        /// <summary>释放当前句柄；即使原生释放异常，也清除托管状态，避免后续复用失效连接。</summary>
         public void Disconnect()
         {
             lock (_lock)
             {
                 if (!_connected) return;
-                cnc_freelibhndl(_hndl);
-                _connected = false;
+                try
+                {
+                    cnc_freelibhndl(_hndl);
+                }
+                finally
+                {
+                    _hndl = 0;
+                    _connected = false;
+                }
             }
         }
 
