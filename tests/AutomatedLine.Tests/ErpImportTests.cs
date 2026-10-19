@@ -38,13 +38,30 @@ public sealed class ErpImportTests
         finally { CultureInfo.CurrentCulture = previous; }
     }
 
-    /// <summary>非法行明确失败，不能以默认零或NaN创建工件。</summary>
+    /// <summary>ERP序号允许从0开始，仍以整数原值保存业务身份。</summary>
+    /// <param name="serial">允许的非负整数序号。</param>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(int.MaxValue)]
+    public void Parser_AcceptsNonNegativeSerial(int serial)
+    {
+        Assert.True(ErpJobParser.TryParse(Row(serial), out var info, out var error));
+        Assert.Null(error);
+        Assert.NotNull(info);
+        Assert.Equal(serial, info.SerialNo);
+    }
+
+    /// <summary>非法行明确失败，不能把非法字段默认为0或以NaN创建工件。</summary>
     /// <param name="line">非法ERP原始行</param>
     /// <param name="reason">应指出的错误字段</param>
     [Theory]
     [InlineData("bad", "8列")]
     [InlineData("X,,1,1200,180,70,1,25", "版号")]
-    [InlineData("X,P,0,1200,180,70,1,25", "序号")]
+    [InlineData("X,P,-1,1200,180,70,1,25", "序号")]
+    [InlineData("X,P,,1200,180,70,1,25", "序号")]
+    [InlineData("X,P,abc,1200,180,70,1,25", "序号")]
+    [InlineData("X,P,2147483648,1200,180,70,1,25", "序号")]
     [InlineData("X,P,1.5,1200,180,70,1,25", "序号")]
     [InlineData("X,P,1,0,180,70,1,25", "长度")]
     [InlineData("X,P,1,NaN,180,70,1,25", "长度")]
@@ -116,6 +133,27 @@ public sealed class ErpImportTests
         Assert.Equal(999, existing.Info.Length);
         Assert.Contains(fixture.Logger.Messages, m => m.Contains("第1行") && m.Contains("重复"));
         Assert.Contains(fixture.Logger.Messages, m => m.Contains("第2行") && m.Contains("8列"));
+    }
+
+    /// <summary>序号0正常导入并清理，同版号序号0仍去重，负序号原行保留。</summary>
+    /// <returns>异步文件消费验证任务。</returns>
+    [Fact]
+    public async Task ZeroSerial_IsImportedAndConsumed_DuplicatesAndNegativeRemain()
+    {
+        await using var fixture = new Fixture();
+        await File.WriteAllLinesAsync(fixture.Path, new[] { Row(0), Row(0), Row(1), Row(-1) });
+        await fixture.Service.StartAsync(default);
+        fixture.Service.SetListening(true);
+        await Until(() => fixture.Manager.Snapshot().Count == 2 && fixture.File.WriteCount >= 1);
+        fixture.Service.SetListening(false);
+        await fixture.Service.StopAsync(default);
+
+        Assert.Equal(new[] { 0, 1 }, fixture.Manager.Snapshot().Select(task => task.Info.SerialNo));
+        Assert.All(fixture.Manager.Snapshot(), task => Assert.Equal(WorkpieceState.Created, task.Runtime.TaskState));
+        Assert.Equal(new[] { Row(0), Row(-1) }, await File.ReadAllLinesAsync(fixture.Path));
+        Assert.Equal(2, fixture.Service.Status.ImportedCount);
+        Assert.Contains(fixture.Logger.Messages, message => message.Contains("第2行") && message.Contains("重复"));
+        Assert.Contains(fixture.Logger.Messages, message => message.Contains("第4行") && message.Contains("序号必须为非负整数"));
     }
 
     /// <summary>清理失败后暂停/继续仍复用回执，不把成功行作为重复错误遗留。</summary>

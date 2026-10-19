@@ -21,7 +21,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [ObservableProperty]
     private string _plateNo = string.Empty;
 
-    /// <summary>序号（输入用文本，组装时转 int）。</summary>
+    /// <summary>非负整数序号（允许0；输入用文本，组装时转int）。</summary>
     [ObservableProperty]
     private string _serialNo = string.Empty;
 
@@ -100,13 +100,13 @@ public partial class AddWorkpieceViewModel : ObservableObject
     };
 
     /// <summary>
-    /// 校验输入是否合法：版号非空、序号为正整数、直径/长度为正、堵孔只能 70/100、**斜床工艺 1~10**。
+    /// 校验输入是否合法：版号非空、序号为非负整数（允许0）、直径/长度为正、堵孔只能 70/100、**斜床工艺 1~10**。
     /// </summary>
     /// <returns>合法返回 true</returns>
     public bool Validate()
     {
         return !string.IsNullOrWhiteSpace(PlateNo)
-               && int.TryParse(SerialNo.Trim(), out var serialNo) && serialNo > 0
+               && int.TryParse(SerialNo.Trim(), out var serialNo) && serialNo >= 0
                && Diameter > 0
                && Length > 0
                && (PlugHole == 70 || PlugHole == 100)
