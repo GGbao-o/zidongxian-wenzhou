@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Alarms;
 using AutomatedLine.Application.Line;
@@ -110,8 +111,12 @@ public sealed class CraneStateMachine
         TransferContext? ctx = null;
         var route = $"设备{task.SourceDeviceId}→设备{task.TargetDeviceId}";
         var phase = "初始化";
+        var started = Stopwatch.GetTimestamp();
         try
         {
+            _logger.Info(LogCategory.StateMachine,
+                $"[{crane.Name}/Id={crane.Id}] 搬运入口：搬运Id={task.TaskId:N}，工件Id={task.WorkpieceRuntimeId:N}，" +
+                $"源设备={task.SourceDeviceId}/X={task.SourceX}，目标设备={task.TargetDeviceId}/X={task.TargetX}，目标工序={task.TargetProcess}，优先级={task.Priority}，线路状态={_lineControl.State}");
             execution?.ThrowIfManualAbortRequested();
             //判断线路是否暂停 暂停状态就不执行任务了 防止因为异常触发暂停引擎了 另一个天车又有派发的任务
             if (!_lineControl.IsRunning)
@@ -133,6 +138,9 @@ public sealed class CraneStateMachine
                          ?? throw new InvalidOperationException($"目标设备 {task.TargetDeviceId} 不存在");
             route = $"{wp.Info} {source.Name}→{target.Name}";
             ctx = new TransferContext(crane, wp, _driverRegistry, _configStore, _configService.GetAppOptions(), _logger);
+            _logger.Info(LogCategory.StateMachine,
+                $"[{crane.Name}] 搬运初始化：搬运Id={task.TaskId:N}，工件={wp.Info}，长度={wp.Info.Length}，直径={wp.Info.Diameter}，堵孔={wp.Info.PlugHole}，堵厚={wp.Info.PlugThickness}，斜床工艺={wp.Info.LatheMachiningMode}；" +
+                $"源={source.Name}/{source.Type}，目标={target.Name}/{target.Type}，原状态={wp.Runtime.TaskState}，原位置={wp.Runtime.CurrentLocation}，原工序={wp.Runtime.CurrentProcess}，握手超时={ctx.Options.StateMachine.HandshakeTimeoutMs}ms");
 
             // 1) 原子获取路权 + 预约；竞争失败回滚，任务回 Waiting，不作为故障暂停。
             phase = "获取资源";
@@ -161,35 +169,40 @@ public sealed class CraneStateMachine
 
             // 3) 去源设备取料阶段：  已经z回升->发下料完成了
             phase = $"取料({source.Name})";
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 阶段开始：{phase}，搬运Id={task.TaskId:N}；按源类型执行取料，完成后才交接内存工件");
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
             execution?.ThrowIfManualAbortRequested();
             //这个时候才转移设备
             source.CurrentWorkpiece = null;
             crane.CurrentWorkpiece = wp;
             wp.Runtime.CurrentLocation = WorkpieceLocation.OnCrane(crane.Id);
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 取料内存交接：搬运Id={task.TaskId:N}，源设备{source.Id}.CurrentWorkpiece已清空，天车持有工件Id={wp.Id:N}，工件位置={wp.Runtime.CurrentLocation}；累计耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
             ctx.LogStep($"取料完成：{source.Name}（板已在天车 {crane.Name} 上）");
 
             // 4) 中转：XY到目标→清理源设备plc点位->释放源预约->缩小路权->清除目标设备plc点位
             phase = $"中转({source.Name}→{target.Name})";
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 阶段开始：{phase}，搬运Id={task.TaskId:N}，当前路权={crane.Runtime.LockedInterval}");
             await TransitAsync(ctx, crane, task, source, target, cancellationToken).ConfigureAwait(false);
             execution?.ThrowIfManualAbortRequested();
             ctx.LogStep($"中转到达：{target.Name}（已释放源预约、缩小路权、复位源握手位）");
 
             // 5) 去目标设备放料阶段：结果：也是z回升了发过下料完成的
             phase = $"放料({target.Name})";
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 阶段开始：{phase}，搬运Id={task.TaskId:N}；按目标类型执行放料，完成后才交接内存工件");
             await _handlers.Get(target.Type).PlaceAsync(ctx, target, cancellationToken).ConfigureAwait(false);
             execution?.ThrowIfManualAbortRequested();
             target.CurrentWorkpiece = wp;
             crane.CurrentWorkpiece = null;
             wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(target.Id);
             wp.Runtime.CurrentProcess = task.TargetProcess;
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 放料内存交接：搬运Id={task.TaskId:N}，目标设备{target.Id}持有工件Id={wp.Id:N}，天车工件已清空，工件位置={wp.Runtime.CurrentLocation}，工序={wp.Runtime.CurrentProcess}；累计耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
             ctx.LogStep($"放料完成：{target.Name}（板已交给目标设备）");
 
             // 6) 完成：回安全位、释放全部
             phase = "收尾";
             await FinishAsync(ctx, crane, task, target, wp, cancellationToken, execution).ConfigureAwait(false);
 
-            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}");
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}；搬运Id={task.TaskId:N}，工件Id={wp.Id:N}，工件状态={wp.Runtime.TaskState}，位置={wp.Runtime.CurrentLocation}，工序={wp.Runtime.CurrentProcess}，总耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)//为true 表示这个token已经失效了 手动取消的任务
         {
@@ -262,6 +275,7 @@ public sealed class CraneStateMachine
     {
         ctx.LogStep($"获取资源：任务 {ShortId(task.TaskId)}（源设备 {task.SourceDeviceId} → 目标设备 {task.TargetDeviceId}）");
         var interval = task.GetRightOfWayInterval(crane.Width);
+        _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 资源申请明细：搬运Id={task.TaskId:N}，源X={task.SourceX}，目标X={task.TargetX}，车宽={crane.Width}，申请路权={interval}，预约源设备={task.SourceDeviceId}、目标设备={task.TargetDeviceId}");
 
         if (!_rightOfWayManager.TryAcquire(task.TaskId, interval))
         {
@@ -356,12 +370,18 @@ public sealed class CraneStateMachine
         ctx.LogStep(target, "中转：源握手复位结束，释放源设备预约 + 路权缩小到目标车体区间");
         //释放源设备预约
         _reservationManager.ReleaseSource(task.TaskId);
+        _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 已释放源预约：搬运Id={task.TaskId:N}，源设备={source.Id}，仍保留目标设备={target.Id}预约");
         var targetInterval = XInterval.FromTask(target.PositionX, target.PositionX, crane.Width);
         //缩小路权
         if (_rightOfWayManager.Resize(task.TaskId, targetInterval))
         {
             // 大屏读取天车运行态；仅在调整成功后同步，避免显示未实际取得的区间。
             crane.Runtime.LockedInterval = targetInterval;
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 路权缩小成功：搬运Id={task.TaskId:N}，新路权={targetInterval}");
+        }
+        else
+        {
+            _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 路权缩小未成功：搬运Id={task.TaskId:N}，期望={targetInterval}，继续保留={crane.Runtime.LockedInterval}");
         }
 
         // 目标设备：放料前把它"上位机写入的握手位"清零，保证放料阶段每次写 1 都是干净的上升沿

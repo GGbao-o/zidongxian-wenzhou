@@ -158,6 +158,8 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
                 }
             }
 
+            _logger.Info(LogCategory.Communication,
+                $"设备[{DeviceId}] FC16写入开始：PrintContent，PDU={MarkerMachineAddress.PrintContentStart}，内容=「{text.Replace("\r", "\\r").Replace("\n", "\\n")}」，UTF8字节数={bytes.Length}，Word数量={registers.Length}，低字节在前组字=[{string.Join(",", registers.Select(word => $"0x{word:X4}"))}]；等待应答");
             await _client.WriteRegistersAsync(MarkerMachineAddress.PrintContentStart, registers, cancellationToken).ConfigureAwait(false);
             _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] 写打印内容 {bytes.Length} 字节{connectionSuffix}");
             return;
@@ -169,11 +171,16 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
         switch (point.Area)
         {
             case ModbusArea.Coil:
+                _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] FC05写入开始：{point.Name}，PDU={point.Address}，录入={value}；等待应答");
                 await _client.WriteCoilAsync(point.Address, ToBool(value), cancellationToken).ConfigureAwait(false);
+                _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] FC05写入完成：{point.Name}，PDU={point.Address}，应答已接收");
                 break;
             case ModbusArea.HoldingRegister:
                 var raw = ToRegisterWord(point, value);
+                _logger.Info(LogCategory.Communication,
+                    $"设备[{DeviceId}] FC06写入开始：{point.Name}，PDU={point.Address}，录入={value}，倍率={point.Scale}，布尔语义={point.IsBool}，Word={raw}(0x{raw:X4})；等待应答");
                 await _client.WriteRegisterAsync(point.Address, raw, cancellationToken).ConfigureAwait(false);
+                _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] FC06写入完成：{point.Name}，PDU={point.Address}，Word={raw}，应答已接收");
                 if (point.RoundViaInt32)
                 {
                     _logger.Info(LogCategory.Communication,

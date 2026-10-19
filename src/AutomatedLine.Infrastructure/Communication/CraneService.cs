@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Domain.Diagnostics;
@@ -303,6 +304,9 @@ public sealed class CraneService : ICraneDriver
             //判断z轴方向
             var zDirection = dz > 0 ? 1 : dz < 0 ? 2 : 0;
 
+            _logger.Info(LogCategory.Operation,
+                $"天车[{_name}] 绝对运动换算：用户编码器目标XYZ=({x},{y},{z})，当前编码器XYZ=({s.XEncoder},{s.YEncoder},{s.ZEncoder})，当前显示XYZ=({s.XPosition},{s.YPosition},{s.ZPosition})；" +
+                $"写入目标=用户目标-当前编码器+当前显示，结果XYZ=({writeX},{writeY},{writeZ})，Z方向={zDirection}(1下降/2上升/0不变)");
             return await MoveAsync(writeX, writeY, writeZ, x, y, z, pollEncoder: true, zDirection, cancellationToken).ConfigureAwait(false);
         }
         //OperationCanceledException：表示"调用方主动取消了"，这不是一个失败结果，而是一个控制信号。它必须向上传播，让调用方（或 Task 调度层）知道这个任务是"被取消"而不是"执行失败"。
@@ -335,6 +339,8 @@ public sealed class CraneService : ICraneDriver
 
             var zDirection = dz > 0 ? 1 : dz < 0 ? 2 : 0;
 
+            _logger.Info(LogCategory.Operation,
+                $"天车[{_name}] 相对运动换算：增量XYZ=({dx},{dy},{dz})，当前显示XYZ=({s.XPosition},{s.YPosition},{s.ZPosition})，显示目标XYZ=({targetX},{targetY},{targetZ})；-1表示该轴跳过，Z方向={zDirection}(1下降/2上升/0不变)");
             return await MoveAsync(targetX, targetY, targetZ, targetX, targetY, targetZ, pollEncoder: false, zDirection, cancellationToken).ConfigureAwait(false);
         }
         //OperationCanceledException：表示"调用方主动取消了"，这不是一个失败结果，而是一个控制信号。它必须向上传播，让调用方（或 Task 调度层）知道这个任务是"被取消"而不是"执行失败"。
@@ -382,10 +388,13 @@ public sealed class CraneService : ICraneDriver
     {
         if (_manualModeSet)
         {
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 手动前置沿用已设置缓存，本次不重复写D{CraneAddress.ModeCmd}/D{CraneAddress.ManualMode}");
             return;
         }
 
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 手动前置下发开始：依次FC06写D{CraneAddress.ModeCmd}=2、D{CraneAddress.ManualMode}=2，等待各次应答");
         await _client.WriteRegisterAsync(CraneAddress.ModeCmd, 2, cancellationToken).ConfigureAwait(false);
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 手动前置写入完成：D{CraneAddress.ModeCmd}=2，下一步写D{CraneAddress.ManualMode}=2");
         await _client.WriteRegisterAsync(CraneAddress.ManualMode, 2, cancellationToken).ConfigureAwait(false);
         _manualModeSet = true;
         _logger.Info(LogCategory.Operation, $"天车[{_name}] 进入手动模式 D4001=2 D4500=2");
@@ -409,15 +418,19 @@ public sealed class CraneService : ICraneDriver
         CancellationToken cancellationToken = default)
         => ExecuteAsync("设置三轴绝对速度", async () =>
         {
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 速度FC06下发X轴：D{CraneAddress.XAbsSpeed}={(ushort)speedX}，D{CraneAddress.XAbsAccel}={(ushort)accelX}，D{CraneAddress.XAbsDecel}={(ushort)decelX}，依次等待应答");
             await _client.WriteRegisterAsync(CraneAddress.XAbsSpeed, (ushort)speedX, cancellationToken).ConfigureAwait(false);
             await _client.WriteRegisterAsync(CraneAddress.XAbsAccel, (ushort)accelX, cancellationToken).ConfigureAwait(false);
             await _client.WriteRegisterAsync(CraneAddress.XAbsDecel, (ushort)decelX, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] X轴三项速度写入完成；速度FC06下发Y轴：D{CraneAddress.YAbsSpeed}={(ushort)speedY}，D{CraneAddress.YAbsAccel}={(ushort)accelY}，D{CraneAddress.YAbsDecel}={(ushort)decelY}");
             await _client.WriteRegisterAsync(CraneAddress.YAbsSpeed, (ushort)speedY, cancellationToken).ConfigureAwait(false);
             await _client.WriteRegisterAsync(CraneAddress.YAbsAccel, (ushort)accelY, cancellationToken).ConfigureAwait(false);
             await _client.WriteRegisterAsync(CraneAddress.YAbsDecel, (ushort)decelY, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] Y轴三项速度写入完成；速度FC06下发Z轴：D{CraneAddress.ZAbsSpeed}={(ushort)speedZ}，D{CraneAddress.ZAbsAccel}={(ushort)accelZ}，D{CraneAddress.ZAbsDecel}={(ushort)decelZ}");
             await _client.WriteRegisterAsync(CraneAddress.ZAbsSpeed, (ushort)speedZ, cancellationToken).ConfigureAwait(false);
             await _client.WriteRegisterAsync(CraneAddress.ZAbsAccel, (ushort)accelZ, cancellationToken).ConfigureAwait(false);
             await _client.WriteRegisterAsync(CraneAddress.ZAbsDecel, (ushort)decelZ, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] Z轴三项速度写入完成，九项FC06均已返回");
         });
 
     /// <summary>
@@ -444,6 +457,8 @@ public sealed class CraneService : ICraneDriver
             await EnterManualAsync(cancellationToken).ConfigureAwait(false);
 
             // 写目标（调用方按业务换算：相对运动写显示目标；绝对运动写 用户绝对值−编码器值+显示值）
+            _logger.Info(LogCategory.Operation,
+                $"天车[{_name}] 运动目标FC16下发开始（DINT低Word在前，-1跳过）：D{CraneAddress.XAbsTarget}~D{CraneAddress.XAbsTarget + 1}={writeX}，D{CraneAddress.YAbsTarget}~D{CraneAddress.YAbsTarget + 1}={writeY}，D{CraneAddress.ZAbsTarget}~D{CraneAddress.ZAbsTarget + 1}={writeZ}");
             if (writeX != -1) await _client.WriteInt32Async(CraneAddress.XAbsTarget, writeX, cancellationToken).ConfigureAwait(false);
             if (writeY != -1) await _client.WriteInt32Async(CraneAddress.YAbsTarget, writeY, cancellationToken).ConfigureAwait(false);
             if (writeZ != -1) await _client.WriteInt32Async(CraneAddress.ZAbsTarget, writeZ, cancellationToken).ConfigureAwait(false);
@@ -459,6 +474,7 @@ public sealed class CraneService : ICraneDriver
 
             if (zDirection == 1)
             {
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动阶段：Z下降，先触发XY并等待XY位置容差及Busy=0，再触发Z；最终轮询叠加X2下压保护");
                 // Z 下降：先 XY（并行）后 Z    对应的轴 寄存器地址写2 延迟 写0
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
                 var xyResult = await PollAxesAsync(targetX, targetY, -1, pollEncoder, false, cancellationToken).ConfigureAwait(false);
@@ -467,6 +483,7 @@ public sealed class CraneService : ICraneDriver
             }
             else if (zDirection == 2)
             {
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动阶段：Z上升，先触发Z并等待Z位置容差及Busy=0，再触发XY");
                 // Z 上升：先 Z 后 XY（并行）
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
                 var zResult = await PollAxesAsync(-1, -1, targetZ, pollEncoder, false, cancellationToken).ConfigureAwait(false);
@@ -475,6 +492,7 @@ public sealed class CraneService : ICraneDriver
             }
             else
             {
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动阶段：Z方向不变，同阶段触发全部参与轴，再等待到位");
                 // Z 不变：三轴并行
                 await PulseManyAsync(new[] { xy[0], xy[1], z[0] }, 500, cancellationToken).ConfigureAwait(false);
             }
@@ -493,6 +511,7 @@ public sealed class CraneService : ICraneDriver
         }
         finally
         {
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动收尾：对本次参与轴的D{CraneAddress.ManualXAbsMove}/D{CraneAddress.ManualYAbsMove}/D{CraneAddress.ManualZAbsMove}写0；沿用不可取消的尽力复位");
             // 触发位必须复位；用不可取消令牌，避免取消/超时后卡在 2
             var resetCt = CancellationToken.None;
             if (writeX != -1) await TryWriteAsync(CraneAddress.ManualXAbsMove, 0, resetCt).ConfigureAwait(false);
@@ -696,9 +715,13 @@ public sealed class CraneService : ICraneDriver
             return;
         }
 
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 脉冲写入开始：FC06 D{register}=2，等待应答");
         await _client.WriteRegisterAsync(register, 2, cancellationToken).ConfigureAwait(false);
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 脉冲触发已返回：D{register}=2，保持{delayMs}ms后写0");
         await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 脉冲复位开始：FC06 D{register}=0，等待应答");
         await _client.WriteRegisterAsync(register, 0, cancellationToken).ConfigureAwait(false);
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 脉冲复位完成：D{register}=0，触发和复位均已返回");
     }
 
     /// <summary>
@@ -725,14 +748,19 @@ public sealed class CraneService : ICraneDriver
         //寄存器地址写2
         foreach (var register in active)
         {
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动触发开始：FC06 D{register}=2，等待应答");
             await _client.WriteRegisterAsync(register, 2, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动触发已返回：D{register}=2");
         }
         //固定延时
+        _logger.Info(LogCategory.Operation, $"天车[{_name}] 本阶段触发全部返回：寄存器={string.Join(",", active.Select(register => $"D{register}"))}，保持{delayMs}ms后依次复位");
         await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
         //寄存器地址写0
         foreach (var register in active)
         {
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动触发复位开始：FC06 D{register}=0，等待应答");
             await _client.WriteRegisterAsync(register, 0, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动触发复位已返回：D{register}=0");
         }
     }
 
@@ -764,9 +792,12 @@ public sealed class CraneService : ICraneDriver
             // 与其他手动脉冲共用写入封装，先完整复位再检查对应反馈，不轮询、不重试。  
             // 写2到写0始终保持200ms；仅充退磁在清0完成后额外等待，再读取对应反馈。
             await PulseAsync(trigger, true, 200, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}触发已复位：D{trigger}=0，开始等待反馈延时{feedbackDelayMs}ms");
             await Task.Delay(feedbackDelayMs, cancellationToken).ConfigureAwait(false);
             //读线圈返回
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}反馈读取开始：FC01线圈PDU={feedbackCoil}（{feedbackName}），期望=1；仅本次读取，不轮询");
             feedback = await _client.ReadCoilAsync(feedbackCoil, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}反馈读取完成：{feedbackName}={(feedback ? 1 : 0)}，期望=1，匹配={feedback}");
         }).ConfigureAwait(false);
         if (!result.IsSuccess || feedback)
         {
@@ -790,6 +821,14 @@ public sealed class CraneService : ICraneDriver
     {
         var deadline = DateTime.UtcNow.AddMilliseconds(_moveTimeoutMs);
         var lastState = "尚未完成位置及Busy读取";
+        var started = Stopwatch.GetTimestamp();
+        long? lastLoggedAt = null;
+        string? lastBusyState = null;
+        _logger.Info(LogCategory.Operation,
+            $"天车[{_name}] 到位等待开始：目标XYZ=({targetX},{targetY},{targetZ})，-1轴跳过，位置来源={(pollEncoder ? "编码器" : "显示值")}，" +
+            $"位置读取=FC03 D{CraneAddress.StatusStart}/数量{CraneAddress.StatusCount}及D{CraneAddress.XAbsSpeed}/数量21，" +
+            $"参与轴须误差≤{_positionTolerance}mm且Busy=0（FC01 X={CraneAddress.XBusy}/Y={CraneAddress.YBusy}/Z={CraneAddress.ZBusy}），" +
+            $"超时={_moveTimeoutMs}ms，轮询等待=200ms，监视X2={watchPressure}（PDU={CraneAddress.X2_MagnetDownLimit}，下压容差={_pressureTolerance}mm）");
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -803,8 +842,10 @@ public sealed class CraneService : ICraneDriver
             // Z 下降叠加下压保护：压到 X2 即收尾（急停 + 清报警），再按 Z 与目标差是否在下压容差内判定成功/失败。
             if (watchPressure && await IsPressureLimitOnAsync(cancellationToken).ConfigureAwait(false))
             {
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位等待观测：X2=1，当前XYZ=({x},{y},{z})；进入原下压收尾，急停/清报警后按Z误差判定");
                 await PressureStopAsync().ConfigureAwait(false);
                 var delta = Math.Abs(z - targetZ);
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 下压判定：Z={z}，目标Z={targetZ}，误差={delta}mm，允许≤{_pressureTolerance}mm，满足={delta <= _pressureTolerance}，耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
                 return delta <= _pressureTolerance
                     ? CraneCommandResult.Ok(CraneCommandCode.PressureReached,
                         $"天车[{_name}] 下压到位 Z={z} 目标={targetZ} 差={delta}mm（≤{_pressureTolerance}）")
@@ -826,14 +867,25 @@ public sealed class CraneService : ICraneDriver
             var xOk = targetX == -1 || Math.Abs(x - targetX) <= _positionTolerance && !xBusy;
             var yOk = targetY == -1 || Math.Abs(y - targetY) <= _positionTolerance && !yBusy;
             var zOk = targetZ == -1 || Math.Abs(z - targetZ) <= _positionTolerance && !zBusy;
+            // 复用本轮实测位置/Busy；首次、Busy变化及每2秒记录，不额外读取也不逐200ms刷盘。
+            var busyState = $"{xBusyText}/{yBusyText}/{zBusyText}";
+            if (lastLoggedAt is null || busyState != lastBusyState || Stopwatch.GetElapsedTime(lastLoggedAt.Value).TotalMilliseconds >= 2000)
+            {
+                _logger.Info(LogCategory.Operation,
+                    $"天车[{_name}] 到位等待观测：{lastState}；目标XYZ=({targetX},{targetY},{targetZ})，误差XYZ=({(targetX == -1 ? "跳过" : Math.Abs((long)x - targetX).ToString())},{(targetY == -1 ? "跳过" : Math.Abs((long)y - targetY).ToString())},{(targetZ == -1 ? "跳过" : Math.Abs((long)z - targetZ).ToString())})mm，" +
+                    $"各轴满足XYZ=({xOk},{yOk},{zOk})，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，上限={_moveTimeoutMs}ms");
+                lastLoggedAt = Stopwatch.GetTimestamp();
+                lastBusyState = busyState;
+            }
             //成功到位
             if (xOk && yOk && zOk)
             {
-                _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位：{lastState}（容差±{_positionTolerance}mm，参与轴Busy均为0）");
+                _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位：{lastState}（容差±{_positionTolerance}mm，参与轴Busy均为0），等待耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
                 return CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{_name}] 到位：{lastState}");
             }
         }
         //到位失败  超时
+        _logger.Warn(LogCategory.Operation, $"天车[{_name}] 到位等待超时：目标XYZ=({targetX},{targetY},{targetZ})，{lastState}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，上限={_moveTimeoutMs}ms");
         return CraneCommandResult.Fail(CraneCommandCode.Timeout,
             $"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{_positionTolerance}mm，参与轴须Busy=0；最后状态：{lastState}）");
     }
@@ -889,7 +941,9 @@ public sealed class CraneService : ICraneDriver
     {
         try
         {
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动兜底复位开始：FC06 D{register}={value}，等待应答");
             await _client.WriteRegisterAsync(register, value, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动兜底复位完成：D{register}={value}");
         }
         catch (Exception ex)
         {

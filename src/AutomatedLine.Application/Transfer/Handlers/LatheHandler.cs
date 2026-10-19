@@ -123,6 +123,7 @@ public sealed class LatheHandler : ITransferHandler
         var info = ctx.Workpiece.Info;
         if (!ctx.Options.Transfer.Lathes.TryGetValue(latheId, out var opt))
         {
+            ctx.LogStepWarn($"斜床设备Id={latheId} 未配置Y二次偏移参数，本次沿用原缺省偏移0；工件长度={info.Length}，堵孔={info.PlugHole}");
             return 0;
         }
 

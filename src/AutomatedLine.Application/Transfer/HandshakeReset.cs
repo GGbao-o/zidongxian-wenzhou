@@ -42,12 +42,16 @@ public static class HandshakeReset
         }
 
         var cleared = 0;
+        logger.Info(LogCategory.StateMachine,
+            $"设备[{deviceName}/Id={driver.DeviceId}] 握手复位开始：依次写0，点名={string.Join('、', points)}；单点失败记警告后继续");
         foreach (var point in points)
         {
             try
             {
+                logger.Info(LogCategory.StateMachine, $"设备[{deviceName}/Id={driver.DeviceId}] 握手位写入开始：{point}=0，等待驱动返回");
                 await driver.WriteSignalAsync(point, 0, cancellationToken).ConfigureAwait(false);
                 cleared++;
+                logger.Info(LogCategory.StateMachine, $"设备[{deviceName}/Id={driver.DeviceId}] 握手位写入完成：{point}=0，已完成{cleared}/{points.Count}");
             }
             catch (OperationCanceledException)
             {

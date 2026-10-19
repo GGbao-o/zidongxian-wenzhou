@@ -110,8 +110,12 @@ public class MarkerConnectionTests
             Assert.False(driver.IsConnected);
             try { Assert.Equal(0, await stream.ReadAsync(new byte[1], guard.Token)); }
             catch (IOException) when (failure == "设备异常") { /* 未读的异常尾零在关闭时可触发RST。 */ }
-            if (failure != "取消") Assert.Contains("协议适配=打号机FC04尾零", Assert.Single(logger.Messages));
-            else Assert.Empty(logger.Messages);
+            // 新增写入开始日志后，只对故障日志计数；主动取消仍不能误记通信错误或写入完成。
+            var errors = logger.Messages.Where(message => message.StartsWith("E:Communication:")).ToArray();
+            if (failure != "取消") Assert.Contains("协议适配=打号机FC04尾零", Assert.Single(errors));
+            else Assert.Empty(errors);
+            Assert.Contains(logger.Messages, message => message.Contains("FC06写入开始：LoadDone"));
+            Assert.DoesNotContain(logger.Messages, message => message.Contains("FC06写入完成：LoadDone"));
 
             var nextAccepted = listener.AcceptTcpClientAsync(guard.Token);
             var nextWrite = driver.WriteSignalAsync("LoadDone", 0, guard.Token);

@@ -107,6 +107,8 @@ public sealed class LatheFocasDriver : IDeviceDriver
             _ => Convert.ToDouble(value)
         };
 
+        _logger.Info(LogCategory.Communication,
+            $"斜床[{DeviceId}] FOCAS写入开始：点名={pointName}，宏=#{macro}，录入={value}，下发数值={numeric}；等待SDK返回");
         await _channel.WriteMacroAsync(macro, numeric, cancellationToken).ConfigureAwait(false);
         _logger.Info(LogCategory.Communication, $"斜床[{DeviceId}] 写宏 #{macro}={numeric}");
     }

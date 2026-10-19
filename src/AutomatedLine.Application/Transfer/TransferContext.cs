@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Runtime;
@@ -26,6 +27,9 @@ public sealed class TransferContext
     /// <summary>设备坐标缓存（本任务内只查一次）。</summary>
     private IReadOnlyDictionary<int, DeviceConfigDto>? _deviceConfigs;
 
+    /// <summary>固定本次搬运标识，收尾清空天车任务后日志仍能关联原搬运。</summary>
+    private readonly Guid? _transportTaskId;
+
     /// <summary>
     /// 构造函数。
     /// </summary>
@@ -49,6 +53,7 @@ public sealed class TransferContext
         _store = store;
         Options = options;
         _logger = logger;
+        _transportTaskId = crane.Runtime.CurrentTask?.TaskId;
     }
 
     /// <summary>执行天车。</summary>
@@ -70,8 +75,11 @@ public sealed class TransferContext
     public ICraneDriver CraneDriver
         => _drivers.GetCrane(Crane.Id) ?? throw new InvalidOperationException($"天车 {Crane.Id} 无驱动");
 
-    /// <summary>日志前缀：天车 + 工件。</summary>
+    /// <summary>原异常提示前缀，保留现有弹窗和错误消息格式。</summary>
     private string Tag => $"[{Crane.Name}] 工件 {Workpiece.Info}";
+
+    /// <summary>日志额外关联天车号及两个独立任务标识，不改变业务异常文本。</summary>
+    private string LogTag => $"[{Crane.Name}/Id={Crane.Id}] 工件 {Workpiece.Info}（搬运={_transportTaskId?.ToString("N") ?? "未关联"}，工件Id={Workpiece.Id:N}）";
 
     /// <summary>按设备号取设备驱动。</summary>
     /// <param name="deviceId">设备号</param>
@@ -93,6 +101,11 @@ public sealed class TransferContext
         }
 
         //return的是加了天车偏移的
+        _logger.Info(LogCategory.StateMachine,
+            $"{LogTag} [{device.Name}/Id={device.Id}] 坐标换算：设备库XYZ=({cfg.PositionX},{cfg.PositionY},{cfg.PositionZ})，" +
+            $"天车偏移XYZ=({Crane.OffsetX},{Crane.OffsetY},{Crane.OffsetZ})，" +
+            $"基坐标XYZ=({CraneCoordinate.BaseX(cfg.PositionX, Crane)},{CraneCoordinate.BaseY(cfg.PositionY, Crane)},{CraneCoordinate.BaseZ(cfg.PositionZ, Crane)})；" +
+            $"设备类型={device.Type}，直径={Workpiece.Info.Diameter}，Z下压量={CraneCoordinate.ZDrop(device.Type, Workpiece.Info.Diameter)}，安全位X={Crane.SafeX} Z={Crane.SafeZ}");
         return (
             CraneCoordinate.BaseX(cfg.PositionX, Crane),
             CraneCoordinate.BaseY(cfg.PositionY, Crane),
@@ -104,11 +117,14 @@ public sealed class TransferContext
     /// <param name="y">Y（内部四舍五入取整）</param>
     /// <param name="z">Z（内部四舍五入取整）</param>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>异步运动任务；记录原命令结果，失败继续抛出原业务异常。</returns>
     public async Task MoveAbsoluteAsync(double x, double y, double z, CancellationToken cancellationToken)
     {
         var (ix, iy, iz) = ((int)Math.Round(x), (int)Math.Round(y), (int)Math.Round(z));
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 绝对运动 → X{ix} Y{iy} Z{iz}");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 绝对运动下发：原始目标XYZ=({x},{y},{z})，取整目标XYZ=({ix},{iy},{iz})；等待驱动实时到位/下压判定结果");
+        var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MoveAbsoluteAsync(ix, iy, iz, cancellationToken).ConfigureAwait(false);
+        LogCommandResult("绝对运动", result, started);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException($"{Tag} 绝对运动失败（目标 X{ix} Y{iy} Z{iz}）：{result.Code} {result.Message}");
@@ -120,10 +136,13 @@ public sealed class TransferContext
     /// <param name="dy">Y 相对值</param>
     /// <param name="dz">Z 相对值</param>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>异步运动任务；日志不增加位置读取或运动指令。</returns>
     public async Task MoveRelativeAsync(int dx, int dy, int dz, CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 相对运动 → dX{dx} dY{dy} dZ{dz}");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 相对运动 → dX{dx} dY{dy} dZ{dz}");
+        var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MoveRelativeAsync(dx, dy, dz, cancellationToken).ConfigureAwait(false);
+        LogCommandResult("相对运动", result, started);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException($"{Tag} 相对运动失败（dX{dx} dY{dy} dZ{dz}）：{result.Code} {result.Message}");
@@ -132,14 +151,21 @@ public sealed class TransferContext
 
     /// <summary>下发本车三轴速度/加速度/减速度（流程开始时设置一次）。</summary>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>异步设置任务；记录取整参数和驱动返回结果。</returns>
     public async Task SetCraneSpeedAsync(CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 设置天车速度");
+        _logger.Info(LogCategory.StateMachine,
+            $"{LogTag} 设置天车速度（速度/加速度/减速度，原配置→取整指令）：" +
+            $"X=({Crane.SpeedX},{Crane.AccelX},{Crane.DecelX})→({(int)Math.Round(Crane.SpeedX)},{(int)Math.Round(Crane.AccelX)},{(int)Math.Round(Crane.DecelX)})，" +
+            $"Y=({Crane.SpeedY},{Crane.AccelY},{Crane.DecelY})→({(int)Math.Round(Crane.SpeedY)},{(int)Math.Round(Crane.AccelY)},{(int)Math.Round(Crane.DecelY)})，" +
+            $"Z=({Crane.SpeedZ},{Crane.AccelZ},{Crane.DecelZ})→({(int)Math.Round(Crane.SpeedZ)},{(int)Math.Round(Crane.AccelZ)},{(int)Math.Round(Crane.DecelZ)})；等待写入返回");
+        var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.SetAbsoluteSpeedAsync(
             (int)Math.Round(Crane.SpeedX), (int)Math.Round(Crane.AccelX), (int)Math.Round(Crane.DecelX),
             (int)Math.Round(Crane.SpeedY), (int)Math.Round(Crane.AccelY), (int)Math.Round(Crane.DecelY),
             (int)Math.Round(Crane.SpeedZ), (int)Math.Round(Crane.AccelZ), (int)Math.Round(Crane.DecelZ),
             cancellationToken).ConfigureAwait(false);
+        LogCommandResult("设置天车速度", result, started);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException($"设置天车速度失败：{result.Code} {result.Message}");
@@ -151,8 +177,10 @@ public sealed class TransferContext
     /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOnAsync(CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 充磁");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 充磁下发：等待驱动完成触发脉冲、复位及本次配置延时后单读X6=1；取料充磁调用标志={MagnetCommandStarted}");
+        var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MagnetOnAsync(cancellationToken).ConfigureAwait(false);
+        LogCommandResult("充磁", result, started);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException($"{Tag} 充磁失败：{result.Code} {result.Message}");
@@ -166,8 +194,10 @@ public sealed class TransferContext
     /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOffAsync(CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 放磁");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 放磁下发：等待驱动完成触发脉冲、复位及本次配置延时后单读X7=1");
+        var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MagnetOffAsync(cancellationToken).ConfigureAwait(false);
+        LogCommandResult("放磁", result, started);
         if (!result.IsSuccess)
         {
             throw new InvalidOperationException($"{Tag} 放磁失败：{result.Code} {result.Message}");
@@ -192,14 +222,14 @@ public sealed class TransferContext
                 throw new InvalidOperationException($"取料补降配置不合法：追加次数={retryCount}（须>=0），单次下降={stepMm}mm（须>0）");
 
             _logger.Info(LogCategory.StateMachine,
-                $"{Tag} 取料有板检查开始：最多追加下降{retryCount}次，每次{stepMm}mm，最大累计指令下降{(long)retryCount * stepMm}mm；原位及每次补降后均等待500ms");
+                $"{LogTag} 取料有板检查开始：最多追加下降{retryCount}次，每次{stepMm}mm，最大累计指令下降{(long)retryCount * stepMm}mm；原位及每次补降后均等待500ms");
             while (true)
             {
                 // 仅发布展示进度；X11判断和补降仍按原实时读取流程执行。
                 PublishStep($"取料：第{(long)completedDrops + 1}次检查有板（补降{completedDrops}/{retryCount}次）");
                 action = "等待信号稳定";
                 _logger.Info(LogCategory.StateMachine,
-                    $"{Tag} 取料：检查第{(long)completedDrops + 1}次前等待500ms，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm");
+                    $"{LogTag} 取料：检查第{(long)completedDrops + 1}次前等待500ms，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm");
                 await Task.Delay(500, cancellationToken).ConfigureAwait(false);
                 action = "专用读取X11";
                 // 只有专用读取明确返回false才允许继续下降；通信失败不能解释成无板，也不读取缓存判定。
@@ -208,10 +238,10 @@ public sealed class TransferContext
                 position = await ReadPlateCheckPositionAsync(cancellationToken).ConfigureAwait(false);
                 var progress = $"已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，{position}";
                 _logger.Info(LogCategory.StateMachine,
-                    $"{Tag} 取料：检查第{(long)completedDrops + 1}次，X11={(hasPlate ? 1 : 0)}，{progress}");
+                    $"{LogTag} 取料：检查第{(long)completedDrops + 1}次，X11={(hasPlate ? 1 : 0)}，{progress}");
                 if (hasPlate)
                 {
-                    _logger.Info(LogCategory.StateMachine, $"{Tag} 取料有板检查通过：X11=1，{progress}，下一步才开始充磁");
+                    _logger.Info(LogCategory.StateMachine, $"{LogTag} 取料有板检查通过：X11=1，{progress}，下一步才开始充磁");
                     return;
                 }
                 if (completedDrops >= retryCount)
@@ -222,26 +252,26 @@ public sealed class TransferContext
 
                 action = $"第{completedDrops + 1}/{retryCount}次补降";
                 _logger.Warn(LogCategory.StateMachine,
-                    $"{Tag} 取料：X11=0，准备{action}，仅Z相对下降{stepMm}mm，计划累计指令下降{totalCommandDropMm + stepMm}mm；下压前{position}");
+                    $"{LogTag} 取料：X11=0，准备{action}，仅Z相对下降{stepMm}mm，计划累计指令下降{totalCommandDropMm + stepMm}mm；下压前{position}");
                 // 本系统Z正向为下降；只动Z保留源设备XY及斜床Y偏移，复用原运动超时/下压判定。
                 await MoveRelativeAsync(0, 0, stepMm, cancellationToken).ConfigureAwait(false);
                 completedDrops++;
                 totalCommandDropMm += stepMm;
                 // 累计的是成功执行的指令距离，不把到位容差或下压限位结果冒充实测下降量。
                 _logger.Info(LogCategory.StateMachine,
-                    $"{Tag} 取料：补降运动完成，已完成补降{completedDrops}/{retryCount}次，本次指令下降{stepMm}mm，累计指令下降{totalCommandDropMm}mm；等待稳定后重读X11和实际位置");
+                    $"{LogTag} 取料：补降运动完成，已完成补降{completedDrops}/{retryCount}次，本次指令下降{stepMm}mm，累计指令下降{totalCommandDropMm}mm；等待稳定后重读X11和实际位置");
             }
         }
         catch (OperationCanceledException ex)
         {
             _logger.Warn(LogCategory.StateMachine,
-                $"{Tag} 取料有板检查中止：{action}，执行令牌已取消={cancellationToken.IsCancellationRequested}，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，最后读取的{position}，原因：{ex.Message}");
+                $"{LogTag} 取料有板检查中止：{action}，执行令牌已取消={cancellationToken.IsCancellationRequested}，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，最后读取的{position}，原因：{ex.Message}");
             throw;
         }
         catch (Exception ex)
         {
             _logger.Error(LogCategory.StateMachine,
-                $"{Tag} 取料有板检查失败：{action}，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，最后读取的{position}，尚未充磁，原因：{ex.Message}", ex);
+                $"{LogTag} 取料有板检查失败：{action}，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，最后读取的{position}，尚未充磁，原因：{ex.Message}", ex);
             throw;
         }
     }
@@ -255,12 +285,12 @@ public sealed class TransferContext
             cancellationToken.ThrowIfCancellationRequested();
             if (status is not null)
                 return $"当前显示坐标X={status.XDisplay} Y={status.YDisplay} Z={status.ZDisplay}；编码器X={status.XEncoder} Y={status.YEncoder} Z={status.ZEncoder}";
-            _logger.Warn(LogCategory.StateMachine, $"{Tag} 取料位置日志：实时状态不可用，当前位置记未知，X11仍以专用读取为准");
+            _logger.Warn(LogCategory.StateMachine, $"{LogTag} 取料位置日志：实时状态不可用，当前位置记未知，X11仍以专用读取为准");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            _logger.Warn(LogCategory.StateMachine, $"{Tag} 取料位置日志读取失败，当前位置记未知：{ex.Message}");
+            _logger.Warn(LogCategory.StateMachine, $"{LogTag} 取料位置日志读取失败，当前位置记未知：{ex.Message}");
         }
         return "当前位置未知（实时状态不可用）";
     }
@@ -269,27 +299,43 @@ public sealed class TransferContext
     /// <param name="predicate">条件（如 dto =&gt; dto.HasPlate == true）</param>
     /// <param name="description">条件描述（日志/异常）</param>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>异步等待任务；只记录原有读取结果，保留原超时和报警判定。</returns>
     public async Task WaitCraneAsync(Func<CraneStatusDto, bool> predicate, string description, CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 等待天车 {description}");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 等待天车 {description}：实时读取，超时={Options.StateMachine.HandshakeTimeoutMs}ms，轮询等待=200ms");
         var timeout = TimeSpan.FromMilliseconds(Options.StateMachine.HandshakeTimeoutMs);
         var deadline = DateTime.UtcNow + timeout;
+        var started = Stopwatch.GetTimestamp();
+        string? lastObservation = null;
+        var lastLoggedAt = started;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var dto = await CraneDriver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+            var observation = dto is null ? "实时状态不可用" :
+                $"显示XYZ=({dto.XDisplay},{dto.YDisplay},{dto.ZDisplay})，编码器XYZ=({dto.XEncoder},{dto.YEncoder},{dto.ZEncoder})，" +
+                $"有板={FormatLogValue(dto.HasPlate)}，充磁={FormatLogValue(dto.MagnetizeFeedback)}，退磁={FormatLogValue(dto.DemagnetizeFeedback)}，报警={dto.HasAlarm}";
+            if (observation != lastObservation || Stopwatch.GetElapsedTime(lastLoggedAt).TotalMilliseconds >= 2000)
+            {
+                _logger.Info(LogCategory.StateMachine, $"{LogTag} 等待天车 {description} 观测：{observation}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
+                lastObservation = observation;
+                lastLoggedAt = Stopwatch.GetTimestamp();
+            }
             if (dto is not null && dto.HasAlarm)
             {
+                _logger.Warn(LogCategory.StateMachine, $"{LogTag} 等待天车 {description} 因报警中止：{observation}");
                 throw new InvalidOperationException($"{Tag} 天车报警，等待 {description} 中止");
             }
 
             if (dto is not null && predicate(dto))
             {
+                _logger.Info(LogCategory.StateMachine, $"{LogTag} 等待天车 {description} 满足：{observation}，耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
                 return;
             }
 
             if (DateTime.UtcNow >= deadline)
             {
+                _logger.Warn(LogCategory.StateMachine, $"{LogTag} 等待天车 {description} 超时：{observation}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，上限={timeout.TotalMilliseconds}ms");
                 throw new InvalidOperationException($"{Tag} 等待天车 {description} 超时（{timeout.TotalMilliseconds}ms）");
             }
 
@@ -302,11 +348,15 @@ public sealed class TransferContext
     /// <param name="signal">点名</param>
     /// <param name="expected">期望布尔值</param>
     /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>异步等待任务；只观察已有快照，保留原信号判定。</returns>
     public async Task WaitDeviceAsync(DeviceBase device, string signal, bool expected, CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 等待 {device.Name}.{signal}={expected}");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 等待 {device.Name}.{signal}={expected}：设备Id={device.Id}，期望={(expected ? 1 : 0)}，来源=后台采集缓存，超时={Options.StateMachine.HandshakeTimeoutMs}ms，轮询等待=200ms");
         var timeout = TimeSpan.FromMilliseconds(Options.StateMachine.HandshakeTimeoutMs);
         var deadline = DateTime.UtcNow + timeout;
+        var started = Stopwatch.GetTimestamp();
+        string? lastObservation = null;
+        var lastLoggedAt = started;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -315,17 +365,33 @@ public sealed class TransferContext
             // 信号必须真实读到：缺失视为"未知"，不算满足。
             // 否则 expected=false（如"下料架无板"）会把"没采到数据"误当成"无料"，可能往实际有板的架子放料。
             var snapshot = device.Signals;
+            // 诊断只观察本轮已取得的快照；不因日志增加PLC读取，也不将序号变化当作信号变化刷盘。
+            var observation = snapshot is null ? "未知（尚无快照）" :
+                $"原值={(snapshot.Values.TryGetValue(signal, out var raw) ? FormatLogValue(raw) : "未知（缺少点位）")}，连接={snapshot.ConnectionState}，质量={snapshot.Quality}";
+            var snapshotDetail = snapshot is null ? "无采集时间/序号" :
+                $"采集时间={snapshot.CapturedAt:yyyy-MM-dd HH:mm:ss.fff}，序号={snapshot.Sequence}，快照年龄={(DateTime.Now - snapshot.CapturedAt).TotalMilliseconds:0}ms";
+            if (observation != lastObservation || Stopwatch.GetElapsedTime(lastLoggedAt).TotalMilliseconds >= 2000)
+            {
+                _logger.Info(LogCategory.StateMachine,
+                    $"{LogTag} 等待 {device.Name}.{signal} 观测：期望={(expected ? 1 : 0)}，{observation}，{snapshotDetail}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
+                lastObservation = observation;
+                lastLoggedAt = Stopwatch.GetTimestamp();
+            }
             if (snapshot is not null && snapshot.Values.TryGetValue(signal, out var v))
             {
                 var value = v is bool b && b;
                 if (value == expected)
                 {
+                    _logger.Info(LogCategory.StateMachine,
+                        $"{LogTag} 等待 {device.Name}.{signal} 满足：期望={(expected ? 1 : 0)}，{observation}，{snapshotDetail}，耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
                     return;
                 }
             }
 
             if (DateTime.UtcNow >= deadline)
             {
+                _logger.Warn(LogCategory.StateMachine,
+                    $"{LogTag} 等待 {device.Name}.{signal} 超时：期望={(expected ? 1 : 0)}，{observation}，{snapshotDetail}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，上限={timeout.TotalMilliseconds}ms");
                 throw new InvalidOperationException($"{Tag} 等待 {device.Name}.{signal}={expected} 超时（{timeout.TotalMilliseconds}ms）");
             }
 
@@ -338,11 +404,31 @@ public sealed class TransferContext
     /// <param name="signal">点名</param>
     /// <param name="value">值</param>
     /// <param name="cancellationToken">取消令牌</param>
-    public Task WriteDeviceAsync(DeviceBase device, string signal, object? value, CancellationToken cancellationToken)
+    /// <returns>异步写入任务；驱动成功返回后才记录完成，原异常继续向上传播。</returns>
+    public async Task WriteDeviceAsync(DeviceBase device, string signal, object? value, CancellationToken cancellationToken)
     {
-        _logger.Info(LogCategory.StateMachine, $"{Tag} 写 {device.Name}.{signal}={value}");
-        return DeviceDriver(device.Id).WriteSignalAsync(signal, value, cancellationToken);
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 写入开始：设备[{device.Name}/Id={device.Id}/类型={device.Type}]，点名={signal}，下发值={FormatLogValue(value)}；等待驱动写入返回");
+        var started = Stopwatch.GetTimestamp();
+        await DeviceDriver(device.Id).WriteSignalAsync(signal, value, cancellationToken).ConfigureAwait(false);
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} 写入完成：设备[{device.Name}/Id={device.Id}]，点名={signal}，下发值={FormatLogValue(value)}，耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms；写入返回成功，不代表设备工艺动作已完成");
     }
+
+    // 仅呈现原命令结果，不参与成败、取消或充磁边界的业务判断。
+    private void LogCommandResult(string action, CraneCommandResult result, long started)
+    {
+        var message = $"{LogTag} {action}返回：成功={result.IsSuccess}，结果码={result.Code}，详情={result.Message}，耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms";
+        if (result.IsSuccess) _logger.Info(LogCategory.StateMachine, message);
+        else _logger.Warn(LogCategory.StateMachine, message);
+    }
+
+    // 保留未知及原类型，打印内容转义换行，防止一次写入的数据拆散为多条伪日志。
+    private static string FormatLogValue(object? value) => value switch
+    {
+        null => "未知(null)",
+        bool flag => flag ? "1(Boolean)" : "0(Boolean)",
+        string text => $"「{text.Replace("\r", "\\r").Replace("\n", "\\n")}」(String)",
+        _ => $"{value}({value.GetType().Name})"
+    };
 
     /// <summary>
     /// 写一条**流程步骤**日志：自动带 **天车 + 工件**，并标注**设备**与当前走到哪一步。
@@ -354,7 +440,7 @@ public sealed class TransferContext
     public void LogStep(DeviceBase device, string action)
     {
         PublishStep(action);
-        _logger.Info(LogCategory.StateMachine, $"{Tag} [{device.Name}] {action}");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} [{device.Name}] {action}");
     }
 
     /// <summary>写一条**流程步骤**日志（不针对具体设备，如收尾阶段）。</summary>
@@ -363,7 +449,7 @@ public sealed class TransferContext
     {
         //更新天车字段CurrentStep  大屏展示页面会进行显示
         PublishStep(action);
-        _logger.Info(LogCategory.StateMachine, $"{Tag} {action}");
+        _logger.Info(LogCategory.StateMachine, $"{LogTag} {action}");
     }
 
     // 不解析日志文本；沿用业务明确记录步骤的时机发布只读说明，任务释放后不复活旧步骤。
@@ -378,5 +464,5 @@ public sealed class TransferContext
     /// </summary>
     /// <param name="action">步骤说明</param>
     public void LogStepWarn(string action)
-        => _logger.Warn(LogCategory.StateMachine, $"{Tag} {action}");
+        => _logger.Warn(LogCategory.StateMachine, $"{LogTag} {action}");
 }
