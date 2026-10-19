@@ -2,7 +2,7 @@ namespace AutomatedLine.Infrastructure.Communication;
 
 /// <summary>
 /// 双头镗寄存器地址（Modbus TCP）。
-/// 端口 502、站号 1 写死；IP 用数据库。
+/// 端口 502、站号 11 写死；IP 用数据库。
 /// 保持寄存器地址 = R 编号 × 2 + 1，下列常量均为 **0 基 PDU 地址**。
 /// 三个加工参数均为16位无符号Word：长度/堵厚舍入为整数，外径乘10后舍入，FC06单点写入。
 /// </summary>
@@ -11,8 +11,8 @@ public static class BoringMachineAddress
     /// <summary>TCP 端口（写死）。</summary>
     public const int Port = 502;
 
-    /// <summary>Modbus 站号（写死）。</summary>
-    public const byte UnitId = 1;
+    /// <summary>Modbus 站号11（十进制，报文字节0x0B）。</summary>
+    public const byte UnitId = 11;
 
     // ── 加工参数（写，FC06；每项只占一个Word）──
     /// <summary>板长（R150），Convert.ToInt32原值后转ushort。</summary>

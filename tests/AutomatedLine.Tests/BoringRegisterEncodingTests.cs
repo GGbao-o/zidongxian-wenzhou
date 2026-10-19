@@ -1,11 +1,12 @@
 using System.Net;
 using System.Net.Sockets;
+using AutomatedLine.Infrastructure.Communication;
 using AutomatedLine.Infrastructure.Drivers;
 using AutomatedLine.Tests.Fakes;
 
 namespace AutomatedLine.Tests;
 
-/// <summary>用本机TCP桩核对双头镗三参数的真实FC06地址、Word值和中点舍入，不访问现场PLC。</summary>
+/// <summary>用本机TCP桩核对双头镗站号11、FC03采集及三参数FC06编码，不访问现场PLC。</summary>
 public class BoringRegisterEncodingTests
 {
     /// <summary>真实Modbus采集只读取三个请求，避免向已删除的卡钳地址发送请求。</summary>
@@ -17,7 +18,7 @@ public class BoringRegisterEncodingTests
         listener.Start();
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var driver = new ModbusDeviceDriver(1, "127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port,
-            1, DeviceModbusMaps.Boring(), new TestLogger());
+            BoringMachineAddress.UnitId, DeviceModbusMaps.Boring(), new TestLogger());
         var server = ServeInputsAsync(listener, guard.Token);
         try
         {
@@ -46,6 +47,7 @@ public class BoringRegisterEncodingTests
         {
             var request = new byte[12];
             await stream.ReadExactlyAsync(request, token);
+            Assert.Equal(11, request[6]); // 直接核对线上MBAP的UnitId，避免只改常量却未用于请求。
             Assert.Equal(3, request[7]);
             Assert.Equal(1, (request[10] << 8) | request[11]);
             addresses[i] = (request[8] << 8) | request[9];
@@ -75,12 +77,13 @@ public class BoringRegisterEncodingTests
         listener.Start();
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var driver = new ModbusDeviceDriver(1, "127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port,
-            1, DeviceModbusMaps.Boring(), new TestLogger());
+            BoringMachineAddress.UnitId, DeviceModbusMaps.Boring(), new TestLogger());
         var server = EchoAsync(listener, guard.Token);
         try
         {
             await driver.WriteSignalAsync(point, value, guard.Token);
             var request = await server;
+            Assert.Equal(11, request[6]);
             Assert.Equal(6, request[7]);
             Assert.Equal(address, (request[8] << 8) | request[9]);
             Assert.Equal(word, (request[10] << 8) | request[11]);
