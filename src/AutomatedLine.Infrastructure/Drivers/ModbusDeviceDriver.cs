@@ -140,28 +140,32 @@ public sealed class ModbusDeviceDriver : IDeviceDriver
     {
         // 写响应按标准长度处理；仅在收到应答后记录成功，不把“已发送”当成功。
         var connectionSuffix = _expectMarkerReadTrailingZero ? "（打号机长连接：应答已接收）" : string.Empty;
-        // 打号机打印内容：字节流按 FC16 写多寄存器
+        // 旧打号机直接UTF8解码请求数据，组Word时必须保留线上字节原序，不能逐对交换。
         if (pointName == "PrintContent")
         {
             var text = value?.ToString() ?? string.Empty;
             var bytes = Encoding.UTF8.GetBytes(text);
-            var registers = new ushort[(bytes.Length + 1) / 2];
-            for (var i = 0; i < bytes.Length; i++)
+            // 每次FC16都会替换整段打印内容，不能拆包；空内容也不能生成数量为0的请求。
+            const int maxPrintBytes = 123 * 2;
+            if (bytes.Length == 0 || bytes.Length > maxPrintBytes)
             {
-                if ((i & 1) == 0)
-                {
-                    registers[i / 2] = bytes[i];
-                }
-                else
-                {
-                    registers[i / 2] |= (ushort)(bytes[i] << 8);
-                }
+                throw new ArgumentException($"打印内容UTF-8字节数必须为1～{maxPrintBytes}，当前={bytes.Length}；不允许截断或分段下发", nameof(value));
+            }
+
+            var paddingRequired = (bytes.Length & 1) != 0;
+            var registers = new ushort[(bytes.Length + 1) / 2];
+            for (var i = 0; i < registers.Length; i++)
+            {
+                // 服务端不裁掉NUL，奇数末尾补可打印空格，第一字节放Word高8位。
+                var offset = i * 2;
+                var secondByte = offset + 1 < bytes.Length ? bytes[offset + 1] : (byte)0x20;
+                registers[i] = (ushort)((bytes[offset] << 8) | secondByte);
             }
 
             _logger.Info(LogCategory.Communication,
-                $"设备[{DeviceId}] FC16写入开始：PrintContent，PDU={MarkerMachineAddress.PrintContentStart}，内容=「{text.Replace("\r", "\\r").Replace("\n", "\\n")}」，UTF8字节数={bytes.Length}，Word数量={registers.Length}，低字节在前组字=[{string.Join(",", registers.Select(word => $"0x{word:X4}"))}]；等待应答");
+                $"设备[{DeviceId}] FC16写入开始：PrintContent，PDU={MarkerMachineAddress.PrintContentStart}，内容=「{text.Replace("\r", "\\r").Replace("\n", "\\n")}」，UTF8字节数={bytes.Length}，发送字节数={registers.Length * 2}，填充={(paddingRequired ? "末尾空格0x20" : "无")}，Word数量={registers.Length}，高字节在前组字=[{string.Join(",", registers.Select(word => $"0x{word:X4}"))}]；等待应答");
             await _client.WriteRegistersAsync(MarkerMachineAddress.PrintContentStart, registers, cancellationToken).ConfigureAwait(false);
-            _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] 写打印内容 {bytes.Length} 字节{connectionSuffix}");
+            _logger.Info(LogCategory.Communication, $"设备[{DeviceId}] 写打印内容 {bytes.Length} 字节，发送{registers.Length * 2}字节，{registers.Length}个Word，应答已接收{connectionSuffix}");
             return;
         }
 

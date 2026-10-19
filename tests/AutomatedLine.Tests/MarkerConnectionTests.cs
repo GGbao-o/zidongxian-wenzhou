@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using AutomatedLine.Domain.Devices;
 using AutomatedLine.Infrastructure.Drivers;
 
@@ -38,7 +39,7 @@ public class MarkerConnectionTests
             var requests = await server;
             Assert.Equal(new byte[] { 0x10, 6, 6, 4, 6, 6, 6, 6 }, requests.Select(frame => frame[7]));
             Assert.Equal(new[] { 9, 6, 7, 0, 4, 5, 4, 5 }, requests.Select(frame => (frame[8] << 8) | frame[9]));
-            Assert.Equal(new byte[] { 0x42, 0x41 }, requests[0].AsSpan(13).ToArray());
+            Assert.Equal(new byte[] { 0x41, 0x42 }, requests[0].AsSpan(13).ToArray());
             Assert.Equal(new[] { 180, 70, 1, 1, 0, 0 }, requests.Where(frame => frame[7] == 6)
                 .Select(frame => (frame[10] << 8) | frame[11]));
             Assert.DoesNotContain(logger.Messages, message => message.StartsWith("E:"));
@@ -273,6 +274,111 @@ public class MarkerConnectionTests
                 var request = await ReadFrameAsync(stream, guard.Token);
                 await stream.WriteAsync(ResponseFor(request), guard.Token);
             }
+        }
+    }
+
+    /// <summary>打印数据保持UTF8字节原序，奇数末尾补空格；与旧服务端直接解码逻辑一致。</summary>
+    /// <param name="text">原始打印字符串。</param>
+    /// <param name="expectedHex">协议要求的完整数据字节，含必要填充。</param>
+    /// <returns>异步报文验证任务。</returns>
+    [Theory]
+    [InlineData("ABC123", "414243313233")]
+    [InlineData("AB", "4142")]
+    [InlineData("ABC", "41424320")]
+    [InlineData("A", "4120")]
+    [InlineData("打号", "E68993E58FB7")]
+    [InlineData("中", "E4B8AD20")]
+    [InlineData("😀", "F09F9880")]
+    public async Task PrintContent_PreservesUtf8ByteOrderAndWaitsForReply(string text, string expectedHex)
+    {
+        var request = await CapturePrintRequestAsync(text);
+        var payload = Convert.FromHexString(expectedHex);
+        AssertPrintFrame(request, payload);
+        // 模拟VB服务端直接解码线上字节，不先重排Word，也不去掉空格或零。
+        Assert.Equal(text + (Encoding.UTF8.GetByteCount(text) % 2 == 1 ? " " : ""),
+            new UTF8Encoding(false, true).GetString(request, 13, payload.Length));
+    }
+
+    /// <summary>FC16最大单次文本按字节计数，245字节只补一个空格，246字节完整发送。</summary>
+    /// <param name="byteCount">ASCII文本原始字节数。</param>
+    /// <returns>异步边界验证任务。</returns>
+    [Theory]
+    [InlineData(245)]
+    [InlineData(246)]
+    public async Task PrintContent_MaximumPayload_IsOneFc16Request(int byteCount)
+    {
+        var text = new string('A', byteCount);
+        var request = await CapturePrintRequestAsync(text);
+        AssertPrintFrame(request, Encoding.UTF8.GetBytes(text + (byteCount == 245 ? " " : "")));
+        Assert.Equal(123, (request[10] << 8) | request[11]);
+    }
+
+    /// <summary>空内容及超过单次FC16容量的内容必须在建立连接前拒绝，不能截断或分段触发打印。</summary>
+    /// <param name="text">不合法的原始内容，null沿用接口空字符串语义。</param>
+    /// <param name="repeat">重复内容次数，覆盖按字节而非字符数的长度限制。</param>
+    /// <returns>异步校验验证任务。</returns>
+    [Theory]
+    [InlineData(null, 1)]
+    [InlineData("", 1)]
+    [InlineData("A", 247)]
+    [InlineData("中", 83)]
+    public async Task PrintContent_InvalidLength_DoesNotConnect(string? text, int repeat)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var driver = CreateMarker(listener, new TestLogger());
+        try
+        {
+            var exception = await Assert.ThrowsAsync<ArgumentException>(() => driver.WriteSignalAsync(
+                "PrintContent", text is null ? null : string.Concat(Enumerable.Repeat(text, repeat))));
+            Assert.Contains("UTF-8", exception.Message);
+            Assert.False(driver.IsConnected);
+            Assert.False(listener.Pending());
+        }
+        finally
+        {
+            await driver.DisconnectAsync();
+            listener.Stop();
+        }
+    }
+
+    // 校验完整MBAP/PDU与原始数据，防止只有Word数组正确而最终线上字节再次交换。
+    private static void AssertPrintFrame(byte[] request, byte[] payload)
+    {
+        Assert.Equal(0, (request[2] << 8) | request[3]);
+        Assert.Equal(7 + payload.Length, (request[4] << 8) | request[5]);
+        Assert.Equal((byte)1, request[6]);
+        Assert.Equal((byte)0x10, request[7]);
+        Assert.Equal(9, (request[8] << 8) | request[9]);
+        Assert.Equal(payload.Length / 2, (request[10] << 8) | request[11]);
+        Assert.Equal(payload.Length, (int)request[12]);
+        Assert.Equal(payload, request.AsSpan(13).ToArray());
+    }
+
+    // 使用真实驱动与本机服务端捕获一次请求；暂不回包时写入不能被视为成功。
+    private static async Task<byte[]> CapturePrintRequestAsync(string text)
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var driver = CreateMarker(listener, new TestLogger());
+        try
+        {
+            var accepted = listener.AcceptTcpClientAsync(guard.Token);
+            var write = driver.WriteSignalAsync("PrintContent", text, guard.Token);
+            using var peer = await accepted;
+            var request = await ReadFrameAsync(peer.GetStream(), guard.Token);
+            Assert.False(write.IsCompleted);
+            await peer.GetStream().WriteAsync(ResponseFor(request), guard.Token);
+            await write;
+            Assert.False(peer.GetStream().DataAvailable);
+            return request;
+        }
+        finally
+        {
+            guard.Cancel();
+            await driver.DisconnectAsync();
+            listener.Stop();
         }
     }
 
