@@ -48,7 +48,7 @@ public class CraneMagnetPulseTests
         }
     }
 
-    /// <summary>写 2 后至少保持 200ms，写 0 后只读对应反馈，直接返回成功或失败。</summary>
+    /// <summary>充退磁写2后保持1000ms，写0后只读对应反馈，直接返回成功或失败。</summary>
     /// <param name="magnetOn">是否验证充磁，否则验证退磁</param>
     /// <param name="feedback">PLC 返回的对应反馈值</param>
     /// <returns>异步验证任务</returns>
@@ -86,7 +86,7 @@ public class CraneMagnetPulseTests
                 Assert.Equal(value, (request[10] << 8) | request[11]);
                 if (address == trigger && value == 0)
                 {
-                    Assert.True(pulse.ElapsedMilliseconds >= 190, $"脉冲过短：{pulse.ElapsedMilliseconds}ms");
+                    Assert.True(pulse.ElapsedMilliseconds >= 990, $"充退磁脉冲应保持1000ms，实际过短：{pulse.ElapsedMilliseconds}ms");
                 }
                 await stream.WriteAsync(request, deadline.Token);
                 if (address == trigger && value == 2)

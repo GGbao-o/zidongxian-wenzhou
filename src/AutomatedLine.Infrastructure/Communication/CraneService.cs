@@ -560,13 +560,13 @@ public sealed class CraneService : ICraneDriver
         });
     }
 
-    /// <summary>充磁：D4510=2 → 200ms → D4510=0 → 读取一次 X6，直接返回结果。</summary>
+    /// <summary>充磁：D4510=2 → 1000ms → D4510=0 → 读取一次 X6，直接返回结果。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>X6=1 返回成功；X6=0 或通信失败返回失败结果</returns>
     public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default)
         => PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, "X6", "充磁", cancellationToken);
 
-    /// <summary>退磁：D4511=2 → 200ms → D4511=0 → 读取一次 X7，直接返回结果。</summary>
+    /// <summary>退磁：D4511=2 → 1000ms → D4511=0 → 读取一次 X7，直接返回结果。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>X7=1 返回成功；X7=0 或通信失败返回失败结果</returns>
     public Task<CraneCommandResult> MagnetOffAsync(CancellationToken cancellationToken = default)
@@ -678,9 +678,10 @@ public sealed class CraneService : ICraneDriver
             _client.IsConnected ? CraneCommandCode.Communication : CraneCommandCode.NotConnected,
             $"天车[{_name}] {label}失败：{ex.Message}");
 
-    /// <summary>写触发位 2 → 200ms → 0（脉冲）。</summary>
+    /// <summary>写触发位2，按调用方指定时长保持后写0；各动作独立选择脉冲宽度。</summary>
     /// <param name="register">寄存器地址</param>
     /// <param name="enabled">是否写（false 跳过）</param>
+    /// <param name="delayMs">写2到写0之间的保持时间（毫秒）。</param>
     /// <param name="cancellationToken">取消令牌</param>
     private async Task PulseAsync(int register, bool enabled, int delayMs, CancellationToken cancellationToken)
     {
@@ -729,7 +730,7 @@ public sealed class CraneService : ICraneDriver
         }
     }
 
-    /// <summary>磁铁单次脉冲：写 2 → 200ms → 写 0，再读一次反馈，失败交给上层处理。</summary>
+    /// <summary>磁铁单次脉冲：写 2 → 1000ms → 写 0，再读一次反馈，失败交给上层处理。</summary>
     /// <param name="trigger">触发寄存器</param>
     /// <param name="feedbackCoil">反馈线圈</param>
     /// <param name="feedbackName">反馈信号名，用于失败提示</param>
@@ -744,8 +745,8 @@ public sealed class CraneService : ICraneDriver
             //手动模式
             await EnterManualAsync(cancellationToken).ConfigureAwait(false);
             // 与其他手动脉冲共用写入封装，先完整复位再检查对应反馈，不轮询、不重试。  
-            //写2-200ms-写0
-            await PulseAsync(trigger, true, 200, cancellationToken).ConfigureAwait(false);
+            // 充磁和退磁单独保持1000ms；其他动作继续使用各自原有脉冲时长。
+            await PulseAsync(trigger, true, 1000, cancellationToken).ConfigureAwait(false);
             //读线圈返回
             feedback = await _client.ReadCoilAsync(feedbackCoil, cancellationToken).ConfigureAwait(false);
         }).ConfigureAwait(false);
