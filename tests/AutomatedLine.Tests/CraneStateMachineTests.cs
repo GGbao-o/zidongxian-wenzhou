@@ -39,16 +39,8 @@ public class CraneStateMachineTests
         public FakeConfigurationStore Store { get; } = new();
         public FakeConfigService Config { get; } = new();
         public CraneStateMachine Machine { get; }
-        public Crane Crane { get; } = new(1, 1, "天车1")
-        {
-            SafeX = 0,
-            SafeZ = 500,
-            Width = 100,
-            StartX = 0,
-            EndX = 5000,
-            IsEnabled = true
-        };
-        public FakeCraneDriver CraneDriver { get; } = new();
+        public Crane Crane { get; }
+        public FakeCraneDriver CraneDriver { get; }
         public DeviceBase Source { get; }
         public DeviceBase Target { get; }
         public FakeDeviceDriver SourceDriver { get; }
@@ -59,8 +51,19 @@ public class CraneStateMachineTests
         /// <param name="target">本次搬运目标设备。</param>
         /// <param name="handshakeTimeoutMs">设备握手等待期限，单位毫秒。</param>
         /// <param name="startLine">是否按正常搬运前提启动线路。</param>
-        public Harness(DeviceBase source, DeviceBase target, int handshakeTimeoutMs, bool startLine = true)
+        /// <param name="craneId">天车号，默认1，用于验证不同天车的收尾策略。</param>
+        public Harness(DeviceBase source, DeviceBase target, int handshakeTimeoutMs, bool startLine = true, int craneId = 1)
         {
+            Crane = new Crane(craneId, craneId, $"天车{craneId}")
+            {
+                SafeX = 0,
+                SafeZ = 500,
+                Width = 100,
+                StartX = 0,
+                EndX = 5000,
+                IsEnabled = true
+            };
+            CraneDriver = new FakeCraneDriver { CraneId = craneId };
             Source = source;
             Target = target;
             var logger = new TestLogger();
@@ -429,6 +432,77 @@ public class CraneStateMachineTests
             catch (OperationCanceledException) when (execution.Token.IsCancellationRequested) { }
             h.Reservations.Release(competitor);
         }
+    }
+
+    /// <summary>仅1号车送研磨机或打号机跳过收尾回位，所有分支仍清握手、释放资源并提交工件状态。</summary>
+    /// <param name="craneId">实际天车号。</param>
+    /// <param name="targetType">目标设备类型。</param>
+    /// <param name="skipReturn">是否应跳过收尾回位。</param>
+    /// <returns>异步流程验证任务。</returns>
+    [Theory]
+    [InlineData(1, DeviceType.GrinderMachine, true)]
+    [InlineData(1, DeviceType.MarkerMachine, true)]
+    [InlineData(1, DeviceType.BoringMachine, false)]
+    [InlineData(1, DeviceType.UnloadRack, false)]
+    [InlineData(2, DeviceType.GrinderMachine, false)]
+    [InlineData(2, DeviceType.MarkerMachine, false)]
+    [InlineData(2, DeviceType.BoringMachine, false)]
+    [InlineData(2, DeviceType.UnloadRack, false)]
+    public async Task Finish_ReturnsToSafePositionExceptCraneOneGrindingOrMarking(int craneId, DeviceType targetType, bool skipReturn)
+    {
+        DeviceBase target = targetType switch
+        {
+            DeviceType.GrinderMachine => new GrinderMachine(2, "研磨机", 2000),
+            DeviceType.MarkerMachine => new MarkerMachine(2, "打号机", 2000),
+            DeviceType.BoringMachine => new BoringMachine(2, "双头镗", 2000),
+            _ => new UnloadRack(2, "下料架", 2000)
+        };
+        var h = new Harness(new LoadRack(1, "上料架", 1000), target, 10000, craneId: craneId);
+        // 显示序号不决定设备身份，确保分支依据实际天车Id。
+        h.Crane.No = craneId == 1 ? 2 : 1;
+        h.Source.Signals = TestSignals.Of(("HasMaterial", true));
+        target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true), ("LoadLockDone", true),
+            ("Busy", false), ("HasMaterial", false));
+        var process = targetType switch
+        {
+            DeviceType.GrinderMachine => ProcessType.Grinding,
+            DeviceType.MarkerMachine => ProcessType.Marking,
+            DeviceType.BoringMachine => ProcessType.Boring,
+            _ => ProcessType.Unloading
+        };
+        var (wp, task) = h.NewTask(process);
+        var clearSnapshots = new List<(string LastMove, bool HoldsResources, WorkpieceState State)>();
+        h.TargetDriver.OnWrite = (_, value, _) =>
+        {
+            if (Equals(value, 0) && h.TargetDriver.Writes.Contains("LoadDone=1"))
+            {
+                // 清理方法逐点容错，先记录现场，结束后断言，避免测试断言被当通信失败吞掉。
+                clearSnapshots.Add((h.CraneDriver.Actions.Last(),
+                    h.Row.IsHeld(task.TaskId) && h.Reservations.IsReserved(target.Id), wp.Runtime.TaskState));
+            }
+            return Task.CompletedTask;
+        };
+
+        await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
+
+        Assert.Equal(!skipReturn, h.CraneDriver.Actions.Contains("MOVE(0,0,500)"));
+        Assert.Equal(targetType != DeviceType.UnloadRack, clearSnapshots.Count > 0);
+        Assert.All(clearSnapshots, snapshot =>
+        {
+            Assert.Equal(skipReturn ? "MOVE(2000,0,500)" : "MOVE(0,0,500)", snapshot.LastMove);
+            Assert.True(snapshot.HoldsResources);
+            Assert.Equal(WorkpieceState.Running, snapshot.State);
+        });
+        Assert.Contains("MAGNET_OFF", h.CraneDriver.Actions);
+        Assert.Contains("MOVE(2000,0,500)", h.CraneDriver.Actions);
+        Assert.Same(wp, target.CurrentWorkpiece);
+        Assert.Equal(WorkpieceLocation.AtDevice(target.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(process == ProcessType.Unloading ? WorkpieceState.Completed : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.True(h.Crane.IsIdle);
+        Assert.Null(h.Crane.Runtime.LockedInterval);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(target.Id));
+        Assert.Equal(LineState.Running, h.Line.State);
     }
 
     /// <summary>回安全位失败不清目标；收尾单点写失败沿用尽力清理，不改变已交付工件。</summary>

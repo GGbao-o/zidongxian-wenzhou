@@ -198,10 +198,9 @@ public sealed class CraneStateMachine
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 放料内存交接：搬运Id={task.TaskId:N}，目标设备{target.Id}持有工件Id={wp.Id:N}，天车工件已清空，工件位置={wp.Runtime.CurrentLocation}，工序={wp.Runtime.CurrentProcess}；累计耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
             ctx.LogStep($"放料完成：{target.Name}（板已交给目标设备）");
 
-            // 6) 完成：回安全位、释放全部
+            // 6) 上料完成：进行收尾操作  按天车和目标判断是否回安全位，清握手后释放全部
             phase = "收尾";
             await FinishAsync(ctx, crane, task, target, wp, cancellationToken, execution).ConfigureAwait(false);
-
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}；搬运Id={task.TaskId:N}，工件Id={wp.Id:N}，工件状态={wp.Runtime.TaskState}，位置={wp.Runtime.CurrentLocation}，工序={wp.Runtime.CurrentProcess}，总耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)//为true 表示这个token已经失效了 手动取消的任务
@@ -398,17 +397,27 @@ public sealed class CraneStateMachine
         ctx.LogStep(target, "中转：完成（已释放源预约、缩小路权、复位源与目标握手位）");
     }
 
-    /// <summary>完成：回安全位、保持目标预约复位握手，再释放天车/路权/目标预约并改进度。</summary>
+    /// <summary>完成：按天车及目标判断是否回安全位，保持目标预约复位握手，再释放资源并改进度。</summary>
     private async Task FinishAsync(TransferContext ctx, Crane crane, TransportTask task, DeviceBase target, WorkpieceTask wp,
         CancellationToken cancellationToken, CraneTaskExecution? execution)
     {
-        ctx.LogStep($"收尾：回本车安全位（X={crane.SafeX}、Z={crane.SafeZ}）");
-        // 回到本车安全位 X（同一目标 Y、Z 取安全高度）
-        var (_, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
-        //回安全位置 没有+偏移量  safez也是 没有+偏移量   正常状态机执行回safez也不加偏移量
-        await ctx.MoveAbsoluteAsync(crane.SafeX, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        // 目标设备是研磨机/打号机 天车为1号天车 不需要回安全位置
+        if (crane.Id == 1 && target.Type is DeviceType.GrinderMachine or DeviceType.MarkerMachine)
+        {
+            ctx.LogStep(target, "收尾：1号天车目标为研磨机或打号机，跳过回本车安全位（放料已回SafeZ）");
+        }
+        //除了上述特殊情况 其他情况需要回安全位置
+        else
+        {
+            ctx.LogStep($"收尾：回本车安全位（X={crane.SafeX}、Z={crane.SafeZ}）");
+            // 回到本车安全位 X（同一目标 Y、Z 取安全高度）
+            var (_, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
+            //回安全位置 没有+偏移量  safez也是 没有+偏移量   正常状态机执行回safez也不加偏移量
+            await ctx.MoveAbsoluteAsync(crane.SafeX, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        }
         // 清理期间仍持有目标预约与路权，避免旧任务清零覆盖新任务的握手写入。   就是因为上料完成也需要清一下 目标设备都是上料的 
-        ctx.LogStep(target, "收尾：已回安全位，复位目标设备握手位（清理结束后再释放预约）");
+        ctx.LogStep(target, "收尾：复位目标设备握手位（清理结束后再释放预约）");
+        //清理目标设备plc点位握手信号  就是因为上料完成也需要清一下 目标设备都是上料的    
         if (_driverRegistry.GetDevice(target.Id) is { } targetDriver)
         {
             await _handlers.Get(target.Type)
