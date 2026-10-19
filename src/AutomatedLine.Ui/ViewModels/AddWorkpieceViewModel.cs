@@ -1,3 +1,4 @@
+using System.Globalization;
 using AutomatedLine.Domain.Workpieces;
 using CommunityToolkit.Mvvm.ComponentModel;
 
@@ -25,17 +26,17 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [ObservableProperty]
     private string _serialNo = string.Empty;
 
-    /// <summary>直径。</summary>
+    /// <summary>直径原始输入；输入期间保留小数点及尾零，确认时才解析为数值。</summary>
     [ObservableProperty]
-    private double _diameter;
+    private string _diameterText = "0";
 
-    /// <summary>长度。</summary>
+    /// <summary>长度原始输入，避免逐字转换double吞掉尚未输入完的小数点。</summary>
     [ObservableProperty]
-    private double _length;
+    private string _lengthText = "0";
 
-    /// <summary>堵厚原始录入值，与双头镗实际下发的整数Word分开保存。</summary>
+    /// <summary>堵厚原始输入；确认后保留小数，双头镗的整数Word换算仍由驱动负责。</summary>
     [ObservableProperty]
-    private double _plugThickness;
+    private string _plugThicknessText = "0";
 
     /// <summary>堵孔尺寸：只能 70（小孔）或 100（大孔）。</summary>
     [ObservableProperty]
@@ -73,9 +74,9 @@ public partial class AddWorkpieceViewModel : ObservableObject
 
         PlateNo = info.PlateNo;
         SerialNo = info.SerialNo.ToString();
-        Diameter = info.Diameter;
-        Length = info.Length;
-        PlugThickness = info.PlugThickness;
+        DiameterText = info.Diameter.ToString(CultureInfo.CurrentCulture);
+        LengthText = info.Length.ToString(CultureInfo.CurrentCulture);
+        PlugThicknessText = info.PlugThickness.ToString(CultureInfo.CurrentCulture);
         PlugHole = info.PlugHole;
         PrintContent = info.PrintContent;
         LatheMachiningMode = info.LatheMachiningMode;
@@ -86,31 +87,51 @@ public partial class AddWorkpieceViewModel : ObservableObject
     /// 编辑模式沿用原 <c>RuntimeId</c>，新增模式新建一个。
     /// </summary>
     /// <returns>工件数据</returns>
-    public WorkpieceInfo BuildWorkpieceInfo() => new()
+    /// <exception cref="InvalidOperationException">当前输入不合法，禁止使用旧数值或默认值生成工件。</exception>
+    public WorkpieceInfo BuildWorkpieceInfo()
     {
-        RuntimeId = _runtimeId ?? Guid.NewGuid(),
-        PlateNo = PlateNo.Trim(),
-        SerialNo = int.TryParse(SerialNo.Trim(), out var serialNo) ? serialNo : 0,
-        Diameter = Diameter,
-        Length = Length,
-        PlugThickness = PlugThickness,
-        PlugHole = PlugHole,
-        PrintContent = PrintContent.Trim(),
-        LatheMachiningMode = LatheMachiningMode
-    };
+        if (!TryReadInput(out var serialNo, out var diameter, out var length, out var plugThickness))
+            throw new InvalidOperationException("工件输入不合法，不能生成工件数据");
+
+        return new WorkpieceInfo
+        {
+            RuntimeId = _runtimeId ?? Guid.NewGuid(),
+            PlateNo = PlateNo.Trim(),
+            SerialNo = serialNo,
+            Diameter = diameter,
+            Length = length,
+            PlugThickness = plugThickness,
+            PlugHole = PlugHole,
+            PrintContent = PrintContent.Trim(),
+            LatheMachiningMode = LatheMachiningMode
+        };
+    }
 
     /// <summary>
-    /// 校验输入是否合法：版号非空、序号为非负整数（允许0）、直径/长度为正、堵孔只能 70/100、**斜床工艺 1~10**。
+    /// 确认时解析原始文本并校验：版号非空、序号非负、直径/长度为有限正数、堵厚为有限数值、堵孔70/100、斜床工艺1~10。
+    /// 不回写输入文本，允许编辑中的小数点、尾零保持原样。
     /// </summary>
     /// <returns>合法返回 true</returns>
-    public bool Validate()
+    public bool Validate() => TryReadInput(out _, out _, out _, out _);
+
+    // 校验和组装复用同一套解析规则；错误文本不能退回上次输入成功的数值。
+    private bool TryReadInput(out int serialNo, out double diameter, out double length, out double plugThickness)
     {
+        var serialValid = int.TryParse(SerialNo.Trim(), out serialNo);
+        var diameterValid = TryParseFinite(DiameterText, out diameter);
+        var lengthValid = TryParseFinite(LengthText, out length);
+        var thicknessValid = TryParseFinite(PlugThicknessText, out plugThickness);
         return !string.IsNullOrWhiteSpace(PlateNo)
-               && int.TryParse(SerialNo.Trim(), out var serialNo) && serialNo >= 0
-               && Diameter > 0
-               && Length > 0
+               && serialValid && serialNo >= 0
+               && diameterValid && diameter > 0
+               && lengthValid && length > 0
+               && thicknessValid
                && (PlugHole == 70 || PlugHole == 100)
                && LatheMachiningMode >= WorkpieceInfo.LatheMachiningModeMin
                && LatheMachiningMode <= WorkpieceInfo.LatheMachiningModeMax;
     }
+
+    // 不接收NaN/无穷大；不把逗号等分组符静默删掉，避免错误文本变成另一尺寸。
+    private static bool TryParseFinite(string text, out double value)
+        => double.TryParse(text, NumberStyles.Float, CultureInfo.CurrentCulture, out value) && double.IsFinite(value);
 }

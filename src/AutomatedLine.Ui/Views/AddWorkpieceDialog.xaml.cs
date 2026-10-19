@@ -39,7 +39,7 @@ public partial class AddWorkpieceDialog : FluentWindow
         {
             // 校验失败给出提示，不关闭窗口，避免用户重新输入。
             // 全限定名：Wpf.Ui.Controls 也有 MessageBox，直接用 MessageBox 会产生歧义
-            System.Windows.MessageBox.Show(this, "请检查输入：版号必填；序号为非负整数（>=0）；直径、长度为正数；堵孔只能填 70 或 100；斜床工艺只能填 1~10。", "输入不合法",
+            System.Windows.MessageBox.Show(this, "请检查输入：版号必填；序号为非负整数（>=0）；直径、长度为有限正数；堵厚为有限数值；堵孔只能填 70 或 100；斜床工艺只能填 1~10。", "输入不合法",
                 System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
