@@ -276,8 +276,16 @@
                         <TextBlock FontFamily="Consolas" Text="{Binding X3HomeXText, StringFormat=X3 X物理原点：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding X4HomeYText, StringFormat=X4 Y物理原点：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding X5HomeZText, StringFormat=X5 Z物理原点：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X6MagnetizeText, StringFormat=X6 充磁反馈：{0}}" />
-                        <TextBlock FontFamily="Consolas" Text="{Binding X7DemagnetizeText, StringFormat=X7 退磁反馈：{0}}" />
+                        <TextBlock
+                            FontFamily="Consolas"
+                            FontWeight="Bold"
+                            Foreground="Brown"
+                            Text="{Binding X6MagnetizeText, StringFormat=X6 充磁反馈：{0}}" />
+                        <TextBlock
+                            FontFamily="Consolas"
+                            FontWeight="Bold"
+                            Foreground="Brown"
+                            Text="{Binding X7DemagnetizeText, StringFormat=X7 退磁反馈：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding X11HasPlateText, StringFormat=X11 检测有版：{0}}" />
                     </StackPanel>
                 </Border>
