@@ -353,6 +353,7 @@ public sealed class CraneStateMachine
         await ctx.MoveAbsoluteAsync(x, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
         //进行微调操作
         await ctx.RefineXyAsync(x, y, cancellationToken).ConfigureAwait(false);
+        
         ctx.LogStep(target, "中转：已到达目标上方（Z 仍在安全高度）");
 
         // 清源握手时继续持有预约，保证旧任务所有源写入结束前不会交给下一任务。
@@ -431,11 +432,10 @@ public sealed class CraneStateMachine
 
         // 异步清理在完成提交之前结束，保留正常完成与人工中止的原有互斥判断。
         if (execution is null) CommitCompletion();
-        else execution.Complete(CommitCompletion);
-
+        else execution.Complete(CommitCompletion); 
         void CommitCompletion()
         {
-            ctx.LogStep("收尾：释放路权 + 目标设备预约 + 清空天车运行时状态");
+            ctx.LogStep("收尾：释放路权 + 目标设备预约 + 清空天车运行时状态");//现在的路权 锁都是根据任务id来的  
             _rightOfWayManager.Release(task.TaskId);
             _reservationManager.Release(task.TaskId);
 

@@ -16,7 +16,7 @@ public sealed class UnloadRackHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => Task.FromResult(0);
 
-    /// <inheritdoc />
+    /// <inheritdoc />下料架没有下料操作
     public Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
         => throw new NotSupportedException("下料架不作为取料源");
 

@@ -235,7 +235,7 @@ public sealed class CraneScheduler : IHostedService
                             && statuses.TryGetValue(c.Id, out var s) && s is not null && !s.HasAlarm)
                 .OrderBy(c => Math.Abs(statuses[c.Id]!.XDisplay - candidate.Source.PositionX))   // 离源最近
                 .ToList();
-
+            
             // 逐候选记录"为什么这些天车不行"：**只要本轮有天车被排除就报**（不再等"全都没资格"），
             // 这样"2 台车里 1 台能干活"时，也能看到另一台被排除的原因（未启用/忙/范围不覆盖/读状态失败/报警）
             var craneReasons = ExplainNoEligible(candidate, cranes, statuses);

@@ -35,6 +35,7 @@ public sealed class BoringHandler : ITransferHandler
         //三轴运动   去source上方
         ctx.LogStep(source, $"取料：XY → 设备上方（X={x} Y={y} Z={ctx.Crane.SafeZ}）");
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        //进行微调操作
         await ctx.RefineXyAsync(x, y, cancellationToken).ConfigureAwait(false);
         //计算下降距离(绝对值编码器的值)
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);

@@ -16,7 +16,7 @@ public sealed class LoadRackHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => Task.FromResult(0);
 
-    /// <inheritdoc />
+    /// <inheritdoc /> 上料架下料操作
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         ctx.LogStep(source, "取料：开始（等上料架有板 HasMaterial=1）");

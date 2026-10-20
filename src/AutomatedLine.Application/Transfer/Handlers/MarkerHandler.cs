@@ -19,9 +19,7 @@ public sealed class MarkerHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
-    /// <inheritdoc />
-    ///
-    
+    /// <inheritdoc />打号机下料操作
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         ctx.LogStep(source, "取料：开始（等设备打印完成 ProcessDone=1）");

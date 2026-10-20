@@ -209,7 +209,6 @@ public sealed class CraneWorker : IHostedService
                     }
                 }
             }
-
             try
             {
                 await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
@@ -220,7 +219,7 @@ public sealed class CraneWorker : IHostedService
             }
         }
     }
-
+    
     /// <summary>异常兜底：若还挂着任务，走统一中止（释放路权/预约、清理任务、暂停线路）。</summary>
     /// <param name="crane">天车</param>
     /// <param name="reason">原因</param>
