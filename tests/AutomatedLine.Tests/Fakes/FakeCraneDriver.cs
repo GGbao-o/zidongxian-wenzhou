@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AutomatedLine.Application.Abstractions;
 
 namespace AutomatedLine.Tests.Fakes;
@@ -89,15 +90,22 @@ public sealed class FakeCraneDriver : ICraneDriver
     }
 
     /// <inheritdoc />
-    public Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken ct = default)
+    public async Task<CraneCommandResult> MoveAbsoluteAsync(int x, int y, int z, CancellationToken ct = default)
     {
         Actions.Add($"MOVE({x},{y},{z})");
-        if (OnAbsoluteMove is not null) return OnAbsoluteMove(x, ct);
-        if (x == FailAbsoluteMoveX)
+        var result = OnAbsoluteMove is not null ? await OnAbsoluteMove(x, ct)
+            : x == FailAbsoluteMoveX ? CraneCommandResult.Fail(CraneCommandCode.Timeout, "运动超时")
+            : CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok");
+        // 普通运动成功后更新桩坐标，避免旧的默认零坐标无意制造额外微调；保留其他脚本化反馈。
+        if (result.IsSuccess && Status is not null)
         {
-            return Task.FromResult(CraneCommandResult.Fail(CraneCommandCode.Timeout, "运动超时"));
+            var snapshot = JsonSerializer.SerializeToNode(Status)!;
+            snapshot[nameof(CraneStatusDto.XEncoder)] = x;
+            snapshot[nameof(CraneStatusDto.YEncoder)] = y;
+            snapshot[nameof(CraneStatusDto.ZEncoder)] = z;
+            Status = snapshot.Deserialize<CraneStatusDto>();
         }
-        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.InPosition, "ok"));
+        return result;
     }
 
     /// <inheritdoc />

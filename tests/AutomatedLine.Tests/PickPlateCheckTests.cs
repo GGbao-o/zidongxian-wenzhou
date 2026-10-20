@@ -60,6 +60,8 @@ public class PickPlateCheckTests
         var store = new FakeConfigurationStore();
         store.Devices.Add(new DeviceConfigDto { Id = 1, PositionX = 1000, PositionY = 0, PositionZ = 500 });
         var options = new AppOptions();
+        // 本组只验证下降后的X11等待；关闭独立XY读取前延时，保留原两次MOVE后的观察边界。
+        options.Crane.XyRefineSettleMs = 0;
         options.Transfer.Lathes[1] = new LatheTransferOptions { TailstockCenterDistance = 800 };
         var ctx = new TransferContext(crane, new WorkpieceTask(new WorkpieceInfo { Diameter = 100, Length = 700 }),
             drivers, store, options, new TestLogger());

@@ -351,6 +351,8 @@ public sealed class CraneStateMachine
         var (x, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
         //去目标位置
         await ctx.MoveAbsoluteAsync(x, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        //进行微调操作
+        await ctx.RefineXyAsync(x, y, cancellationToken).ConfigureAwait(false);
         ctx.LogStep(target, "中转：已到达目标上方（Z 仍在安全高度）");
 
         // 清源握手时继续持有预约，保证旧任务所有源写入结束前不会交给下一任务。

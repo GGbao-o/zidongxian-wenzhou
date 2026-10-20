@@ -127,9 +127,11 @@ public partial class ParamsViewModel : ObservableObject
         scheduling.Items.Add(IntItem("调度周期(ms)", () => _options.Scheduling.ScheduleIntervalMs, v => _options.Scheduling.ScheduleIntervalMs = v));
         Categories.Add(scheduling);
 
-        var crane = new ParamCategoryViewModel("天车", "运动超时、到位/下压容差与充退磁反馈等待时间");
+        var crane = new ParamCategoryViewModel("天车", "运动超时、到位/下压容差、XY精定位与充退磁反馈等待时间");
         crane.Items.Add(IntItem("运动超时(ms)", () => _options.Crane.MoveTimeoutMs, v => _options.Crane.MoveTimeoutMs = v));
         crane.Items.Add(IntItem("到位容差(mm)", () => _options.Crane.PositionToleranceMm, v => _options.Crane.PositionToleranceMm = v));
+        crane.Items.Add(IntItem("XY精定位容差(mm)", () => _options.Crane.XyRefineToleranceMm, v => _options.Crane.XyRefineToleranceMm = v));
+        crane.Items.Add(IntItem("XY微调读取前等待(ms)", () => _options.Crane.XyRefineSettleMs, v => _options.Crane.XyRefineSettleMs = v));
         crane.Items.Add(IntItem("下压容差(mm)", () => _options.Crane.PressureToleranceMm, v => _options.Crane.PressureToleranceMm = v));
         crane.Items.Add(IntItem("充退磁反馈等待时间(ms)", () => _options.Crane.MagnetFeedbackDelayMs, v => _options.Crane.MagnetFeedbackDelayMs = v));
         Categories.Add(crane);

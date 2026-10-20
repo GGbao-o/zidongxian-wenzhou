@@ -1,3 +1,4 @@
+using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Runtime;
 using AutomatedLine.Application.Transfer;
@@ -12,6 +13,84 @@ namespace AutomatedLine.Tests;
 /// <summary>取放料流程顺序测试（打桩驱动）。</summary>
 public class TransferFlowTests
 {
+    /// <summary>五类源仅在首次到上方后检查XY；斜床保持pickY，失败时禁止下降与充磁。</summary>
+    /// <param name="type">源设备类型。</param>
+    /// <param name="fail">是否模拟精定位失败。</param>
+    /// <returns>异步流程验证任务。</returns>
+    [Theory]
+    [InlineData(DeviceType.LoadRack, false)]
+    [InlineData(DeviceType.BoringMachine, false)]
+    [InlineData(DeviceType.LatheMachine, false)]
+    [InlineData(DeviceType.GrinderMachine, false)]
+    [InlineData(DeviceType.MarkerMachine, false)]
+    [InlineData(DeviceType.LoadRack, true)]
+    [InlineData(DeviceType.BoringMachine, true)]
+    [InlineData(DeviceType.LatheMachine, true)]
+    [InlineData(DeviceType.GrinderMachine, true)]
+    [InlineData(DeviceType.MarkerMachine, true)]
+    public async Task SourceAbove_RefinesBeforeDescentOnly(DeviceType type, bool fail)
+    {
+        DeviceBase source = type switch
+        {
+            DeviceType.LoadRack => new LoadRack(1, "上料", 1000),
+            DeviceType.BoringMachine => new BoringMachine(1, "双头镗", 1000),
+            DeviceType.LatheMachine => new LatheMachine(1, "斜床", 1000),
+            DeviceType.GrinderMachine => new GrinderMachine(1, "研磨", 1000),
+            _ => new MarkerMachine(1, "打号", 1000)
+        };
+        ITransferHandler handler = type switch
+        {
+            DeviceType.LoadRack => new LoadRackHandler(),
+            DeviceType.BoringMachine => new BoringHandler(),
+            DeviceType.LatheMachine => new LatheHandler(),
+            DeviceType.GrinderMachine => new GrinderHandler(),
+            _ => new MarkerHandler()
+        };
+        var wp = new WorkpieceTask(new WorkpieceInfo { Diameter = 100, Length = 700, PlugHole = 100 });
+        var ctx = BuildContext(out var driver, out _, out _, source, new UnloadRack(9, "下料", 2000), wp);
+        ctx.Options.Transfer.Lathes[1] = new LatheTransferOptions { TailstockCenterDistance = 800, BigHoleOffset = 122 };
+        source.Signals = TestSignals.Of(("HasMaterial", true), ("RequestUnload", true), ("ProcessDone", true),
+            ("TailstockOpened", true), ("UnloadReleaseDone", true));
+        var expectedY = type == DeviceType.LatheMachine ? -172 : 0;
+        driver.OnReadStatus = _ =>
+        {
+            if (driver.StatusReadCount == 1)
+            {
+                Assert.Equal($"MOVE(1000,{expectedY},500)", Assert.Single(driver.Actions));
+                Assert.False(ctx.MagnetCommandStarted);
+            }
+            return Task.FromResult<CraneStatusDto?>(fail ? null : new()
+                { XEncoder = 1000, YEncoder = expectedY, HasPlate = true });
+        };
+        if (fail)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => handler.PickAsync(ctx, source, default));
+            Assert.Single(driver.Actions);
+            Assert.False(ctx.MagnetCommandStarted);
+        }
+        else await handler.PickAsync(ctx, source, default);
+        Assert.True(driver.StatusReadCount >= 1);
+        Assert.Equal(type == DeviceType.LatheMachine && !fail ? new[] { "REL(0,172,0)" } : Array.Empty<string>(),
+            driver.Actions.Where(action => action.StartsWith("REL(")));
+    }
+
+    /// <summary>普通绝对运动仍只执行一次；首次上方运动失败也不能进入精定位。</summary>
+    /// <returns>异步验证任务。</returns>
+    [Fact]
+    public async Task OrdinaryMovementAndFailedFirstMove_DoNotRefine()
+    {
+        var source = new LoadRack(1, "上料", 1000);
+        source.Signals = TestSignals.Of(("HasMaterial", true));
+        var ctx = BuildContext(out var driver, out _, out _, source, new BoringMachine(2, "双头镗", 2000),
+            new WorkpieceTask(new WorkpieceInfo { Diameter = 100, Length = 700 }));
+        await ctx.MoveAbsoluteAsync(10, 20, 30, default);
+        await ctx.MoveAbsoluteAsync(10, 20, 500, default);
+        Assert.Equal(0, driver.StatusReadCount);
+        driver.FailAbsoluteMoveX = 1000;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new LoadRackHandler().PickAsync(ctx, source, default));
+        Assert.Equal(0, driver.StatusReadCount);
+    }
+
     /// <summary>构造流程上下文与打桩驱动。</summary>
     private static TransferContext BuildContext(
         out FakeCraneDriver craneDriver,
@@ -34,7 +113,9 @@ public class TransferFlowTests
         store.Devices.Add(new DeviceConfigDto { Id = source.Id, PositionX = 1000, PositionY = 0, PositionZ = 500 });
         store.Devices.Add(new DeviceConfigDto { Id = target.Id, PositionX = 2000, PositionY = 0, PositionZ = 500 });
 
-        return new TransferContext(crane, wp, registry, store, new AppOptions(), new TestLogger());
+        var options = new AppOptions();
+        options.Crane.XyRefineSettleMs = 0;
+        return new TransferContext(crane, wp, registry, store, options, new TestLogger());
     }
 
     /// <summary>料架取料：审核有板 → XY → Z 降 → X11 有板 → 充磁 → Z 升。</summary>
@@ -71,6 +152,7 @@ public class TransferFlowTests
         Assert.Contains("LoadDone=1", targetDriver.Writes);
         Assert.Equal("MAGNET_OFF", craneDriver.Actions[^2]);
         Assert.False(ctx.MagnetCommandStarted); // 单独执行放料不会标记取料充磁。
+        Assert.Equal(0, craneDriver.StatusReadCount);
     }
 
     /// <summary>斜床放料：Z 降后相对 -YOffset，再放磁。</summary>
@@ -90,6 +172,7 @@ public class TransferFlowTests
         Assert.Contains("REL(0,-172,0)", craneDriver.Actions);
         Assert.Contains("CraneLoadInPlace=1", targetDriver.Writes);   // #1102 天车上料到位
         Assert.Contains("CraneLoadDone=1", targetDriver.Writes);
+        Assert.Equal(0, craneDriver.StatusReadCount);
     }
 
     /// <summary>下料架放料：Z回安全高度后发完成脉冲，保持1秒并复位。</summary>
@@ -107,5 +190,6 @@ public class TransferFlowTests
 
         Assert.Contains("MAGNET_OFF", craneDriver.Actions);
         Assert.Equal(new[] { "PlaceDone=1", "PlaceDone=0" }, targetDriver.Writes);
+        Assert.Equal(0, craneDriver.StatusReadCount);
     }
 }

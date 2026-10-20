@@ -131,6 +131,45 @@ public sealed class TransferContext
         }
     }
 
+    /// <summary>源/目标上方读取一次绝对编码器，仅超差XY轴补偿一次，不追加微调后的精度复核。</summary>
+    /// <param name="x">本次X绝对目标，与首次运动使用相同取整。</param>
+    /// <param name="y">本次Y绝对目标，保留斜床pickY等业务偏移。</param>
+    /// <param name="cancellationToken">当前搬运取消令牌。</param>
+    /// <returns>跳过微调或一次相对运动完成的任务；Z增量始终为0。</returns>
+    public async Task RefineXyAsync(double x, double y, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var (ix, iy) = ((int)Math.Round(x), (int)Math.Round(y));
+        var tolerance = Options.Crane.XyRefineToleranceMm;
+        var settleMs = Options.Crane.XyRefineSettleMs;
+        if (tolerance <= 0 || settleMs < 0)
+            throw new InvalidOperationException($"{Tag} XY微调参数非法：容差={tolerance}mm须大于0，读取前等待={settleMs}ms须非负");
+
+        LogStep($"XY微调：等待{settleMs}ms后读取一次绝对编码器，目标X={ix} Y={iy}，误差>{tolerance}mm才补发，最多1次，Z不参与");
+        await Task.Delay(settleMs, cancellationToken).ConfigureAwait(false);
+        var status = await CraneDriver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
+        // 现有状态接口可能将读取取消转换为null；优先保留搬运取消语义。
+        cancellationToken.ThrowIfCancellationRequested();
+        if (status is null) throw new InvalidOperationException($"{Tag} XY微调读取天车状态失败，未下发微调");
+        if (status.HasAlarm) throw new InvalidOperationException($"{Tag} XY微调发现天车报警，未下发微调");
+        //获取目标位置与当前编码器位置的差值
+        var errorX = (long)ix - status.XEncoder;
+        var errorY = (long)iy - status.YEncoder;
+        //判断差值是否大于配置的5mm
+        var dx = Math.Abs(errorX) > tolerance ? checked((int)errorX) : 0;
+        var dy = Math.Abs(errorY) > tolerance ? checked((int)errorY) : 0;
+        LogStep($"XY微调检查：编码器X={status.XEncoder} Y={status.YEncoder}，目标X={ix} Y={iy}，绝对误差X={Math.Abs(errorX)} Y={Math.Abs(errorY)}mm，阈值={tolerance}mm；修正量dX={dx} dY={dy} dZ=0");
+        if (dx == 0 && dy == 0)
+        {
+            LogStep("XY微调：误差未超过阈值，直接继续，不补发运动");
+            return;
+        }
+
+        // 差值大于5mm 进行相对位移微调 微调完不会进行再次判断  编码器差值作为相对增量，复用现有显示坐标换算、触发、到位等待和异常复位。
+        await MoveRelativeAsync(dx, dy, 0, cancellationToken).ConfigureAwait(false);
+        LogStep("XY微调：1/1次相对运动成功，按原运动到位规则继续，不追加精度复核");
+    }
+
     /// <summary>相对移动并校验成功。</summary>
     /// <param name="dx">X 相对值</param>
     /// <param name="dy">Y 相对值</param>

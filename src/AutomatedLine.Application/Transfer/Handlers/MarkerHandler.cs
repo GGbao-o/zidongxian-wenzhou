@@ -30,6 +30,7 @@ public sealed class MarkerHandler : ITransferHandler
         var (x, y, z) = await ctx.BaseOfAsync(source, cancellationToken).ConfigureAwait(false);
         ctx.LogStep(source, $"取料：XY → 设备上方（X={x} Y={y} Z={ctx.Crane.SafeZ}）");
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        await ctx.RefineXyAsync(x, y, cancellationToken).ConfigureAwait(false);
 
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
         ctx.LogStep(source, $"取料：Z 下降到取料位（Z={zTarget}，工件直径 {ctx.Workpiece.Info.Diameter}）");

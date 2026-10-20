@@ -36,6 +36,7 @@ public sealed class LatheHandler : ITransferHandler
         ctx.LogStep(source, $"取料：XY → 设备上方并做 Y 二次偏移（X={x} Y={pickY}，Y偏移={yOffset}）");
         //y到偏移位置 绝对移动
         await ctx.MoveAbsoluteAsync(x, pickY, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        await ctx.RefineXyAsync(x, pickY, cancellationToken).ConfigureAwait(false);
 
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
         ctx.LogStep(source, $"取料：Z 下降到取料位（Z={zTarget}，工件直径 {ctx.Workpiece.Info.Diameter}）");

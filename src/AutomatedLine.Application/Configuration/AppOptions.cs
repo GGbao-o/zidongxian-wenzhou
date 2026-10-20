@@ -96,6 +96,12 @@ public sealed class CraneOptions
     /// <summary>正常XYZ到位容差（mm），默认30；参与轴还须实时确认对应Busy=0。</summary>
     public int PositionToleranceMm { get; set; } = 30;
 
+    /// <summary>源/目标上方XY精定位容差（mm），默认5；绝对编码器误差严格大于此值才微调一次，必须大于0。</summary>
+    public int XyRefineToleranceMm { get; set; } = 5;
+
+    /// <summary>XY微调读取编码器前的一次等待（毫秒），默认500；允许0，不做重复稳定采样。</summary>
+    public int XyRefineSettleMs { get; set; } = 500;
+
     /// <summary>下压容差（mm）：仅当 X2 下压触发时，用它判断 Z 是否真的到位。默认 15。</summary>
     public int PressureToleranceMm { get; set; } = 15;
 }

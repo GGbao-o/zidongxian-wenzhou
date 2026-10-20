@@ -25,6 +25,87 @@ namespace AutomatedLine.Tests;
 /// </summary>
 public class CraneStateMachineTests
 {
+    /// <summary>源上方微调失败仍属充磁前故障，保留源设备上的工件，不发送下料完成。</summary>
+    /// <returns>异步状态机验证任务。</returns>
+    [Fact]
+    public async Task SourceRefinementFailure_PreservesSourceWorkpieceBeforeMagnet()
+    {
+        var h = new Harness(new BoringMachine(1, "双头镗", 1000), new BoringMachine(2, "目标", 2000), 1000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        wp.Runtime.CurrentProcess = ProcessType.Boring;
+        wp.Runtime.QueueOrder = 7;
+        h.CraneDriver.OnReadStatus = _ => Task.FromResult<CraneStatusDto?>(new() { XEncoder = 1010 });
+        h.CraneDriver.OnRelativeMove = (_, _, _, _) => Task.FromResult(
+            CraneCommandResult.Fail(CraneCommandCode.Timeout, "模拟源微调运动失败"));
+
+        await h.Machine.RunFlowAsync(h.Crane, task, default);
+
+        Assert.Equal("REL(-10,0,0)", Assert.Single(h.CraneDriver.Actions.Where(action => action.StartsWith("REL("))));
+        Assert.Same(wp, h.Source.CurrentWorkpiece);
+        Assert.Null(h.Target.CurrentWorkpiece);
+        Assert.Null(h.Crane.CurrentWorkpiece);
+        Assert.Equal(WorkpieceLocation.AtDevice(h.Source.Id), wp.Runtime.CurrentLocation);
+        Assert.Equal(ProcessType.Boring, wp.Runtime.CurrentProcess);
+        Assert.Equal(7, wp.Runtime.QueueOrder);
+        Assert.Equal(WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Empty(h.SourceDriver.Writes);
+        Assert.Empty(h.TargetDriver.Writes);
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+    }
+
+    /// <summary>目标XY检查在清握手、释放源预约、缩路权之前，失败按原充磁后策略弃板；收尾不再检查。</summary>
+    /// <param name="failTarget">是否让目标精定位失败。</param>
+    /// <returns>异步状态机验证任务。</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TargetRefinement_PrecedesCleanupAndRetainsOriginalFailurePolicy(bool failTarget)
+    {
+        var h = new Harness(new BoringMachine(1, "双头镗", 1000), new BoringMachine(2, "目标", 2000), 1000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        var targetChecked = false;
+        h.CraneDriver.OnReadStatus = _ =>
+        {
+            var status = h.CraneDriver.Status;
+            if (status?.XEncoder == 2000)
+            {
+                Assert.False(targetChecked);
+                targetChecked = true;
+                Assert.Contains("UnloadDone=1", h.SourceDriver.Writes);
+                Assert.DoesNotContain("UnloadDone=0", h.SourceDriver.Writes);
+                Assert.Empty(h.TargetDriver.Writes);
+                Assert.True(h.Reservations.IsReserved(h.Source.Id));
+                Assert.True(h.Reservations.IsReserved(h.Target.Id));
+                Assert.Contains(h.Row.Snapshot(), interval => interval.Min < 1000 && interval.Max > 2000);
+                return Task.FromResult<CraneStatusDto?>(new() { XEncoder = 2010 });
+            }
+            return Task.FromResult(status);
+        };
+        h.CraneDriver.OnRelativeMove = (_, _, _, _) => Task.FromResult(failTarget
+            ? CraneCommandResult.Fail(CraneCommandCode.Timeout, "模拟目标微调运动失败")
+            : CraneCommandResult.Ok(CraneCommandCode.InPosition, "普通运动到位"));
+        await h.Machine.RunFlowAsync(h.Crane, task, default);
+        Assert.True(targetChecked);
+        Assert.Equal("REL(-10,0,0)", Assert.Single(h.CraneDriver.Actions.Where(action => action.StartsWith("REL("))));
+        Assert.Equal(failTarget ? WorkpieceState.Discarded : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        if (failTarget)
+        {
+            Assert.Empty(h.TargetDriver.Writes);
+            Assert.Equal(LineState.PausedByFault, h.Line.State);
+        }
+        else Assert.Contains("LoadDone=1", h.TargetDriver.Writes);
+    }
+
     /// <summary>测试装配：真实注册表/管理器 + 打桩驱动与配置。</summary>
     private sealed class Harness
     {
@@ -68,6 +149,7 @@ public class CraneStateMachineTests
             Target = target;
             var logger = new TestLogger();
             Config.Options.StateMachine.HandshakeTimeoutMs = handshakeTimeoutMs;
+            Config.Options.Crane.XyRefineSettleMs = 0;
 
             Row = new RightOfWayManager(logger);
             Reservations = new ResourceReservationManager(logger);
