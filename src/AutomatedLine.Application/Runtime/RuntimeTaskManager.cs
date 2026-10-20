@@ -125,7 +125,7 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         return removed;
     }
 
-    /// <inheritdoc />
+    /// <inheritdoc />批量删除到达保留期限的Completed工件；同一锁内清匹配引用和移除，锁外只通知一次。
     public IReadOnlyList<WorkpieceTask> RemoveCompleted(DateTimeOffset completedBeforeUtc, DeviceRegistry devices, CraneRegistry cranes)
     {
         var removed = new List<(WorkpieceTask Task, int Devices, int Cranes)>();

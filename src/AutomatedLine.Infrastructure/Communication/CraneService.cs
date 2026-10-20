@@ -472,7 +472,7 @@ public sealed class CraneService : ICraneDriver
             //注意 如果writex=-1 后面PulseManyAsync 不会写对应轴 2->延迟->0
             var xy = new[] { (CraneAddress.ManualXAbsMove, writeX != -1), (CraneAddress.ManualYAbsMove, writeY != -1) };
             var z = new[] { (CraneAddress.ManualZAbsMove, writeZ != -1) };
-
+            //z轴下降
             if (zDirection == 1)
             {
                 _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动阶段：Z下降，先触发XY并等待XY位置容差及Busy=0，再触发Z；最终轮询叠加X2下压保护");
@@ -480,6 +480,7 @@ public sealed class CraneService : ICraneDriver
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
                 var xyResult = await PollAxesAsync(targetX, targetY, -1, pollEncoder, false, cancellationToken).ConfigureAwait(false);
                 if (!xyResult.IsSuccess) return xyResult;//这个就是xy没有运动成功
+                //z轴对应写2 写0
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
             }
             else if (zDirection == 2)
