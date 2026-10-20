@@ -40,7 +40,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
 
     /// <summary>堵孔尺寸：只能 70（小孔）或 100（大孔）。</summary>
     [ObservableProperty]
-    private int _plugHole;
+    private int _plugHole = 70;
 
     /// <summary>打印内容。</summary>
     [ObservableProperty]

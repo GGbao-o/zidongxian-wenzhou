@@ -38,7 +38,7 @@ public sealed class WorkpieceInfo
     public const int LatheMachiningModeMax = 10;
 
     /// <summary>手工录入时的斜床工艺默认值。</summary>
-    public const int LatheMachiningModeDefault = 1;
+    public const int LatheMachiningModeDefault = 4;
 
     /// <summary>
     /// 斜床工艺（写入斜床宏 `#909 加工模式`）：**取值 0~10**，由操作员按现场工艺卡录入，
