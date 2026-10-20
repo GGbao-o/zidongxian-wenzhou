@@ -407,6 +407,8 @@ public sealed class CraneStateMachine
         if (crane.Id == 1 && target.Type is DeviceType.GrinderMachine or DeviceType.MarkerMachine)
         {
             ctx.LogStep(target, "收尾：1号天车目标为研磨机或打号机，跳过回本车安全位（放料已回SafeZ）");
+            //不需要会安全位置 但是做一个延迟 放置清设备信号清太快了
+            await Task.Delay(2000, cancellationToken).ConfigureAwait(false);
         }
         //除了上述特殊情况 其他情况需要回安全位置
         else
