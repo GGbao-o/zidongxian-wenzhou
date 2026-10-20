@@ -239,7 +239,7 @@ public sealed class TransportTaskGenerator : IHostedService
             if (next is null)
             {
                 // 仅锁定路线的下料终点返回空，缺设备不能走入完成分支。
-                runtime.TaskState = WorkpieceState.Completed;
+                runtime.MarkCompleted(DateTimeOffset.UtcNow);
                 _logger.Info(LogCategory.Generation, $"工件 {Describe(task)} 已无可执行工序，标记完成");
                 // task.txt：另一条完成路径（线上已无该工件的下一道可执行工序）。
                 // Generation 记"为什么判完成"，Task 记"生命周期终点"，两者互补不重复。

@@ -125,6 +125,38 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         return removed;
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<WorkpieceTask> RemoveCompleted(DateTimeOffset completedBeforeUtc, DeviceRegistry devices, CraneRegistry cranes)
+    {
+        var removed = new List<(WorkpieceTask Task, int Devices, int Cranes)>();
+        lock (_sync)
+        {
+            // 与ERP入队使用同一把任务表锁；先清旧引用再移除，使同身份重收只发生在删除提交之后。
+            var expired = _tasks.Where(t => t.Runtime.TaskState == WorkpieceState.Completed
+                && t.Runtime.CompletedAtUtc is { } completedAt && completedAt <= completedBeforeUtc).ToArray();
+            foreach (var task in expired)
+            {
+                var deviceCount = devices.ClearWorkpiece(task.Id);
+                var craneCount = cranes.ClearWorkpiece(task.Id);
+                removed.Add((task, deviceCount, craneCount));
+            }
+            // 一次删除避免逐件List.Remove的平方级开销；所有引用清理成功后才提交移除。
+            if (expired.Length > 0)
+            {
+                var ids = expired.Select(task => task.Id).ToHashSet();
+                _tasks.RemoveAll(task => ids.Contains(task.Id));
+            }
+        }
+        if (removed.Count == 0) return Array.Empty<WorkpieceTask>();
+
+        foreach (var entry in removed)
+            _logger.Info(LogCategory.Task, $"自动删除已完成任务：工件 {entry.Task.Info}，工件Id={entry.Task.Id:N}，完成时间={entry.Task.Runtime.CompletedAtUtc:O}，清理截止={completedBeforeUtc:O}，已清设备引用={entry.Devices}、天车引用={entry.Cranes}；同版号同序号允许再次接收");
+        // 回调可能同步进入UI或重新查询任务表，必须在所有内部锁释放之后且每批只调用一次。
+        try { Changed?.Invoke(this, EventArgs.Empty); }
+        catch (Exception ex) { _logger.Warn(LogCategory.Operation, $"已自动删除{removed.Count}件完成任务，页面通知失败，等待后续刷新：{ex.Message}"); }
+        return removed.Select(entry => entry.Task).ToArray();
+    }
+
     /// <inheritdoc />  主页面对应工件启动按钮和新方法
     public bool Start(Guid taskId)
     {

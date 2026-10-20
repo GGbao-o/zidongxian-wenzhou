@@ -36,6 +36,13 @@ public interface IRuntimeTaskManager
     /// <returns>移除成功返回 true；不存在返回 false</returns>
     bool Remove(Guid taskId);
 
+    /// <summary>批量删除到达保留期限的Completed工件；同一锁内清匹配引用和移除，锁外只通知一次。</summary>
+    /// <param name="completedBeforeUtc">完成时间不晚于此时刻才清理；缺少完成时间的记录保留。</param>
+    /// <param name="devices">原子清除相同工件ID引用的设备目录。</param>
+    /// <param name="cranes">原子清除相同工件ID引用的天车目录；不修改搬运任务。</param>
+    /// <returns>本批实际移除的工件；无删除时不发送Changed通知。</returns>
+    IReadOnlyList<WorkpieceTask> RemoveCompleted(DateTimeOffset completedBeforeUtc, DeviceRegistry devices, CraneRegistry cranes);
+
     /// <summary>
     /// 启动任务：首次启动锁定最新工艺，暂停恢复沿用原快照；转为排队中并分配入线顺序。
     /// </summary>

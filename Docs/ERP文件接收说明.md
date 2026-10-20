@@ -122,3 +122,7 @@ ERP接收：暂停监听，当前批次完成后停止接收
 - [MainViewModel](../src/AutomatedLine.Ui/ViewModels/MainViewModel.cs) / [MainPageView](../src/AutomatedLine.Ui/Views/MainPageView.xaml)：切换按钮、状态显示、任务列表。
 - [ParamsViewModel](../src/AutomatedLine.Ui/ViewModels/ParamsViewModel.cs) / [AppOptions](../src/AutomatedLine.Application/Configuration/AppOptions.cs)：动态编辑与默认参数。
 - [ErpImportTests](../tests/AutomatedLine.Tests/ErpImportTests.cs)：临时磁盘文件、非法/重复行、暂停恢复、清理失败回执、编码和宿主收尾回归。
+
+## 已完成记录清理后的再次接收
+
+独立后台默认在Completed完成60秒后、每10秒检查时批量删除任务记录，并清匹配的内存引用；没有永久去重表。任务仍在内存时继续按版号+序号拒绝重复，删除后可重新接收，生成新RuntimeId、锁定当时最新工艺并追加入队尾。未曾接收、因重复留在文件的行随后也会自动接收，不要求重新写文件。已接收但文件清理失败的行仍受原回执保护，避免重复提交同一回执。接收本身仍遵守ERP监听开关，自动清理不受该开关及线路状态影响。详见[自动清理说明](已完成任务自动清理.md)。

@@ -69,20 +69,21 @@ public sealed class DeviceRegistry
     }
 
     /// <summary>
-    /// 清除所有设备对指定工件的引用（人工删除任务时调用，避免悬挂引用把设备占死）。
+    /// 清除所有设备对指定工件的引用；用于人工删除和已完成自动清理，原子保留后来放入的新对象。
     /// </summary>
     /// <param name="workpieceRuntimeId">工件运行期标识</param>
-    public void ClearWorkpiece(Guid workpieceRuntimeId)
+    /// <returns>实际清除的设备引用数量。</returns>
+    public int ClearWorkpiece(Guid workpieceRuntimeId)
     {
+        var cleared = 0;
         lock (_sync)
         {
             foreach (var device in _devices.Values)
             {
-                if (device.CurrentWorkpiece?.Id == workpieceRuntimeId)
-                {
-                    device.CurrentWorkpiece = null;
-                }
+                var observed = device.CurrentWorkpiece;
+                if (observed?.Id == workpieceRuntimeId && device.TryClearWorkpiece(observed)) cleared++;
             }
         }
+        return cleared;
     }
 }

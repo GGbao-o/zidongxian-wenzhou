@@ -176,6 +176,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<CraneStateCollector>();
         services.AddHostedService(sp => sp.GetRequiredService<CraneStateCollector>());
 
+        // 独立宿主循环：暂停线路或切换页面均不停止完成记录清理，不使用任何PLC驱动。
+        services.AddHostedService<CompletedTaskCleanupService>();
+
         // 配置装载、配置存储（CRUD）与冷启动核对
         services.AddSingleton<IConfigurationLoader, ConfigurationLoader>();
         services.AddSingleton<IConfigurationStore, ConfigurationStore>();

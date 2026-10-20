@@ -519,6 +519,32 @@ public sealed class ErpImportTests
         Assert.Equal(new[] { 1, 2 }, fixture.Manager.Snapshot().Select(t => t.Info.SerialNo));
     }
 
+    /// <summary>文件里因重复保留的行，在旧Completed记录删除后可以自动再次接收并消耗。</summary>
+    /// <returns>异步真实文件接收验证任务。</returns>
+    [Fact]
+    public async Task CompletedCleanup_AllowsRetainedDuplicateLineToBeReceivedAgain()
+    {
+        await using var fixture = new Fixture();
+        var old = fixture.Manager.TryAddImported(Info(1))!;
+        old.Runtime.MarkCompleted(DateTimeOffset.UtcNow.AddSeconds(-61));
+        await File.WriteAllLinesAsync(fixture.Path, new[] { Row(1) });
+        await fixture.Service.StartAsync(default);
+        await Until(() => fixture.Logger.Messages.Any(message => message.Contains("版号和序号重复")));
+        Assert.Same(old, Assert.Single(fixture.Manager.Snapshot()));
+
+        Assert.Single(fixture.Manager.RemoveCompleted(DateTimeOffset.UtcNow.AddSeconds(-60), new DeviceRegistry(), new CraneRegistry()));
+        await Until(() => fixture.Manager.Snapshot().Any(task => task.Id != old.Id) && fixture.File.WriteCount >= 1);
+        fixture.Service.SetListening(false);
+        await fixture.Service.StopAsync(default);
+        var next = Assert.Single(fixture.Manager.Snapshot());
+        Assert.NotEqual(old.Id, next.Id);
+        Assert.Equal(old.Info.PlateNo, next.Info.PlateNo);
+        Assert.Equal(old.Info.SerialNo, next.Info.SerialNo);
+        Assert.Equal(WorkpieceState.Waiting, next.Runtime.TaskState);
+        Assert.True(next.Runtime.QueueOrder > old.Runtime.QueueOrder);
+        Assert.Empty(await File.ReadAllLinesAsync(fixture.Path));
+    }
+
     private static WorkpieceInfo Info(int serial)
     {
         Assert.True(ErpJobParser.TryParse(Row(serial), out var info, out _));

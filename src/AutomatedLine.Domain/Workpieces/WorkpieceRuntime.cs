@@ -19,6 +19,27 @@ public sealed class WorkpieceRuntime
     /// <summary>任务状态 backing 字段（int，供 Interlocked/Volatile 使用）。</summary>
     private int _taskState = (int)WorkpieceState.Created;
 
+    /// <summary>完成时间的UTC ticks；-1表示尚未通过正常完成入口记录，避免未知时间的任务被自动删除。</summary>
+    private long _completedAtUtcTicks = -1;
+
+    /// <summary>工件最终完成时间；仅供完成记录保留期限使用，不是每段搬运的结束时间。</summary>
+    public DateTimeOffset? CompletedAtUtc
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _completedAtUtcTicks);
+            return ticks < 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
+    /// <summary>在最终收尾成功时记录完成时间并发布Completed，保证清理线程不会先看到完成状态而缺少时间。</summary>
+    /// <param name="completedAt">最终完成时刻；按UTC保存。</param>
+    public void MarkCompleted(DateTimeOffset completedAt)
+    {
+        Interlocked.Exchange(ref _completedAtUtcTicks, completedAt.UtcDateTime.Ticks);
+        TaskState = WorkpieceState.Completed;
+    }
+
     /// <summary>当前工序。完成一道搬运后由状态机在放料确认时更新。</summary>
     public ProcessType CurrentProcess
     {

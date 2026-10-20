@@ -76,7 +76,20 @@ public sealed class Crane
     /// 当前工件。只读派生缓存，权威位置是 <see cref="WorkpieceRuntime.CurrentLocation"/>，
     /// 只在取放料确认时由状态机同步。
     /// </summary>
-    public WorkpieceTask? CurrentWorkpiece { get; internal set; }
+    public WorkpieceTask? CurrentWorkpiece
+    {
+        get => Volatile.Read(ref _currentWorkpiece);
+        internal set => Volatile.Write(ref _currentWorkpiece, value);
+    }
+
+    // 自动清理只撤销观察到的旧引用，不覆盖状态机后来交接的新工件。
+    private WorkpieceTask? _currentWorkpiece;
+
+    /// <summary>按对象原子清空旧工件引用，不能清除后来开始搬运的工件。</summary>
+    /// <param name="expected">先前读取且身份已匹配的工件对象。</param>
+    /// <returns>成功清空返回true；当前对象已变化返回false。</returns>
+    internal bool TryClearWorkpiece(WorkpieceTask expected)
+        => ReferenceEquals(Interlocked.CompareExchange(ref _currentWorkpiece, null, expected), expected);
 
     /// <summary>运行态（当前任务、状态、步骤、持有区间）。</summary>
     public CraneRuntime Runtime { get; } = new();

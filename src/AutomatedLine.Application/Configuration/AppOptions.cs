@@ -16,6 +16,9 @@ public sealed class AppOptions
     /// <summary>ERP文件接收参数；合法工件按文件行序自动启动入队，不改变线路开关。</summary>
     public ErpImportOptions ErpImport { get; set; } = new();
 
+    /// <summary>最终已完成工件的内存清理策略；不清理其他状态，不保留额外去重记录。</summary>
+    public CompletedTaskCleanupOptions CompletedTaskCleanup { get; set; } = new();
+
     /// <summary>采集类参数。</summary>
     public CollectionOptions Collection { get; set; } = new();
 
@@ -33,6 +36,19 @@ public sealed class AppOptions
 
     /// <summary>日志类参数。</summary>
     public LoggingOptions Logging { get; set; } = new();
+}
+
+/// <summary>已完成任务自动清理参数；每轮读取最新配置，与页面及线路运行状态无关。</summary>
+public sealed class CompletedTaskCleanupOptions
+{
+    /// <summary>是否自动删除已完成记录；默认启用。</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>完成记录至少保留的秒数，默认60；0表示下轮检查即可清理，负数禁止清理。</summary>
+    public int RetentionSeconds { get; set; } = 60;
+
+    /// <summary>每轮检查结束后的等待秒数，默认10；须为正数且可换算为Int32毫秒。</summary>
+    public int CheckIntervalSeconds { get; set; } = 10;
 }
 
 /// <summary>手动操作防误触参数，仅用于页面确认，不改变自动搬运或底层运动。</summary>

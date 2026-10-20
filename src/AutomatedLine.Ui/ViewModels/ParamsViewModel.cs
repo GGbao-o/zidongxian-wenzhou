@@ -143,6 +143,12 @@ public partial class ParamsViewModel : ObservableObject
         stateMachine.Items.Add(IntItem("取料无板每次下降(mm)", () => _options.StateMachine.PickPlateStepMm, v => _options.StateMachine.PickPlateStepMm = v));
         Categories.Add(stateMachine);
 
+        var cleanup = new ParamCategoryViewModel("完成任务清理", "自动删除最终已完成记录；删除后允许ERP同版号同序号再次接收");
+        cleanup.Items.Add(IntItem("启用自动清理(1开/0关)", () => _options.CompletedTaskCleanup.Enabled ? 1 : 0, v => _options.CompletedTaskCleanup.Enabled = v == 1));
+        cleanup.Items.Add(IntItem("完成保留时间(秒)", () => _options.CompletedTaskCleanup.RetentionSeconds, v => _options.CompletedTaskCleanup.RetentionSeconds = v));
+        cleanup.Items.Add(IntItem("检查间隔(秒)", () => _options.CompletedTaskCleanup.CheckIntervalSeconds, v => _options.CompletedTaskCleanup.CheckIntervalSeconds = v));
+        Categories.Add(cleanup);
+
         // 斜床搬运参数：每台斜床一份（顶尖距离 / 大孔 / 小孔偏移），保存到 App:Transfer
         var lathes = _deviceRegistry.Snapshot()
             .Where(d => d.Type == DeviceType.LatheMachine)

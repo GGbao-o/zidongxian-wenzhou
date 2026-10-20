@@ -50,7 +50,20 @@ public abstract class DeviceBase
     /// 当前工件。这是**只读派生缓存**，不是权威状态：
     /// 权威状态是 <see cref="WorkpieceRuntime.CurrentLocation"/>，此处只在取放料确认时由天车状态机同步。
     /// </summary>
-    public WorkpieceTask? CurrentWorkpiece { get; internal set; }
+    public WorkpieceTask? CurrentWorkpiece
+    {
+        get => Volatile.Read(ref _currentWorkpiece);
+        internal set => Volatile.Write(ref _currentWorkpiece, value);
+    }
+
+    // 清理与放料可能并发：CAS必须与普通赋值操作同一个字段，才能保住后到的新工件。
+    private WorkpieceTask? _currentWorkpiece;
+
+    /// <summary>仅当当前引用仍是读取到的旧对象时清空，避免自动清理误清下一个工件。</summary>
+    /// <param name="expected">先前读取且身份已匹配的工件对象。</param>
+    /// <returns>成功清空返回true；已换成其他对象返回false。</returns>
+    internal bool TryClearWorkpiece(WorkpieceTask expected)
+        => ReferenceEquals(Interlocked.CompareExchange(ref _currentWorkpiece, null, expected), expected);
 
     /// <summary>
     /// 构造函数。

@@ -443,9 +443,9 @@ public sealed class CraneStateMachine
             crane.Runtime.State = CraneState.Idle;
             crane.Runtime.LockedInterval = null;
 
-            wp.Runtime.TaskState = task.TargetProcess == ProcessType.Unloading
-                ? WorkpieceState.Completed
-                : WorkpieceState.Waiting;
+            // 完成时间与最终状态一起发布；中间工序仍回Waiting，不能被完成记录清理服务处理。
+            if (task.TargetProcess == ProcessType.Unloading) wp.Runtime.MarkCompleted(DateTimeOffset.UtcNow);
+            else wp.Runtime.TaskState = WorkpieceState.Waiting;
 
             ctx.LogStep($"收尾：工件状态置 {wp.Runtime.TaskState}（目标工序={task.TargetProcess}）");
 

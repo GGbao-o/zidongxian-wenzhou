@@ -580,6 +580,7 @@ public class CraneStateMachineTests
         Assert.Same(wp, target.CurrentWorkpiece);
         Assert.Equal(WorkpieceLocation.AtDevice(target.Id), wp.Runtime.CurrentLocation);
         Assert.Equal(process == ProcessType.Unloading ? WorkpieceState.Completed : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Equal(process == ProcessType.Unloading, wp.Runtime.CompletedAtUtc.HasValue);
         Assert.True(h.Crane.IsIdle);
         Assert.Null(h.Crane.Runtime.LockedInterval);
         Assert.False(h.Row.IsHeld(task.TaskId));
