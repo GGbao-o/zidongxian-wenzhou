@@ -1,0 +1,278 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Sockets;
+using System.Reflection;
+using AutomatedLine.Application.Abstractions;
+using AutomatedLine.Infrastructure.Communication;
+using AutomatedLine.Tests.Fakes;
+
+namespace AutomatedLine.Tests;
+
+/// <summary>通过本机Modbus服务核对真实运动轮询的位置容差、Busy和分阶段触发，不访问现场PLC。</summary>
+public sealed class CraneMotionCompletionTests
+{
+    /// <summary>默认30mm边界包含正负30，31mm即使已停止也不能到位；Busy=1同样不能到位。</summary>
+    /// <param name="offset">X坐标与目标的差值。</param>
+    /// <param name="busy">X轴是否一直运动中。</param>
+    /// <param name="expected">预期命令结果。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(-30, false, CraneCommandCode.InPosition)]
+    [InlineData(30, false, CraneCommandCode.InPosition)]
+    [InlineData(-31, false, CraneCommandCode.Timeout)]
+    [InlineData(31, false, CraneCommandCode.Timeout)]
+    [InlineData(0, true, CraneCommandCode.Timeout)]
+    public async Task Poll_RequiresBothPositionAndStopped(int offset, bool busy, CraneCommandCode expected)
+    {
+        await using var h = new MotionPeer(timeoutMs: 350);
+        h.OnCoil = _ => new byte[] { 1, 1, busy ? (byte)1 : (byte)0 };
+        var result = await h.Poll(1000 + offset, -1, -1);
+        Assert.Equal(expected, result.Code);
+        Assert.NotEmpty(h.CoilReads);
+        Assert.All(h.CoilReads, address => Assert.Equal(12819, address));
+        Assert.Contains("Busy X=", result.Message);
+    }
+
+    /// <summary>逐轴读取Busy直到停止；未参与轴完全不读，非法容差仍按新的30mm兜底。</summary>
+    /// <param name="axis">唯一参与运动的轴。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Poll_ReadsOnlyParticipatingAxisAndWaitsForBusyZero(int axis)
+    {
+        await using var h = new MotionPeer(timeoutMs: 3000, tolerance: 0);
+        var reads = 0;
+        h.OnCoil = _ => new byte[] { 1, 1, ++reads < 3 ? (byte)1 : (byte)0 };
+        var targets = new[] { -1, -1, -1 };
+        targets[axis] = (axis + 1) * 1000 + 30;
+        var result = await h.Poll(targets[0], targets[1], targets[2]);
+        Assert.Equal(CraneCommandCode.InPosition, result.Code);
+        Assert.Equal(3, reads);
+        Assert.All(h.CoilReads, address => Assert.Equal(new[] { 12819, 12824, 12829 }[axis], address));
+    }
+
+    /// <summary>绝对与相对入口共用新判据；反馈失败仍返回通信失败，不能当Busy=0。</summary>
+    /// <param name="relative">是否从相对移动入口调用。</param>
+    /// <param name="failBusy">是否让Busy读取返回Modbus异常。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task MovementEntrypoints_UseLiveBusyAndPropagateReadFailure(bool relative, bool failBusy)
+    {
+        await using var h = new MotionPeer();
+        h.OnCoil = _ => failBusy ? new byte[] { 0x81, 2 } : new byte[] { 1, 1, 0 };
+        var result = relative
+            ? await h.Service.MoveRelativeAsync(30, 0, 0)
+            : await h.Service.MoveAbsoluteAsync(1030, 2000, 3000);
+        // 客户端对异常报文断线，沿用原FailCommunication映射为NotConnected。
+        Assert.Equal(failBusy ? CraneCommandCode.NotConnected : CraneCommandCode.InPosition, result.Code);
+        Assert.Contains(12819, h.CoilReads);
+        if (relative) Assert.All(h.CoilReads, address => Assert.Equal(12819, address));
+        else if (!failBusy) Assert.Equal(new[] { 12819, 12824, 12829 }, h.CoilReads.ToArray());
+        // 运动结束或失败仍执行原触发位复位。
+        Assert.Contains((4522, 0), h.Writes);
+    }
+
+    /// <summary>上升/下降阶段先确认第一组轴Busy=0，才允许触发后一组。</summary>
+    /// <param name="direction">1先XY后Z，2先Z后XY。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task MovementStages_WaitForFirstStageStopped(int direction)
+    {
+        await using var h = new MotionPeer();
+        var firstCoil = direction == 1 ? 12819 : 12829;
+        var laterTrigger = direction == 1 ? 4520 : 4522;
+        var firstReads = 0;
+        h.OnCoil = address =>
+        {
+            if (address == firstCoil && ++firstReads == 1)
+            {
+                Assert.DoesNotContain((laterTrigger, 2), h.Writes);
+                return new byte[] { 1, 1, 1 };
+            }
+            return new byte[] { 1, 1, 0 };
+        };
+        var result = await h.Service.MoveAsync(1000, 2000, 3000, 1000, 2000, 3000, true, direction);
+        Assert.Equal(CraneCommandCode.InPosition, result.Code);
+        Assert.True(firstReads >= 2);
+        Assert.Contains((laterTrigger, 2), h.Writes);
+        Assert.Contains(direction == 1 ? 12824 : 12829, h.CoilReads);
+    }
+
+    /// <summary>完整状态采集包含三个Busy；单点失败仅变为未知，其余状态继续发布。</summary>
+    /// <param name="failedAddress">模拟返回异常的Busy地址，-1表示全部读取成功。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(12819)]
+    [InlineData(12824)]
+    [InlineData(12829)]
+    public async Task ReadStatus_CollectsBusyAndPreservesUnknownPerPoint(int failedAddress)
+    {
+        await using var h = new MotionPeer();
+        h.OnCoil = address => address == failedAddress ? new byte[] { 0x81, 2 }
+            : new byte[] { 1, 1, address == 12824 ? (byte)0 : (byte)1 };
+        var status = await h.Service.ReadStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal(failedAddress == 12819 ? null : (bool?)true, status.XBusy);
+        Assert.Equal(failedAddress == 12824 ? null : (bool?)false, status.YBusy);
+        Assert.Equal(failedAddress == 12829 ? null : (bool?)true, status.ZBusy);
+        Assert.Equal(1000, status.XEncoder);
+        Assert.True(status.HasPlate);
+        Assert.Equal(12, h.CoilReads.Count);
+        Assert.Equal(new[] { 12819, 12824, 12829 }, h.CoilReads.TakeLast(3));
+    }
+
+    /// <summary>等待Busy停止时仍响应当前任务取消。</summary>
+    /// <returns>异步验证任务。</returns>
+    [Fact]
+    public async Task Poll_CancellationStillPropagates()
+    {
+        await using var h = new MotionPeer();
+        using var cancel = new CancellationTokenSource();
+        h.OnCoil = _ => { cancel.Cancel(); return new byte[] { 1, 1, 1 }; };
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Poll(1000, -1, -1, cancel.Token));
+    }
+
+    /// <summary>X2特殊下压判据保留15mm容差，优先于普通Busy联合到位。</summary>
+    /// <param name="offset">下压坐标与目标的差值。</param>
+    /// <param name="expected">预期下压结果。</param>
+    /// <returns>异步验证任务。</returns>
+    [Theory]
+    [InlineData(15, CraneCommandCode.PressureReached)]
+    [InlineData(16, CraneCommandCode.PressureOutOfRange)]
+    public async Task PressureStop_PreservesExistingTolerance(int offset, CraneCommandCode expected)
+    {
+        await using var h = new MotionPeer();
+        h.OnCoil = _ => new byte[] { 1, 1, 1 };
+        var result = await h.Poll(-1, -1, 3000 + offset, watchPressure: true);
+        Assert.Equal(expected, result.Code);
+        Assert.Equal(new[] { 63490 }, h.CoilReads.ToArray());
+        Assert.Contains((4518, 2), h.Writes);
+        Assert.Contains((4514, 2), h.Writes);
+    }
+
+    /// <summary>只模拟本机请求应答；驱动、坐标解析和轮询均使用生产代码。</summary>
+    private sealed class MotionPeer : IAsyncDisposable
+    {
+        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _lifetime = new(TimeSpan.FromSeconds(15));
+        private readonly ModbusTcpClient _client;
+        private readonly Task _server;
+        /// <summary>连接本机服务的生产天车驱动。</summary>
+        public CraneService Service { get; }
+        /// <summary>实际收到的线圈读取地址。</summary>
+        public ConcurrentQueue<int> CoilReads { get; } = new();
+        /// <summary>实际收到的单寄存器写入。</summary>
+        public ConcurrentQueue<(int Address, int Value)> Writes { get; } = new();
+        /// <summary>按线圈地址返回正常或异常PDU，模拟现场运动反馈。</summary>
+        public Func<int, byte[]> OnCoil { get; set; } = _ => new byte[] { 1, 1, 0 };
+
+        /// <summary>装配真实驱动与随机回环端口，不启动业务宿主。</summary>
+        /// <param name="timeoutMs">单次运动轮询期限。</param>
+        /// <param name="tolerance">覆盖容差；null使用类型默认值，0验证非法配置兜底。</param>
+        public MotionPeer(int timeoutMs = 5000, int? tolerance = null)
+        {
+            _listener.Start();
+            _client = new ModbusTcpClient("127.0.0.1", ((IPEndPoint)_listener.LocalEndpoint).Port, timeoutMs: 1000);
+            var config = new FakeConfigService();
+            config.Options.Crane.MoveTimeoutMs = timeoutMs;
+            if (tolerance.HasValue) config.Options.Crane.PositionToleranceMm = tolerance.Value;
+            Service = new CraneService(1, "运动测试车", "127.0.0.1", new TestLogger(), config);
+            var field = typeof(CraneService).GetField("_client", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            ((ModbusTcpClient)field.GetValue(Service)!).Dispose();
+            field.SetValue(Service, _client);
+            _server = RespondAsync();
+        }
+
+        /// <summary>直接验证生产轮询的判定边界，省去无关运动脉冲耗时。</summary>
+        /// <param name="x">X目标，-1跳过。</param>
+        /// <param name="y">Y目标，-1跳过。</param>
+        /// <param name="z">Z目标，-1跳过。</param>
+        /// <param name="token">当前执行令牌。</param>
+        /// <param name="watchPressure">是否保留X2下压监视。</param>
+        /// <returns>生产方法的轮询结果。</returns>
+        public Task<CraneCommandResult> Poll(int x, int y, int z, CancellationToken token = default, bool watchPressure = false)
+            => (Task<CraneCommandResult>)typeof(CraneService)
+                .GetMethod("PollAxesAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(Service, new object[] { x, y, z, true, watchPressure, token })!;
+
+        private async Task RespondAsync()
+        {
+            try
+            {
+                while (!_lifetime.IsCancellationRequested)
+                {
+                    using var peer = await _listener.AcceptTcpClientAsync(_lifetime.Token);
+                    try { await RespondOnConnectionAsync(peer.GetStream()); }
+                    catch (IOException) when (!_lifetime.IsCancellationRequested)
+                    {
+                        // 异常应答会让生产客户端断线；继续接受运动finally复位触发位的新连接。
+                    }
+                }
+            }
+            catch (Exception ex) when (_lifetime.IsCancellationRequested && ex is OperationCanceledException or IOException or SocketException or ObjectDisposedException) { }
+        }
+
+        private async Task RespondOnConnectionAsync(NetworkStream stream)
+        {
+            while (!_lifetime.IsCancellationRequested)
+            {
+                var header = new byte[7];
+                await stream.ReadExactlyAsync(header, _lifetime.Token);
+                var pdu = new byte[(header[4] << 8 | header[5]) - 1];
+                await stream.ReadExactlyAsync(pdu, _lifetime.Token);
+                var address = pdu[1] << 8 | pdu[2];
+                byte[] body;
+                if (pdu[0] == 1)
+                {
+                    Assert.Equal(1, pdu[3] << 8 | pdu[4]);
+                    CoilReads.Enqueue(address);
+                    body = OnCoil(address);
+                }
+                else if (pdu[0] == 3)
+                {
+                    var count = pdu[3] << 8 | pdu[4];
+                    body = new byte[2 + count * 2];
+                    body[0] = 3;
+                    body[1] = (byte)(count * 2);
+                    if (address == 5000)
+                    {
+                        foreach (var (offset, value) in new[] { (14, 1000), (18, 1000), (20, 2000), (22, 2000), (23, 3000), (25, 3000) })
+                        {
+                            body[2 + offset * 2] = (byte)(value >> 8);
+                            body[3 + offset * 2] = (byte)value;
+                        }
+                    }
+                }
+                else
+                {
+                    Assert.Contains(pdu[0], new byte[] { 6, 16 });
+                    body = pdu.Take(5).ToArray();
+                    if (pdu[0] == 6) Writes.Enqueue((address, pdu[3] << 8 | pdu[4]));
+                }
+                header[4] = 0;
+                header[5] = (byte)(body.Length + 1);
+                await stream.WriteAsync(header.Concat(body).ToArray(), _lifetime.Token);
+            }
+        }
+
+        /// <summary>关闭本机通信并等待应答循环退出，防止测试遗留任务。</summary>
+        /// <returns>异步释放任务。</returns>
+        public async ValueTask DisposeAsync()
+        {
+            await _lifetime.CancelAsync();
+            _client.Dispose();
+            _listener.Stop();
+            try { await _server.WaitAsync(TimeSpan.FromSeconds(3)); }
+            finally { _lifetime.Dispose(); }
+        }
+    }
+}
