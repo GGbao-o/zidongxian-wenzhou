@@ -155,10 +155,11 @@ public sealed class TransferContext
         //获取目标位置与当前编码器位置的差值
         var errorX = (long)ix - status.XEncoder;
         var errorY = (long)iy - status.YEncoder;
-        //判断差值是否大于配置的5mm
+        //判断差值是否大于配置的5mm 大于了话需要微调 dx dy就是差值 相对位移需要走的值
         var dx = Math.Abs(errorX) > tolerance ? checked((int)errorX) : 0;
         var dy = Math.Abs(errorY) > tolerance ? checked((int)errorY) : 0;
         LogStep($"XY微调检查：编码器X={status.XEncoder} Y={status.YEncoder}，目标X={ix} Y={iy}，绝对误差X={Math.Abs(errorX)} Y={Math.Abs(errorY)}mm，阈值={tolerance}mm；修正量dX={dx} dY={dy} dZ=0");
+        //说明不需要微调
         if (dx == 0 && dy == 0)
         {
             LogStep("XY微调：误差未超过阈值，直接继续，不补发运动");

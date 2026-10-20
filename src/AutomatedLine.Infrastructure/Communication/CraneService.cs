@@ -332,7 +332,7 @@ public sealed class CraneService : ICraneDriver
         {
             var s = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
 
-            // 以显示值为基准：目标 = 显示值 + 相对值（0 的轴不动）
+            // 以显示值为基准：目标 = 显示值 + 相对值（0 的轴不动）    dx/dy/dz=0 这个target值计时-1 代表这个轴不动
             var targetX = dx != 0 ? s.XPosition + dx : -1;
             var targetY = dy != 0 ? s.YPosition + dy : -1;
             var targetZ = dz != 0 ? s.ZPosition + dz : -1;
@@ -341,6 +341,7 @@ public sealed class CraneService : ICraneDriver
 
             _logger.Info(LogCategory.Operation,
                 $"天车[{_name}] 相对运动换算：增量XYZ=({dx},{dy},{dz})，当前显示XYZ=({s.XPosition},{s.YPosition},{s.ZPosition})，显示目标XYZ=({targetX},{targetY},{targetZ})；-1表示该轴跳过，Z方向={zDirection}(1下降/2上升/0不变)");
+            //相对运动  轮询显示值
             return await MoveAsync(targetX, targetY, targetZ, targetX, targetY, targetZ, pollEncoder: false, zDirection, cancellationToken).ConfigureAwait(false);
         }
         //OperationCanceledException：表示"调用方主动取消了"，这不是一个失败结果，而是一个控制信号。它必须向上传播，让调用方（或 Task 调度层）知道这个任务是"被取消"而不是"执行失败"。
