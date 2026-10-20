@@ -34,7 +34,7 @@ public class BoringHandshakeFlowTests
             store.Devices.Add(new DeviceConfigDto { Id = 1, PositionX = 1000, PositionY = 0, PositionZ = 500 });
             var options = new AppOptions();
             options.StateMachine.HandshakeTimeoutMs = 0;
-            var wp = new WorkpieceTask(new WorkpieceInfo { Length = 1200.4, Diameter = 180.6, PlugThickness = 12.7 });
+            var wp = new WorkpieceTask(new WorkpieceInfo { Length = 1200.4, Diameter = 180.6, PlugHole = 70, PlugThickness = 12.7 });
             Context = new TransferContext(new Crane(1, 1, "天车1") { SafeZ = 500 }, wp, registry, store, options, new TestLogger());
             SetRequests(true);
         }
@@ -75,11 +75,44 @@ public class BoringHandshakeFlowTests
         await h.Run(pick, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(pick ? "UnloadDone=1" : "LoadDone=1", h.Driver.Writes.Last());
         Assert.Equal(pick, h.Context.MagnetCommandStarted);
-        Assert.Equal(pick ? new[] { "UnloadDone" } : new[] { "Length", "Diameter", "PlugThickness", "DataSentDone", "LoadDone" },
+        Assert.Equal(pick ? new[] { "UnloadDone" } : new[] { "Length", "Diameter", "BorePlug", "PlugThickness", "DataSentDone", "LoadDone" },
             h.Driver.Writes.Select(w => w.Split('=')[0]));
         Assert.Equal(1200.4, h.Context.Workpiece.Info.Length);
         Assert.Equal(180.6, h.Context.Workpiece.Info.Diameter);
         Assert.Equal(12.7, h.Context.Workpiece.Info.PlugThickness);
+        if (!pick) Assert.Contains("BorePlug=70", h.Driver.Writes);
+    }
+
+    /// <summary>305应答未完成时禁止写剩余参数、数据完成或开始运动，避免PLC使用不完整数据。</summary>
+    /// <returns>异步验证任务。</returns>
+    [Fact]
+    public async Task BorePlug_PendingAcknowledgement_BlocksDataDone()
+    {
+        var h = new Harness();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var acknowledged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.Driver.OnWrite = (point, _, token) =>
+        {
+            if (point != "BorePlug") return Task.CompletedTask;
+            started.SetResult();
+            return acknowledged.Task.WaitAsync(token);
+        };
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var placing = h.Run(false, guard.Token);
+        await started.Task.WaitAsync(guard.Token);
+        try
+        {
+            Assert.False(placing.IsCompleted);
+            Assert.DoesNotContain("PlugThickness=12.7", h.Driver.Writes);
+            Assert.DoesNotContain("DataSentDone=1", h.Driver.Writes);
+            Assert.Empty(h.Crane.Actions);
+        }
+        finally
+        {
+            acknowledged.TrySetResult();
+            await placing.WaitAsync(guard.Token);
+        }
+        Assert.Contains("DataSentDone=1", h.Driver.Writes);
     }
 
     /// <summary>设备未请求时禁止动作，仍按原期限报错。</summary>
@@ -134,12 +167,17 @@ public class BoringHandshakeFlowTests
     }
 
     /// <summary>参数失败不能发送数据完成或开始运动。</summary>
+    /// <param name="point">模拟写入失败的加工参数。</param>
     /// <returns>异步验证任务。</returns>
-    [Fact]
-    public async Task ParameterFailure_DoesNotPublishDataDone()
+    [Theory]
+    [InlineData("Length")]
+    [InlineData("Diameter")]
+    [InlineData("BorePlug")]
+    [InlineData("PlugThickness")]
+    public async Task ParameterFailure_DoesNotPublishDataDone(string point)
     {
         var h = new Harness();
-        h.Driver.OnWrite = (point, _, _) => point == "Diameter"
+        h.Driver.OnWrite = (name, _, _) => name == point
             ? Task.FromException(new IOException("模拟参数写入失败")) : Task.CompletedTask;
         await Assert.ThrowsAsync<IOException>(() => h.Run(false, CancellationToken.None));
         Assert.DoesNotContain("DataSentDone=1", h.Driver.Writes);

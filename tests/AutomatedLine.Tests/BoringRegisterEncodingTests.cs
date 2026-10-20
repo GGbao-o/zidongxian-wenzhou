@@ -6,7 +6,7 @@ using AutomatedLine.Tests.Fakes;
 
 namespace AutomatedLine.Tests;
 
-/// <summary>用本机TCP桩核对双头镗站号11、FC03采集及三参数FC06编码，不访问现场PLC。</summary>
+/// <summary>用本机TCP桩核对双头镗站号11、FC03采集及四参数FC06编码，不访问现场PLC。</summary>
 public class BoringRegisterEncodingTests
 {
     /// <summary>真实Modbus采集只读取三个请求，避免向已删除的卡钳地址发送请求。</summary>
@@ -66,6 +66,8 @@ public class BoringRegisterEncodingTests
     [Theory]
     [InlineData("Length", 301, 1200.4, 1200)]
     [InlineData("Diameter", 303, 180.6, 1806)]
+    [InlineData("BorePlug", 305, 70, 70)]
+    [InlineData("BorePlug", 305, 100, 100)]
     [InlineData("PlugThickness", 309, 12.7, 13)]
     [InlineData("Length", 301, 1200.5, 1200)]
     [InlineData("Diameter", 303, 180.65, 1806)]

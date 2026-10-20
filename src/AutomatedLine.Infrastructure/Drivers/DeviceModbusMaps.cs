@@ -10,7 +10,7 @@ namespace AutomatedLine.Infrastructure.Drivers;
 /// </summary>
 public static class DeviceModbusMaps
 {
-    /// <summary>带托料架双头镗三个握手输入/三个输出；仅下发板长、外径、堵厚三个Word，外径倍率10。</summary>
+    /// <summary>带托料架双头镗三个握手输入/三个输出；下发板长、外径、堵孔、堵厚四个Word，外径倍率10。</summary>
     /// <returns>点位表</returns>
     public static IReadOnlyList<ModbusPoint> Boring() => new List<ModbusPoint>
     {
@@ -21,6 +21,7 @@ public static class DeviceModbusMaps
         // 写：加工参数
         new("Length", ModbusArea.HoldingRegister, BoringMachineAddress.Length, true, false, 1, RoundViaInt32: true),
         new("Diameter", ModbusArea.HoldingRegister, BoringMachineAddress.Diameter, true, false, 10, RoundViaInt32: true),
+        new("BorePlug", ModbusArea.HoldingRegister, BoringMachineAddress.BorePlug, true, false, 1, RoundViaInt32: true),
         new("PlugThickness", ModbusArea.HoldingRegister, BoringMachineAddress.PlugThickness, true, false, 1, RoundViaInt32: true),
         // 写：握手输出
         new("DataSentDone", ModbusArea.HoldingRegister, BoringMachineAddress.DataSentDone, true, true),

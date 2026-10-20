@@ -5,7 +5,7 @@ namespace AutomatedLine.Application.Transfer.Handlers;
 
 /// <summary>
 /// 带托料架双头镗：取料充磁后回升，放料退磁后回升，不使用卡钳中间握手。
-/// Z回安全高度成功后才发送取放完成；只下发板长、外径、堵厚三个加工参数。
+/// Z回安全高度成功后才发送取放完成；下发板长、外径、堵孔、堵厚四个加工参数。
 /// </summary>
 public sealed class BoringHandler : ITransferHandler
 {
@@ -67,10 +67,10 @@ public sealed class BoringHandler : ITransferHandler
         ctx.LogStep(target, "放料：开始（等设备请求数据 RequestData，12203=1）");
         await ctx.WaitDeviceAsync(target, "RequestData", true, cancellationToken).ConfigureAwait(false);
 
-        ctx.LogStep(target, "放料：下发三个加工参数（板长301、外径303、堵厚309）");
+        ctx.LogStep(target, "放料：下发四个加工参数（板长301、外径303、堵孔305=工件70/100、堵厚309）");
         await WriteParamsAsync(ctx, target, cancellationToken).ConfigureAwait(false);
 
-        ctx.LogStep(target, "放料：三个参数全部写入成功，写 数据下发完成 DataSentDone，12205=1");
+        ctx.LogStep(target, "放料：四个参数全部写入成功，写 数据下发完成 DataSentDone，12205=1");
         await ctx.WriteDeviceAsync(target, "DataSentDone", 1, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(target, "放料：等设备请求上料 RequestLoad，12207=1");
@@ -97,15 +97,18 @@ public sealed class BoringHandler : ITransferHandler
         ctx.LogStep(target, "放料：完成");
     }
 
-    /// <summary>依次下发三个原始参数；仅驱动编码Word，不修改工件数据供其他工序使用。</summary>
+    /// <summary>依次下发四个原始参数；仅驱动编码Word，不修改工件数据供其他工序使用。</summary>
     private static async Task WriteParamsAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
         var info = ctx.Workpiece.Info;
         ctx.LogStep(target, $"放料参数：Length 301，录入={info.Length}，Word={(ushort)Convert.ToInt32(info.Length)}；" +
                             $"Diameter 303，录入={info.Diameter}，倍率10，Word={(ushort)Convert.ToInt32(info.Diameter * 10)}；" +
+                            $"BorePlug 305，工件PlugHole={info.PlugHole}，倍率1，Word={(ushort)info.PlugHole}；" +
                             $"PlugThickness 309，录入={info.PlugThickness}，Word={(ushort)Convert.ToInt32(info.PlugThickness)}");
         await ctx.WriteDeviceAsync(target, "Length", info.Length, cancellationToken).ConfigureAwait(false);
         await ctx.WriteDeviceAsync(target, "Diameter", info.Diameter, cancellationToken).ConfigureAwait(false);
+        // 305明确使用工件的70/100堵孔值；等待写入应答后再继续，避免设备收到缺少第四项的数据完成信号。
+        await ctx.WriteDeviceAsync(target, "BorePlug", info.PlugHole, cancellationToken).ConfigureAwait(false);
         await ctx.WriteDeviceAsync(target, "PlugThickness", info.PlugThickness, cancellationToken).ConfigureAwait(false);
     }
 }

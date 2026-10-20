@@ -31,7 +31,7 @@ public enum ModbusArea
 /// <param name="IsBool">是否为布尔语义（寄存器按 0/1 判定）</param>
 /// <param name="Scale">工程值→原始值倍率（如 ×100 填 100；布尔/整数填 1）</param>
 /// <param name="InvertDiscreteInput">是否反转FC02离散输入；下料架允许放板信号需转换为HasMaterial，其他点默认不反转</param>
-/// <param name="RoundViaInt32">是否按协议先Convert.ToInt32再转Word；双头镗三参数启用，其他设备保持原换算</param>
+/// <param name="RoundViaInt32">是否按协议先Convert.ToInt32再转Word；双头镗四参数启用，其他设备保持原换算</param>
 public sealed record ModbusPoint(string Name, ModbusArea Area, int Address, bool Writable, bool IsBool, double Scale = 1,
     bool InvertDiscreteInput = false, bool RoundViaInt32 = false);
 

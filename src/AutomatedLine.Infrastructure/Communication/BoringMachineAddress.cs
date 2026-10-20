@@ -4,7 +4,7 @@ namespace AutomatedLine.Infrastructure.Communication;
 /// 双头镗寄存器地址（Modbus TCP）。
 /// 端口 502、站号 11 写死；IP 用数据库。
 /// 保持寄存器地址 = R 编号 × 2 + 1，下列常量均为 **0 基 PDU 地址**。
-/// 三个加工参数均为16位无符号Word：长度/堵厚舍入为整数，外径乘10后舍入，FC06单点写入。
+/// 四个加工参数均为16位无符号Word：长度/堵厚舍入为整数，外径乘10后舍入，堵孔70/100原值写入，FC06单点写入。
 /// </summary>
 public static class BoringMachineAddress
 {
@@ -20,6 +20,9 @@ public static class BoringMachineAddress
 
     /// <summary>外径（R151），Convert.ToInt32(原值×10)后转ushort，表达一位小数。</summary>
     public const int Diameter = 303;
+
+    /// <summary>堵孔（R152），使用工件PlugHole的70/100原值，与309的堵厚参数区分。</summary>
+    public const int BorePlug = 305;
 
     /// <summary>堵厚（R154），Convert.ToInt32原值后转ushort。</summary>
     public const int PlugThickness = 309;
