@@ -285,7 +285,7 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// 入线按钮（启动/暂停共用一个按钮）：
-    /// 未运行 → 先冷启动核对再启动线路（生成器等服务随之工作）；运行中 → 暂停线路（服务停止生成）。
+    /// 未运行 → 人工确认两台天车安全位置后按原流程启动，关闭提示则保持原状态；运行中 → 暂停线路。
     /// </summary>
     [RelayCommand]
     private async Task ToggleLine()
@@ -295,6 +295,9 @@ public partial class MainViewModel : ObservableObject
             _lineControl.Pause();
             return;
         }
+
+        // 只判断人工确认结果，不读取坐标；关闭或取消时连原冷启动核对也不执行。
+        if (!_dialogService.ShowLineStartConfirmation()) return;
 
         // 启动前先核对有效采集快照；现场有料但内存无数据仍只告警，保持原启动策略。
         var blocks = await _coldStartChecker.CheckAsync();

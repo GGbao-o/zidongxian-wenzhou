@@ -11,6 +11,20 @@ namespace AutomatedLine.Ui.Services;
 public class DialogService : IDialogService
 {
     /// <inheritdoc />
+    public bool ShowLineStartConfirmation()
+    {
+        // 使用确定/取消使右上角关闭与Esc均返回取消，只有明确确认才能继续启动。
+        var result = System.Windows.MessageBox.Show(
+            System.Windows.Application.Current!.MainWindow,
+            "启动线路前，请确认1号天车、2号天车均已处于安全位置。",
+            "启动线路提醒",
+            System.Windows.MessageBoxButton.OKCancel,
+            System.Windows.MessageBoxImage.Question,
+            System.Windows.MessageBoxResult.Cancel);
+        return result == System.Windows.MessageBoxResult.OK;
+    }
+
+    /// <inheritdoc />
     public bool ShowAbsoluteMovePasswordDialog(string message, string expectedPassword)
     {
         var dialog = new AbsoluteMovePasswordDialog(message, expectedPassword)

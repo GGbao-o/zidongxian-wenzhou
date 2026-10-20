@@ -9,6 +9,10 @@ namespace AutomatedLine.Ui.Services;
 /// </summary>
 public interface IDialogService
 {
+    /// <summary>启动线路前提醒人工确认1、2号天车安全位置，不读取或判断现场坐标。</summary>
+    /// <returns>仅点击确定返回true；取消、关闭或Esc返回false。</returns>
+    bool ShowLineStartConfirmation();
+
     /// <summary>弹出绝对移动密码确认框；每次重新输入，只有密码匹配且确认才放行动作。</summary>
     /// <param name="message">本次待执行的天车和目标坐标说明。</param>
     /// <param name="expectedPassword">本次从配置读取的密码，不回显或记录。</param>
