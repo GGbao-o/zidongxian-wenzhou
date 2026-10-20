@@ -42,7 +42,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
     [ObservableProperty]
     private string _printContent = string.Empty;
 
-    /// <summary>斜床工艺文本（写入斜床宏 #909，取值 1~10）。</summary>
+    /// <summary>斜床工艺文本（写入斜床宏 #909，取值 0~10）。</summary>
     [ObservableProperty]
     private string _latheMachiningModeText = string.Empty;
 

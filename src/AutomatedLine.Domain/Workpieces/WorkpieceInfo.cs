@@ -32,17 +32,17 @@ public sealed class WorkpieceInfo
     public string PrintContent { get; init; } = string.Empty;
 
     /// <summary>斜床工艺最小值。</summary>
-    public const int LatheMachiningModeMin = 1;
+    public const int LatheMachiningModeMin = 0;
 
     /// <summary>斜床工艺最大值。</summary>
     public const int LatheMachiningModeMax = 10;
 
-    /// <summary>斜床工艺默认值（= 历史上"写死 1"的行为）。</summary>
+    /// <summary>手工录入时的斜床工艺默认值。</summary>
     public const int LatheMachiningModeDefault = 1;
 
     /// <summary>
-    /// 斜床工艺（写入斜床宏 `#909 加工模式`）：**取值 1~10**，由操作员按现场工艺卡录入，
-    /// 斜床放料时**原样下发**（见 <c>LatheHandler</c>）。默认 1。
+    /// 斜床工艺（写入斜床宏 `#909 加工模式`）：**取值 0~10**，由操作员按现场工艺卡录入，
+    /// 斜床放料时**原样下发**（见 <c>LatheHandler</c>）。默认值见 <see cref="LatheMachiningModeDefault"/>。
     /// </summary>
     public int LatheMachiningMode { get; init; } = LatheMachiningModeDefault;
 

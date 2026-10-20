@@ -22,7 +22,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [ObservableProperty]
     private string _plateNo = string.Empty;
 
-    /// <summary>非负整数序号（允许0；输入用文本，组装时转int）。</summary>
+    /// <summary>手工录入的整数序号（允许负数、0和正数；输入用文本，确认时转int）。</summary>
     [ObservableProperty]
     private string _serialNo = string.Empty;
 
@@ -46,7 +46,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [ObservableProperty]
     private string _printContent = string.Empty;
 
-    /// <summary>斜床工艺（写入斜床宏 #909）：1~10。</summary>
+    /// <summary>斜床工艺（写入斜床宏 #909）：0~10。</summary>
     [ObservableProperty]
     private int _latheMachiningMode = WorkpieceInfo.LatheMachiningModeDefault;
 
@@ -108,7 +108,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 确认时解析原始文本并校验：版号非空、序号非负、直径/长度为有限正数、堵厚为有限数值、堵孔70/100、斜床工艺1~10。
+    /// 确认时解析原始文本并校验：版号非空、序号为int整数、直径/长度为有限正数、堵厚为有限数值、堵孔70/100、斜床工艺0~10。
     /// 不回写输入文本，允许编辑中的小数点、尾零保持原样。
     /// </summary>
     /// <returns>合法返回 true</returns>
@@ -122,7 +122,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
         var lengthValid = TryParseFinite(LengthText, out length);
         var thicknessValid = TryParseFinite(PlugThicknessText, out plugThickness);
         return !string.IsNullOrWhiteSpace(PlateNo)
-               && serialValid && serialNo >= 0
+               && serialValid
                && diameterValid && diameter > 0
                && lengthValid && length > 0
                && thicknessValid

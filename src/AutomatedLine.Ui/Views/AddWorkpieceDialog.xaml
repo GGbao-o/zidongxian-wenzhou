@@ -132,7 +132,7 @@
                     Margin="0,0,0,12"
                     Text="{Binding PrintContent, UpdateSourceTrigger=PropertyChanged}" />
 
-                <!--  斜床工艺：写入斜床宏 #909 加工模式，1~10  -->
+                <!--  斜床工艺：写入斜床宏 #909 加工模式，0~10  -->
                 <TextBlock
                     Grid.Row="7"
                     Grid.Column="0"
@@ -142,7 +142,7 @@
                 <ui:TextBox
                     Grid.Row="7"
                     Grid.Column="1"
-                    PlaceholderText="1~10"
+                    PlaceholderText="0~10"
                     Text="{Binding LatheMachiningMode, UpdateSourceTrigger=PropertyChanged}" />
             </Grid>
 

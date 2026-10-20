@@ -28,7 +28,7 @@ public static class ErpJobParser
             return Reject("第6列堵孔只能为70或100", out error);
         if (!int.TryParse(columns[6], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mode)
             || mode < WorkpieceInfo.LatheMachiningModeMin || mode > WorkpieceInfo.LatheMachiningModeMax)
-            return Reject("第7列斜床工艺必须为1至10的整数", out error);
+            return Reject("第7列斜床工艺必须为0至10的整数", out error);
         if (!ReadNumber(columns[7], out var thickness))
             return Reject("第8列堵厚必须为有限数值", out error);
 

@@ -68,7 +68,7 @@ public sealed class ErpImportTests
     [InlineData("X,P,1,1200,-1,70,1,25", "直径")]
     [InlineData("X,P,1,1200,Infinity,70,1,25", "直径")]
     [InlineData("X,P,1,1200,180,80,1,25", "堵孔")]
-    [InlineData("X,P,1,1200,180,70,0,25", "工艺")]
+    [InlineData("X,P,1,1200,180,70,-1,25", "工艺")]
     [InlineData("X,P,1,1200,180,70,11,25", "工艺")]
     [InlineData("X,P,1,1200,180,70,1,NaN", "堵厚")]
     [InlineData("X,P,1,1200,180,70,1,not-number", "堵厚")]
