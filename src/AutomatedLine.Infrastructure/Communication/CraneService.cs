@@ -263,8 +263,30 @@ public sealed class CraneService : ICraneDriver
             PhysicalHomeZ = await ReadCoilOrNullAsync(CraneAddress.X5_HomeZ, "X5 Z 轴物理原点", cancellationToken).ConfigureAwait(false),
             XBusy = await ReadCoilOrNullAsync(CraneAddress.XBusy, "B531 X轴运动中 Busy", cancellationToken).ConfigureAwait(false),
             YBusy = await ReadCoilOrNullAsync(CraneAddress.YBusy, "B536 Y轴运动中 Busy", cancellationToken).ConfigureAwait(false),
-            ZBusy = await ReadCoilOrNullAsync(CraneAddress.ZBusy, "B541 Z轴运动中 Busy", cancellationToken).ConfigureAwait(false)
+            ZBusy = await ReadCoilOrNullAsync(CraneAddress.ZBusy, "B541 Z轴运动中 Busy", cancellationToken).ConfigureAwait(false),
+            // 仅完整展示快照增加模式读回，运动到位轮询不额外读取这两个地址。
+            ModeCommand = await ReadModeWordOrNullAsync(CraneAddress.ModeCmd, cancellationToken).ConfigureAwait(false),
+            ManualEnable = await ReadModeWordOrNullAsync(CraneAddress.ManualMode, cancellationToken).ConfigureAwait(false)
         };
+    }
+
+    /// <summary>模式状态按Word保留原值；单点失败不丢弃已读取的坐标，也不能用0或缓存冒充反馈。</summary>
+    private async Task<int?> ReadModeWordOrNullAsync(int address, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var words = await _client.ReadRegistersAsync(address, 1, cancellationToken).ConfigureAwait(false);
+            return words[0];
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.Warn(LogCategory.Communication, $"天车[{_name}] 模式状态D{address}读取失败，本次显示未知：{ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>
@@ -400,6 +422,18 @@ public sealed class CraneService : ICraneDriver
         _manualModeSet = true;
         _logger.Info(LogCategory.Operation, $"天车[{_name}] 进入手动模式 D4001=2 D4500=2");
     }
+
+    /// <inheritdoc />
+    public Task<CraneCommandResult> SetManualModeAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync("设置手动模式（状态等待后台读回）", async () =>
+        {
+            // 仅供手动按钮显式重写；不读写_manualModeSet，保持原自动运动前置及缓存行为。
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 手动按钮设置模式：FC06 D{CraneAddress.ModeCmd}=2，等待应答");
+            await _client.WriteRegisterAsync(CraneAddress.ModeCmd, 2, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 手动按钮D{CraneAddress.ModeCmd}=2已应答；FC06 D{CraneAddress.ManualMode}=2，等待应答");
+            await _client.WriteRegisterAsync(CraneAddress.ManualMode, 2, cancellationToken).ConfigureAwait(false);
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 手动按钮D{CraneAddress.ManualMode}=2已应答，两项设置已下发，实际状态由后台采集更新");
+        });
 
     /// <summary>
     /// 设置三轴绝对速度/加速度/减速度（D2501~D2503 / D2510~D2512 / D2519~D2521）。

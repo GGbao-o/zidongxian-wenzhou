@@ -142,6 +142,11 @@ public partial class ManualOperationViewModel : ObservableObject
     /// <summary>Z 减速度。</summary>
     [ObservableProperty] private int? _zDecelDisp;
 
+    /// <summary>D4001实读模式指令，未知或快照失效时不保留旧值。</summary>
+    [ObservableProperty] private int? _modeCommand;
+    /// <summary>D4500实读手动使能，按钮写入成功不直接修改该反馈。</summary>
+    [ObservableProperty] private int? _manualEnable;
+
     // ── X 区信号（显示文本）──
     // 用文本而非 bool 的原因：线圈读取失败时值为"未知"，不能显示成 0/False
     // （按 0 显示会把通信故障误读成"无板 / 未下压"）。读到的电平显示"是/否"，失败显示"—"。
@@ -339,6 +344,8 @@ public partial class ManualOperationViewModel : ObservableObject
         XEncoder = status?.XEncoder;
         YEncoder = status?.YEncoder;
         ZEncoder = status?.ZEncoder;
+        ModeCommand = status?.ModeCommand;
+        ManualEnable = status?.ManualEnable;
         XHome = status?.XHomeCompleted;
         YHome = status?.YHomeCompleted;
         ZHome = status?.ZHomeCompleted;
@@ -463,7 +470,11 @@ public partial class ManualOperationViewModel : ObservableObject
         await FinishAsync(result);
     }
 
-    /// <summary>清除报警。</summary>
+    /// <summary>专用按钮每次重写两个手动模式指令；左侧状态等待共享后台快照更新。</summary>
+    [RelayCommand]
+    private async Task SetManualModeAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.SetManualModeAsync(id)));
+
+    /// <summary>清除PLC报警；与设置模式按钮分开，保留原命令行为。</summary>
     [RelayCommand]
     private async Task ClearAlarmAsync() => await FinishAsync(await WithCrane(id => _manualOperationService.ClearAlarmAsync(id)));
 

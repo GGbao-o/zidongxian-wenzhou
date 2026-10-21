@@ -12,6 +12,11 @@ namespace AutomatedLine.Application.Abstractions;
 /// </summary>
 public interface ICraneDriver : IPlcDriver
 {
+    /// <summary>手动按钮专用：每次依次写D4001=2、D4500=2，不使用或修改自动动作的手动前置缓存。</summary>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>两次写入应答均成功才返回成功；不代表PLC模式已读回确认。</returns>
+    Task<CraneCommandResult> SetManualModeAsync(CancellationToken cancellationToken = default);
+
     /// <summary>天车号，与 CraneConfig.Id 对应。</summary>
     int CraneId { get; }
 

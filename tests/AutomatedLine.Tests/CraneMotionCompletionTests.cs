@@ -11,6 +11,60 @@ namespace AutomatedLine.Tests;
 /// <summary>通过本机Modbus服务核对真实运动轮询的位置容差、Busy和分阶段触发，不访问现场PLC。</summary>
 public sealed class CraneMotionCompletionTests
 {
+    /// <summary>按钮不受旧手动缓存影响，连续点击始终写四帧，也不改变运动前置缓存。</summary>
+    /// <param name="cached">原运动前置是否已缓存成功。</param>
+    /// <returns>异步通信验证任务。</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetManualMode_AlwaysWritesBothWordsWithoutChangingMotionCache(bool cached)
+    {
+        await using var h = new MotionPeer();
+        var field = typeof(CraneService).GetField("_manualModeSet", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        field.SetValue(h.Service, cached);
+        Assert.True((await h.Service.SetManualModeAsync()).IsSuccess);
+        Assert.True((await h.Service.SetManualModeAsync()).IsSuccess);
+        Assert.Equal(new[] { (4001, 2), (4500, 2), (4001, 2), (4500, 2) }, h.Writes.ToArray());
+        Assert.Equal(cached, (bool)field.GetValue(h.Service)!);
+        Assert.Empty(h.CoilReads);
+    }
+
+    /// <summary>任一模式写入被PLC拒绝都不能报告成功，首项失败时禁止继续写使能。</summary>
+    /// <param name="failedAddress">PLC返回异常的模式地址。</param>
+    /// <returns>异步通信验证任务。</returns>
+    [Theory]
+    [InlineData(4001)]
+    [InlineData(4500)]
+    public async Task SetManualMode_PartialFailureIsNotSuccess(int failedAddress)
+    {
+        await using var h = new MotionPeer();
+        h.OnWrite = (address, _) => address == failedAddress ? new byte[] { 0x86, 2 } : null;
+        var result = await h.Service.SetManualModeAsync();
+        Assert.False(result.IsSuccess);
+        Assert.Equal(failedAddress == 4001 ? new[] { (4001, 2) } : new[] { (4001, 2), (4500, 2) }, h.Writes.ToArray());
+        Assert.Empty(h.CoilReads);
+    }
+
+    /// <summary>模式单点异常只将该项置未知，另一项可重连后读回，坐标和其他状态仍有效。</summary>
+    /// <param name="failedAddress">失败的模式地址，-1表示均成功。</param>
+    /// <returns>异步通信验证任务。</returns>
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(4001)]
+    [InlineData(4500)]
+    public async Task ReadStatus_ModeWordFailurePreservesOtherFeedback(int failedAddress)
+    {
+        await using var h = new MotionPeer();
+        h.OnModeRead = address => address == failedAddress ? new byte[] { 0x83, 2 } : new byte[] { 3, 2, 0, 2 };
+        var status = await h.Service.ReadStatusAsync();
+        Assert.NotNull(status);
+        Assert.Equal(1000, status.XEncoder);
+        Assert.Equal(failedAddress == 4001 ? null : (int?)2, status.ModeCommand);
+        Assert.Equal(failedAddress == 4500 ? null : (int?)2, status.ManualEnable);
+        Assert.Equal(new[] { 5000, 2501, 4001, 4500 }, h.RegisterReads.ToArray());
+        Assert.Empty(h.Writes);
+    }
+
     /// <summary>默认30mm边界包含正负30，31mm即使已停止也不能到位；Busy=1同样不能到位。</summary>
     /// <param name="offset">X坐标与目标的差值。</param>
     /// <param name="busy">X轴是否一直运动中。</param>
@@ -170,10 +224,16 @@ public sealed class CraneMotionCompletionTests
         public CraneService Service { get; }
         /// <summary>实际收到的线圈读取地址。</summary>
         public ConcurrentQueue<int> CoilReads { get; } = new();
+        /// <summary>实际收到的寄存器读取地址，区分模式显示与运动轮询。</summary>
+        public ConcurrentQueue<int> RegisterReads { get; } = new();
         /// <summary>实际收到的单寄存器写入。</summary>
         public ConcurrentQueue<(int Address, int Value)> Writes { get; } = new();
         /// <summary>按线圈地址返回正常或异常PDU，模拟现场运动反馈。</summary>
         public Func<int, byte[]> OnCoil { get; set; } = _ => new byte[] { 1, 1, 0 };
+        /// <summary>按模式地址返回正常或异常Word应答，模拟单点未知。</summary>
+        public Func<int, byte[]> OnModeRead { get; set; } = _ => new byte[] { 3, 2, 0, 2 };
+        /// <summary>按写地址和值覆盖应答；null表示正常回显。</summary>
+        public Func<int, int, byte[]?> OnWrite { get; set; } = (_, _) => null;
 
         /// <summary>装配真实驱动与随机回环端口，不启动业务宿主。</summary>
         /// <param name="timeoutMs">单次运动轮询期限。</param>
@@ -239,6 +299,7 @@ public sealed class CraneMotionCompletionTests
                 }
                 else if (pdu[0] == 3)
                 {
+                    RegisterReads.Enqueue(address);
                     var count = pdu[3] << 8 | pdu[4];
                     body = new byte[2 + count * 2];
                     body[0] = 3;
@@ -251,12 +312,22 @@ public sealed class CraneMotionCompletionTests
                             body[3 + offset * 2] = (byte)value;
                         }
                     }
+                    if (address is 4001 or 4500)
+                    {
+                        Assert.Equal(1, count);
+                        body = OnModeRead(address);
+                    }
                 }
                 else
                 {
                     Assert.Contains(pdu[0], new byte[] { 6, 16 });
                     body = pdu.Take(5).ToArray();
-                    if (pdu[0] == 6) Writes.Enqueue((address, pdu[3] << 8 | pdu[4]));
+                    if (pdu[0] == 6)
+                    {
+                        var value = pdu[3] << 8 | pdu[4];
+                        Writes.Enqueue((address, value));
+                        body = OnWrite(address, value) ?? body;
+                    }
                 }
                 header[4] = 0;
                 header[5] = (byte)(body.Length + 1);

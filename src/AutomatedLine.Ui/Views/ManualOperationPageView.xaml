@@ -245,7 +245,11 @@
                         <TextBlock
                             Margin="0,8,0,0"
                             FontWeight="SemiBold"
-                            Text="三轴运动中 Busy" />
+                            Text="模式（2为手动/使能）" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ModeCommand, StringFormat=模式指令 D4001：{0}, TargetNullValue=未知}" />
+                        <TextBlock FontFamily="Consolas" Text="{Binding ManualEnable, StringFormat=手动使能 D4500：{0}, TargetNullValue=未知}" />
+
+                        <TextBlock Margin="0,8,0,0" FontWeight="SemiBold" Text="三轴运动中 Busy" />
                         <TextBlock FontFamily="Consolas" Text="{Binding XBusyText, StringFormat=X B531（12819）：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding YBusyText, StringFormat=Y B536（12824）：{0}}" />
                         <TextBlock FontFamily="Consolas" Text="{Binding ZBusyText, StringFormat=Z B541（12829）：{0}}" />
@@ -436,6 +440,11 @@
                 <Border Width="300" Style="{StaticResource CardBorder}">
                     <StackPanel>
                         <TextBlock Style="{StaticResource CardTitle}" Text="动作" />
+                        <ui:Button
+                            Margin="0,8,0,0"
+                            Command="{Binding SetManualModeCommand}"
+                            Content="设置手动模式"
+                            Style="{StaticResource ManualAttentionButton}" />
                         <UniformGrid Margin="0,8,0,0" Columns="2">
                             <ui:Button
                                 Margin="0,0,6,6"

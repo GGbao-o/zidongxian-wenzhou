@@ -49,7 +49,7 @@ public class CraneSignedCoordinateTests
             var read = service.ReadStatusAsync(deadline.Token);
             using var peer = await listener.AcceptTcpClientAsync(deadline.Token);
             var stream = peer.GetStream();
-            for (var i = 0; i < 14; i++)
+            for (var i = 0; i < 16; i++)
             {
                 var request = new byte[12];
                 await stream.ReadExactlyAsync(request, deadline.Token);
@@ -71,12 +71,20 @@ public class CraneSignedCoordinateTests
                         body[3 + j * 2] = (byte)value;
                     }
                 }
-                else
+                else if (i < 14)
                 {
                     Assert.Equal(1, request[7]);
                     Assert.Equal(1, count);
                     if (i >= 11) Assert.Equal(new[] { 12819, 12824, 12829 }[i - 11], address);
                     body = new byte[] { 1, 1, i is 11 or 13 ? (byte)1 : (byte)0 };
+                }
+                else
+                {
+                    Assert.Equal(3, request[7]);
+                    Assert.Equal(i == 14 ? 4001 : 4500, address);
+                    Assert.Equal(1, count);
+                    // 原始Word不按bool或有符号坐标解析，保留PLC实际返回值。
+                    body = new byte[] { 3, 2, i == 14 ? (byte)0 : (byte)0x80, 2 };
                 }
                 var response = new byte[7 + body.Length];
                 request.AsSpan(0, 7).CopyTo(response);
@@ -99,6 +107,8 @@ public class CraneSignedCoordinateTests
             Assert.True(status.XBusy);
             Assert.False(status.YBusy);
             Assert.True(status.ZBusy);
+            Assert.Equal(2, status.ModeCommand);
+            Assert.Equal(32770, status.ManualEnable);
         }
         finally
         {

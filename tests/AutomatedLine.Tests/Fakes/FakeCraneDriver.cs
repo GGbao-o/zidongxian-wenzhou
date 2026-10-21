@@ -64,6 +64,14 @@ public sealed class FakeCraneDriver : ICraneDriver
     public Task DisconnectAsync(CancellationToken ct = default) => Task.CompletedTask;
 
     /// <inheritdoc />
+    public Task<CraneCommandResult> SetManualModeAsync(CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        Actions.Add("SET_MANUAL_MODE");
+        return Task.FromResult(CraneCommandResult.Ok(CraneCommandCode.Completed, "设置已下发"));
+    }
+
+    /// <inheritdoc />
     public Task<IReadOnlyDictionary<string, object?>> ReadAllSignalsAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyDictionary<string, object?>>(new Dictionary<string, object?>());
 

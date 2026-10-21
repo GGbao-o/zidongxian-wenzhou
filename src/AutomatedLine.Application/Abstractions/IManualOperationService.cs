@@ -6,6 +6,12 @@ namespace AutomatedLine.Application.Abstractions;
 /// </summary>
 public sealed class CraneStatusDto
 {
+    /// <summary>D4001模式指令实读Word；2表示手动指令，null表示本次读取未知。</summary>
+    public int? ModeCommand { get; init; }
+
+    /// <summary>D4500手动使能实读Word；2表示使能指令，null表示本次读取未知。</summary>
+    public int? ManualEnable { get; init; }
+
     /// <summary>X 显示值坐标。</summary>
     public int XDisplay { get; init; }
 
@@ -144,6 +150,12 @@ public sealed record CraneSpeedDto(
 /// </summary>
 public interface IManualOperationService
 {
+    /// <summary>手动页面专用：对所选天车重新写入D4001=2、D4500=2，不沿用运动方法缓存。</summary>
+    /// <param name="craneId">天车标识。</param>
+    /// <param name="cancellationToken">取消令牌。</param>
+    /// <returns>两次写入的执行结果；左侧状态仍由后台实读更新。</returns>
+    Task<ManualOperationResult> SetManualModeAsync(int craneId, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// 读取天车状态快照（内部会自动连接；失败返回 null）。
     /// </summary>

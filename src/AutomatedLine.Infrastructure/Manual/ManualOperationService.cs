@@ -59,6 +59,10 @@ public sealed class ManualOperationService : IManualOperationService
     }
 
     /// <inheritdoc />
+    public Task<ManualOperationResult> SetManualModeAsync(int craneId, CancellationToken cancellationToken = default)
+        => RunAsync(craneId, crane => crane.SetManualModeAsync(cancellationToken), "设置手动模式", cancellationToken);
+
+    /// <inheritdoc />
     public Task<ManualOperationResult> SetSpeedAsync(int craneId, CraneSpeedDto speed, CancellationToken cancellationToken = default)
         => RunAsync(craneId, crane => crane.SetAbsoluteSpeedAsync(
             speed.SpeedX, speed.AccelX, speed.DecelX,
