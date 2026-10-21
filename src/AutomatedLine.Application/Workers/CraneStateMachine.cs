@@ -254,7 +254,7 @@ public sealed class CraneStateMachine
             // 清理期间继续持有预约和路权，防止旧任务写0覆盖其他任务写入；清理失败也不能阻止原异常处置。
             try
             {
-                //清理一下与plc点位的握手信号
+                //清理一下与plc点位的握手信号  只有充磁了其实才会和设备交互 才会清理plc点位信号
                 await ClearFailureHandshakeAsync(crane, ctx).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -281,7 +281,10 @@ public sealed class CraneStateMachine
         }
 
         foreach (var (deviceId, role, started) in new[]
-                 { (task.SourceDeviceId, "源", ctx.SourceInteractionStarted), (task.TargetDeviceId, "目标", ctx.TargetInteractionStarted) })
+                 {
+                     (task.SourceDeviceId, "源", ctx.SourceInteractionStarted),
+                     (task.TargetDeviceId, "目标", ctx.TargetInteractionStarted)
+                 })
         {
             var device = _deviceRegistry.Get(deviceId);
             var reservations = _reservationManager.Snapshot();
@@ -410,7 +413,7 @@ public sealed class CraneStateMachine
     {
         ctx.LogStep(target, $"中转：XY → 目标上方（安全高度 Z={crane.SafeZ}）");
         var (x, y, _) = await ctx.BaseOfAsync(target, cancellationToken).ConfigureAwait(false);
-        //去目标位置
+        //去目标位置   xy是加过天车偏移的
         await ctx.MoveAbsoluteAsync(x, y, crane.SafeZ, cancellationToken).ConfigureAwait(false);
         //进行微调操作
         await ctx.RefineXyAsync(x, y, cancellationToken).ConfigureAwait(false);
