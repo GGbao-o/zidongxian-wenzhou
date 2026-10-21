@@ -71,6 +71,12 @@ public sealed class TransferContext
     /// <summary>取料阶段已开始调用充磁；仅在 PickAsync 充磁前置位，此后失败弃板，放磁后不复位。</summary>
     public bool MagnetCommandStarted { get; set; }
 
+    /// <summary>本次搬运已进入源设备取料交互；异常清握手时结合预约归属判断，不依赖易变化的工件引用。</summary>
+    internal bool SourceInteractionStarted { get; set; }
+
+    /// <summary>本次搬运已进入目标设备放料交互；目标尚未接收内存工件时也可能已经写过握手。</summary>
+    internal bool TargetInteractionStarted { get; set; }
+
     /// <summary>天车驱动。</summary>
     public ICraneDriver CraneDriver
         => _drivers.GetCrane(Crane.Id) ?? throw new InvalidOperationException($"天车 {Crane.Id} 无驱动");

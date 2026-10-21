@@ -170,6 +170,7 @@ public sealed class CraneStateMachine
             // 3) 去源设备取料阶段：  已经z回升->发下料完成了
             phase = $"取料({source.Name})";
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 阶段开始：{phase}，搬运Id={task.TaskId:N}；按源类型执行取料，完成后才交接内存工件");
+            ctx.SourceInteractionStarted = true;
             await _handlers.Get(source.Type).PickAsync(ctx, source, cancellationToken).ConfigureAwait(false);
             execution?.ThrowIfManualAbortRequested();
             //这个时候才转移设备
@@ -189,6 +190,7 @@ public sealed class CraneStateMachine
             // 5) 去目标设备放料阶段：结果：也是z回升了发过下料完成的
             phase = $"放料({target.Name})";
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 阶段开始：{phase}，搬运Id={task.TaskId:N}；按目标类型执行放料，完成后才交接内存工件");
+            ctx.TargetInteractionStarted = true;
             await _handlers.Get(target.Type).PlaceAsync(ctx, target, cancellationToken).ConfigureAwait(false);
             execution?.ThrowIfManualAbortRequested();
             target.CurrentWorkpiece = wp;
@@ -212,13 +214,13 @@ public sealed class CraneStateMachine
                 _logger.Error(LogCategory.StateMachine, abortDetail);
                 // 资源竞争回滚可能刚清掉归属；人工中止仍明确弃掉本次工件。
                 crane.Runtime.CurrentTask = task;
-                _abortCoordinator.Abort(crane, abortDetail);
+                await HandleFailureAsync(crane, ctx, abortDetail, manualAbort: true).ConfigureAwait(false);
                 throw;//外层抛出异常
             }
             //主要用于程序关闭、Worker 停止时的宿主取消  因为token是当前任务的令牌，但创建时明确关联了宿主令牌 所以程序关闭 token也失效
             var detail = BuildFailure(crane, ctx, route, phase, "任务被取消");
             _logger.Error(LogCategory.StateMachine, detail);
-            HandleFailure(crane, ctx, detail);
+            await HandleFailureAsync(crane, ctx, detail).ConfigureAwait(false);
             throw;
         }
         //状态机异常处理
@@ -231,29 +233,88 @@ public sealed class CraneStateMachine
                 var abortDetail = BuildFailure(crane, ctx, route, phase, $"人工中止当前任务；{ex.Message}", manualAbort: true);
                 _logger.Error(LogCategory.StateMachine, abortDetail, ex);
                 crane.Runtime.CurrentTask = task;
-                _abortCoordinator.Abort(crane, abortDetail);
+                await HandleFailureAsync(crane, ctx, abortDetail, manualAbort: true).ConfigureAwait(false);
                 return;
             }
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
             // PickAsync 开始调用充磁前保留工件；开始调用后（含命令或反馈失败）沿用弃板处理。
-            HandleFailure(crane, ctx, detail);
+            await HandleFailureAsync(crane, ctx, detail).ConfigureAwait(false);
         }
     }
 
     /// <summary>按 PickAsync 的充磁标记选择异常清理，初始化失败时尚未充磁，也必须保留工件。</summary>
-    private void HandleFailure(Crane crane, TransferContext? ctx, string detail)
+    private async Task HandleFailureAsync(Crane crane, TransferContext? ctx, string detail, bool manualAbort = false)
     {
-        //下发了充磁命令异常处理
-        if (ctx?.MagnetCommandStarted == true)
+        // 已接受的人工中止仍沿用弃板；普通故障只在充磁开始后清PLC，充磁前保留原设备状态。
+        if (manualAbort || ctx?.MagnetCommandStarted == true)
         {
+            _lineControl.EnterFaultPause();
+            // 清理期间继续持有预约和路权，防止旧任务写0覆盖其他任务写入；清理失败也不能阻止原异常处置。
+            try
+            {
+                //清理一下与plc点位的握手信号
+                await ClearFailureHandshakeAsync(crane, ctx).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理未完成，继续原内存清理及资源释放：{ex.Message}");
+            }
             _abortCoordinator.Abort(crane, detail);
         }
-        //没有下发充磁命令异常处理
+        //没有下发充磁命令异常处理   没有充磁就说明没有与source设备发生握手信号 其实不需要清理原设备交互点位
         else
         {
             _abortCoordinator.RecoverBeforeMagnet(crane, detail);
+        }
+    }
+
+    /// <summary>只对本次已交互、仍持有预约且没有其他工件的设备尽力清握手；不清参数或发运动命令。</summary>
+    private async Task ClearFailureHandshakeAsync(Crane crane, TransferContext? ctx)
+    {
+        var task = crane.Runtime.CurrentTask;
+        if (task is null || ctx is null)
+        {
+            _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理跳过：缺少本次任务或执行上下文，不猜测设备归属");
+            return;
+        }
+
+        foreach (var (deviceId, role, started) in new[]
+                 { (task.SourceDeviceId, "源", ctx.SourceInteractionStarted), (task.TargetDeviceId, "目标", ctx.TargetInteractionStarted) })
+        {
+            var device = _deviceRegistry.Get(deviceId);
+            var reservations = _reservationManager.Snapshot();
+            var skip = !started ? "本次尚未进入该设备交互"
+                : !reservations.TryGetValue(deviceId, out var owner) || owner != task.TaskId ? "预约已释放或不属于本任务"
+                : device is null ? "设备未装载"
+                : device.CurrentWorkpiece is { } other && other.Id != task.WorkpieceRuntimeId ? "设备持有其他工件"
+                : null;
+            if (skip is not null)
+            {
+                _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理跳过：{role}设备Id={deviceId}，搬运Id={task.TaskId:N}，原因={skip}");
+                continue;
+            }
+
+            try
+            {
+                var driver = _driverRegistry.GetDevice(deviceId);
+                if (driver is null)
+                {
+                    _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理跳过：{role}设备Id={deviceId}未装载驱动");
+                    continue;
+                }
+                // 原任务可能已经取消；每台设备使用独立清理期限，离线或取消只记日志，仍继续其他设备和资源收尾。
+                using var cleanup = new CancellationTokenSource(Math.Max(1, ctx.Options.Collection.CommunicationTimeoutMs));
+                _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理开始：{role}设备[{device!.Name}/Id={deviceId}]，搬运Id={task.TaskId:N}，仍持有本任务预约，期限={ctx.Options.Collection.CommunicationTimeoutMs}ms");
+                var cleared = await _handlers.Get(device.Type)
+                    .ClearHandshakeAsync(driver, device.Name, _logger, cleanup.Token).ConfigureAwait(false);
+                _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理结束：{role}设备Id={deviceId}，成功复位{cleared}个点；按尽力清策略继续原异常处置");
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理失败或超时：{role}设备Id={deviceId}，{ex.Message}；继续原内存清理及资源释放");
+            }
         }
     }
 

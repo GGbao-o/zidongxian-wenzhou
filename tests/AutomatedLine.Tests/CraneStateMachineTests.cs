@@ -25,6 +25,119 @@ namespace AutomatedLine.Tests;
 /// </summary>
 public class CraneStateMachineTests
 {
+    /// <summary>取料交接后源引用虽已空，中转失败仍应清本任务源握手，持有资源直到清理结束。</summary>
+    /// <returns>异步流程验证任务。</returns>
+    [Fact]
+    public async Task FailureCleanup_EmptySourceStillClearsBeforeReleasingReservation()
+    {
+        var h = new Harness(new BoringMachine(1, "源", 1000), new BoringMachine(2, "目标", 2000), 1000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        h.CraneDriver.FailAbsoluteMoveX = 2000;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        h.SourceDriver.OnWrite = async (point, value, token) =>
+        {
+            if (point != "DataSentDone" || !Equals(value, 0)) return;
+            started.TrySetResult();
+            await finish.Task.WaitAsync(token);
+        };
+        var flow = h.Machine.RunFlowAsync(h.Crane, task, default);
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Null(h.Source.CurrentWorkpiece);
+            Assert.Equal(LineState.PausedByFault, h.Line.State);
+            Assert.True(h.Row.IsHeld(task.TaskId));
+            Assert.Equal(task.TaskId, h.Reservations.Snapshot()[h.Source.Id]);
+            Assert.Same(task, h.Crane.Runtime.CurrentTask);
+            Assert.False(flow.IsCompleted);
+        }
+        finally
+        {
+            finish.TrySetResult();
+            await flow.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.Equal(new[] { "DataSentDone=0", "LoadDone=0", "UnloadDone=0" }, h.SourceDriver.Writes.TakeLast(3));
+        Assert.Empty(h.TargetDriver.Writes);
+        Assert.Equal(WorkpieceState.Discarded, wp.Runtime.TaskState);
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Row.IsHeld(task.TaskId));
+    }
+
+    /// <summary>清理某点失败或整台超时只留日志，不能替换原故障、阻塞工件弃板或资源释放。</summary>
+    /// <param name="timeout">是否模拟清理期限耗尽，否则只让首个点写失败。</param>
+    /// <returns>异步流程验证任务。</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FailureCleanup_BestEffortCannotBlockOriginalAbort(bool timeout)
+    {
+        var h = new Harness(new BoringMachine(1, "源", 1000), new BoringMachine(2, "目标", 2000), 1000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Config.Options.Collection.CommunicationTimeoutMs = 100;
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        h.CraneDriver.MagnetException = new IOException("原充磁故障");
+        h.SourceDriver.OnWrite = (point, _, token) => point != "DataSentDone" ? Task.CompletedTask
+            : timeout ? Task.Delay(Timeout.Infinite, token) : Task.FromException(new IOException("清理失败"));
+        await h.Machine.RunFlowAsync(h.Crane, task, default).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(WorkpieceState.Discarded, wp.Runtime.TaskState);
+        Assert.Null(h.Source.CurrentWorkpiece);
+        Assert.Empty(h.TargetDriver.Writes);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.Contains(h.Logger.Messages, m => m.Contains(timeout ? "异常握手清理失败或超时" : "握手位 DataSentDone 复位失败"));
+        Assert.Contains(h.Logger.Messages, m => m.Contains("任务丢弃") && m.Contains("原充磁故障"));
+        if (!timeout) Assert.Contains("UnloadDone=0", h.SourceDriver.Writes);
+    }
+
+    /// <summary>目标放料失败时尚无工件引用仍清其握手；源已释放/已有新工件时不再写源。</summary>
+    /// <param name="foreignTarget">目标是否已换成其他工件。</param>
+    /// <param name="foreignReservation">目标预约是否已交给其他任务。</param>
+    /// <returns>异步流程验证任务。</returns>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task FailureCleanup_OnlyClearsOwnedTargetAfterPlaceStarted(bool foreignTarget, bool foreignReservation)
+    {
+        var h = new Harness(new BoringMachine(1, "源", 1000), new BoringMachine(2, "目标", 2000), 1000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        h.Target.Signals = TestSignals.Of(("RequestData", true), ("RequestLoad", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        var other = new WorkpieceTask(new WorkpieceInfo());
+        var nextTaskId = Guid.NewGuid();
+        var sourceWritesAtFailure = 0;
+        h.TargetDriver.OnWrite = (point, value, _) =>
+        {
+            if (point == "DataSentDone" && Equals(value, 1))
+            {
+                Assert.Null(h.Target.CurrentWorkpiece);
+                h.Source.CurrentWorkpiece = other;
+                sourceWritesAtFailure = h.SourceDriver.Writes.Count;
+                if (foreignTarget) h.Target.CurrentWorkpiece = other;
+                if (foreignReservation)
+                {
+                    h.Reservations.Release(task.TaskId);
+                    Assert.True(h.Reservations.TryReserve(nextTaskId, 99, h.Target.Id));
+                }
+                throw new IOException("目标参数完成通知失败");
+            }
+            return Task.CompletedTask;
+        };
+        await h.Machine.RunFlowAsync(h.Crane, task, default);
+        Assert.Same(other, h.Source.CurrentWorkpiece);
+        Assert.Equal(sourceWritesAtFailure, h.SourceDriver.Writes.Count);
+        Assert.Equal(foreignTarget || foreignReservation ? 1 : 2, h.TargetDriver.Writes.Count(w => w == "DataSentDone=0"));
+        Assert.Same(foreignTarget ? other : null, h.Target.CurrentWorkpiece);
+        Assert.Equal(WorkpieceState.Discarded, wp.Runtime.TaskState);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        if (foreignReservation) Assert.Equal(nextTaskId, h.Reservations.Snapshot()[h.Target.Id]);
+    }
+
     /// <summary>源上方微调失败仍属充磁前故障，保留源设备上的工件，不发送下料完成。</summary>
     /// <returns>异步状态机验证任务。</returns>
     [Fact]
@@ -119,6 +232,8 @@ public class CraneStateMachineTests
         public AlarmManager Alarms { get; }
         public FakeConfigurationStore Store { get; } = new();
         public FakeConfigService Config { get; } = new();
+        /// <summary>保留实际流程日志，核对尽力清理失败不会覆盖原始故障。</summary>
+        public TestLogger Logger { get; } = new();
         public CraneStateMachine Machine { get; }
         public Crane Crane { get; }
         public FakeCraneDriver CraneDriver { get; }
@@ -147,7 +262,7 @@ public class CraneStateMachineTests
             CraneDriver = new FakeCraneDriver { CraneId = craneId };
             Source = source;
             Target = target;
-            var logger = new TestLogger();
+            var logger = Logger;
             Config.Options.StateMachine.HandshakeTimeoutMs = handshakeTimeoutMs;
             Config.Options.Crane.XyRefineSettleMs = 0;
 
@@ -588,7 +703,7 @@ public class CraneStateMachineTests
         Assert.Equal(LineState.Running, h.Line.State);
     }
 
-    /// <summary>回安全位失败不清目标；收尾单点写失败沿用尽力清理，不改变已交付工件。</summary>
+    /// <summary>回安全位失败改由异常分支清目标；正常收尾单点写失败仍尽力清，不改变已交付工件。</summary>
     /// <param name="failSafeMove">是否让回安全位失败，否则仅让收尾首个握手写入失败。</param>
     /// <returns>异步验证任务。</returns>
     [Theory]
@@ -611,9 +726,9 @@ public class CraneStateMachineTests
 
         await h.Machine.RunFlowAsync(h.Crane, task, CancellationToken.None);
 
-        Assert.Equal(failSafeMove ? 1 : 2, h.TargetDriver.Writes.Count(w => w == "DataSentDone=0"));
-        Assert.Equal(failSafeMove ? 1 : 2, h.TargetDriver.Writes.Count(w => w == "LoadDone=0"));
-        Assert.Equal(failSafeMove ? 1 : 2, h.TargetDriver.Writes.Count(w => w == "UnloadDone=0"));
+        Assert.Equal(2, h.TargetDriver.Writes.Count(w => w == "DataSentDone=0"));
+        Assert.Equal(2, h.TargetDriver.Writes.Count(w => w == "LoadDone=0"));
+        Assert.Equal(2, h.TargetDriver.Writes.Count(w => w == "UnloadDone=0"));
         Assert.Equal(failSafeMove ? WorkpieceState.Discarded : WorkpieceState.Waiting, wp.Runtime.TaskState);
         Assert.Same(failSafeMove ? null : wp, h.Target.CurrentWorkpiece);
         Assert.Equal(failSafeMove ? LineState.PausedByFault : LineState.Running, h.Line.State);
@@ -956,7 +1071,7 @@ public class CraneStateMachineTests
         Assert.False(h.Reservations.IsReserved(h.Source.Id));
         Assert.False(h.Reservations.IsReserved(h.Target.Id));
         Assert.Equal(LineState.PausedByFault, h.Line.State);
-        Assert.Empty(h.SourceDriver.Writes);
+        Assert.Equal(new[] { "DataSentDone=0", "LoadDone=0", "UnloadDone=0" }, h.SourceDriver.Writes);
         Assert.Empty(h.TargetDriver.Writes);
     }
 
