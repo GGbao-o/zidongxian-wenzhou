@@ -270,7 +270,8 @@ public sealed class CraneStateMachine
         }
     }
 
-    /// <summary>只对本次已交互、仍持有预约且没有其他工件的设备尽力清握手；不清参数或发运动命令。</summary>
+    /// <summary>天车搬运任务发生异常后，用于清理源设备和目标设备 PLC 握手信号的补偿方法。</summary>
+    /// 当一次搬运任务失败时，尽量清除本次任务遗留的握手信号，但不能影响其他任务、其他工件，也不能随意操作已经释放预约的设备。
     private async Task ClearFailureHandshakeAsync(Crane crane, TransferContext? ctx)
     {
         var task = crane.Runtime.CurrentTask;
@@ -286,8 +287,11 @@ public sealed class CraneStateMachine
                      (task.TargetDeviceId, "目标", ctx.TargetInteractionStarted)
                  })
         {
+            //取得设备对象
             var device = _deviceRegistry.Get(deviceId);
+            //取得预约快照
             var reservations = _reservationManager.Snapshot();
+
             var skip = !started ? "本次尚未进入该设备交互"
                 : !reservations.TryGetValue(deviceId, out var owner) || owner != task.TaskId ? "预约已释放或不属于本任务"
                 : device is null ? "设备未装载"
@@ -310,6 +314,7 @@ public sealed class CraneStateMachine
                 // 原任务可能已经取消；每台设备使用独立清理期限，离线或取消只记日志，仍继续其他设备和资源收尾。
                 using var cleanup = new CancellationTokenSource(Math.Max(1, ctx.Options.Collection.CommunicationTimeoutMs));
                 _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理开始：{role}设备[{device!.Name}/Id={deviceId}]，搬运Id={task.TaskId:N}，仍持有本任务预约，期限={ctx.Options.Collection.CommunicationTimeoutMs}ms");
+                //真正执行清理
                 var cleared = await _handlers.Get(device.Type)
                     .ClearHandshakeAsync(driver, device.Name, _logger, cleanup.Token).ConfigureAwait(false);
                 _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理结束：{role}设备Id={deviceId}，成功复位{cleared}个点；按尽力清策略继续原异常处置");
