@@ -147,8 +147,8 @@ public sealed class CraneStateCollectionTests
         finally { await collector.StopAsync(CancellationToken.None); }
     }
 
-    /// <summary>调度只用有效缓存；未采集、过期、失败和报警状态不派发，也不额外读取驱动。</summary>
-    /// <param name="state">缓存场景：有效、未采集、过期、失败、报警。</param>
+    /// <summary>调度只用有效缓存；不可用、报警、下压触发或未知均不派发，也不额外读取驱动。</summary>
+    /// <param name="state">缓存场景：有效、未采集、过期、失败、报警、下压触发或未知。</param>
     /// <returns>异步验证任务。</returns>
     [Theory]
     [InlineData("fresh")]
@@ -156,6 +156,8 @@ public sealed class CraneStateCollectionTests
     [InlineData("expired")]
     [InlineData("failed")]
     [InlineData("alarm")]
+    [InlineData("pressure")]
+    [InlineData("pressure-unknown")]
     public async Task Scheduler_OnlyFreshUsableCacheDispatches(string state)
     {
         var clock = new Clock();
@@ -164,7 +166,11 @@ public sealed class CraneStateCollectionTests
         var pool = new CandidateTaskPool();
         pool.Replace(new[] { new CandidateTask(workpiece, new LoadRack(1, "源", 100), new UnloadRack(2, "目标", 200), 0, ProcessType.Unloading) });
         workpiece.Runtime.TaskState = WorkpieceState.Waiting;
-        if (state != "missing") h.Publish(state == "failed" ? null : new CraneStatusDto { PlcAlarm = state == "alarm" ? 1 : 0 });
+        if (state != "missing") h.Publish(state == "failed" ? null : new CraneStatusDto
+        {
+            PlcAlarm = state == "alarm" ? 1 : 0,
+            PressureLimit = state == "pressure-unknown" ? null : state == "pressure"
+        });
         if (state == "expired") clock.Advance(2001);
         var channels = new CraneTaskChannels();
         var scheduler = new CraneScheduler(pool, channels, h.Cranes, h.Store, new RightOfWayManager(h.Logger),
@@ -174,6 +180,44 @@ public sealed class CraneStateCollectionTests
         Assert.Equal(state == "fresh", channels.For(1).Reader.TryRead(out _));
         Assert.Equal(state == "fresh" ? WorkpieceState.Assigned : WorkpieceState.Waiting, workpiece.Runtime.TaskState);
         Assert.Equal(0, h.Driver.StatusReadCount);
+        if (state.StartsWith("pressure")) Assert.Contains(h.Logger.Messages, m => m.Contains(state == "pressure" ? "下压信号已触发" : "下压信号未知"));
+    }
+
+    /// <summary>最近车辆下压触发或未知时改选远处可执行车，候选距离计算与派发筛选保持一致。</summary>
+    /// <param name="pressure">最近车辆的下压信号，true或未知均应排除。</param>
+    /// <returns>异步调度验证任务。</returns>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(null)]
+    public async Task Scheduler_PressureBlockedNearestCraneDoesNotPreventOtherCrane(bool? pressure)
+    {
+        var h = new Harness();
+        var near = new CraneStatusDto { XDisplay = 100, PressureLimit = pressure };
+        h.Publish(near);
+        var other = new FakeCraneDriver { CraneId = 2 };
+        h.AddCrane(other);
+        h.Cranes.Get(2)!.StartX = 0;
+        h.Cranes.Get(2)!.EndX = 1000;
+        var far = new CraneStatusDto { XDisplay = 500, PressureLimit = false };
+        h.Store.Publish(other, far, h.Time.GetTimestamp(), h.Time.GetUtcNow());
+        var workpiece = new WorkpieceTask(new WorkpieceInfo());
+        workpiece.Runtime.TaskState = WorkpieceState.Waiting;
+        var candidate = new CandidateTask(workpiece, new LoadRack(1, "源", 100), new UnloadRack(2, "目标", 200), 0, ProcessType.Unloading);
+        var pool = new CandidateTaskPool();
+        pool.Replace(new[] { candidate });
+        var channels = new CraneTaskChannels();
+        var scheduler = new CraneScheduler(pool, channels, h.Cranes, h.Store, new RightOfWayManager(h.Logger),
+            new ResourceReservationManager(h.Logger), new LineControlService(h.Logger), h.Config, h.Logger);
+        var distance = (double)typeof(CraneScheduler).GetMethod("NearestCraneDistance", BindingFlags.Static | BindingFlags.NonPublic)!
+            .Invoke(null, new object[] { candidate, h.Cranes.Snapshot(), new Dictionary<int, CraneStatusDto?> { [1] = near, [2] = far } })!;
+        Assert.Equal(400d, distance);
+        await (Task)typeof(CraneScheduler).GetMethod("DispatchOnceAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(scheduler, new object[] { false, CancellationToken.None })!;
+        Assert.False(channels.For(1).Reader.TryRead(out _));
+        Assert.True(channels.For(2).Reader.TryRead(out _));
+        Assert.Equal(WorkpieceState.Assigned, workpiece.Runtime.TaskState);
+        Assert.Equal(0, h.Driver.StatusReadCount);
+        Assert.Equal(0, other.StatusReadCount);
     }
 
     /// <summary>冷启动从有效缓存判断有板，仅沿用原提示，不自行读取 PLC。</summary>

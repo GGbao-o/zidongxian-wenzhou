@@ -239,6 +239,6 @@ public class GrinderAutomaticModeTests
     private sealed class ReadyCrane : ICraneStateProvider
     {
         public CraneStateSnapshot? GetSnapshot(int craneId) => null;
-        public CraneStatusDto? GetFreshStatus(int craneId) => new() { XDisplay = 100 };
+        public CraneStatusDto? GetFreshStatus(int craneId) => new() { XDisplay = 100, PressureLimit = false };
     }
 }

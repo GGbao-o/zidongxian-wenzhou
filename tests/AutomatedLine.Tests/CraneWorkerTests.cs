@@ -376,6 +376,7 @@ public class CraneWorkerTests
     public async Task BeforeMagnetFailure_WorkerExecutesSameWorkpieceAfterResume()
     {
         var h = new Harness();
+        h.Driver.Status = new() { HasPlate = true, PressureLimit = false };
         h.Source.Signals = TestSignals.Of(("HasMaterial", true));
         h.Target.Signals = TestSignals.Of(("HasMaterial", false));
         h.Target.MaxDiameter = 1000;
