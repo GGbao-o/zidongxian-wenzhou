@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 namespace AutomatedLine.Application.Erp;
 
 /// <summary>ERP批次接收宿主服务；默认持续监听，合法工件按文件顺序自动入队，线路开关仍独立控制。</summary>
+/// 写后台逻辑用 ExecuteAsync；控制启动时机或做前置同步准备时，才考虑 StartAsync。
 public sealed class ErpImportService : BackgroundService, IErpImportService
 {
     private readonly IErpJobFile _file;
@@ -65,6 +66,7 @@ public sealed class ErpImportService : BackgroundService, IErpImportService
                 $"ERP接收服务启动：{(Status.IsListening ? "持续监听已开启" : "监听已暂停")}，合法工件按文件行序自动启动入队");
             while (!stoppingToken.IsCancellationRequested)
             {
+                //如果监听按钮没有启动
                 if (!Status.IsListening)
                 {
                     await _wake.WaitAsync(stoppingToken).ConfigureAwait(false);
@@ -75,6 +77,7 @@ public sealed class ErpImportService : BackgroundService, IErpImportService
                 {
                     var options = _config.GetAppOptions().ErpImport;
                     if (options.PollIntervalMs <= 0) throw new InvalidOperationException("ERP检查间隔必须大于0");
+                    //等待时间 配置文件定义的
                     interval = options.PollIntervalMs;
                     if (string.IsNullOrWhiteSpace(options.FilePath)) throw new InvalidOperationException("ERP文件路径不能为空");
                     var path = Path.GetFullPath(options.FilePath);
@@ -92,6 +95,7 @@ public sealed class ErpImportService : BackgroundService, IErpImportService
                     WarnOnce("receive", $"ERP接收失败：{ex.Message}");
                     Publish($"接收失败：{ex.Message}");
                 }
+                //获取锁  两个参数 超时时间 取消令牌   这个方法是一个重载的方法 底层其实有0参数 1参数2参数的   传正数超时：到点没拿到 → false；传 -1：死等不返回 false；传 0：立即试一次
                 await _wake.WaitAsync(interval, stoppingToken).ConfigureAwait(false);
             }
         }
