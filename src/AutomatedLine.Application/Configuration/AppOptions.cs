@@ -115,6 +115,12 @@ public sealed class CraneOptions
     /// <summary>源/目标上方XY精定位容差（mm），默认5；绝对编码器误差严格大于此值才微调一次，必须大于0。</summary>
     public int XyRefineToleranceMm { get; set; } = 5;
 
+    /// <summary>X轴单次微调最大距离（mm），默认200；正负方向共用绝对值上限，须为正数且不小于触发阈值。</summary>
+    public int XyRefineMaxXCorrectionMm { get; set; } = 200;
+
+    /// <summary>Y轴单次微调最大距离（mm），默认100；任一轴超限则整次不下发，须为正数且不小于触发阈值。</summary>
+    public int XyRefineMaxYCorrectionMm { get; set; } = 100;
+
     /// <summary>XY微调读取编码器前的一次等待（毫秒），默认500；允许0，不做重复稳定采样。</summary>
     public int XyRefineSettleMs { get; set; } = 500;
 

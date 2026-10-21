@@ -10,6 +10,25 @@ namespace AutomatedLine.Tests;
 /// <summary>在独立临时文件验证真实配置保存、立即重载及旧参数窗口不会覆盖新工艺。</summary>
 public sealed class ProcessPlanConfigTests
 {
+    /// <summary>旧配置缺失微调上限时提供200/100默认值，常规参数保存后新上限可绑定且保留原连接串。</summary>
+    [Fact]
+    public void RefinementLimits_BindDefaultsAndPersistCustomValues()
+    {
+        using var h = new Fixture();
+        var options = h.Store.GetAppOptions();
+        Assert.Equal(200, options.Crane.XyRefineMaxXCorrectionMm);
+        Assert.Equal(100, options.Crane.XyRefineMaxYCorrectionMm);
+        options.Crane.XyRefineMaxXCorrectionMm = 160;
+        options.Crane.XyRefineMaxYCorrectionMm = 80;
+        h.Store.SaveAppOptions(options);
+        using var restarted = (ConfigurationRoot)new ConfigurationBuilder().AddJsonFile(h.Path, false, false).Build();
+        var config = new ConfigService(restarted, h.Path);
+        Assert.Equal(160, config.GetAppOptions().Crane.XyRefineMaxXCorrectionMm);
+        Assert.Equal(80, config.GetAppOptions().Crane.XyRefineMaxYCorrectionMm);
+        Assert.Equal("original-job", config.GetAppOptions().ErpImport.FilePath);
+        Assert.Equal("test-only", config.GetConnectionString());
+    }
+
     /// <summary>工艺仅更新自身节点，立即读取和重建配置对象均能读到新值，其他字段及测试连接串保持原样。</summary>
     [Fact]
     public void SavePlan_IsImmediatelyVisible_AndPreservesOtherSettings()

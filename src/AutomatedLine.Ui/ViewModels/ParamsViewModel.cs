@@ -131,6 +131,8 @@ public partial class ParamsViewModel : ObservableObject
         crane.Items.Add(IntItem("运动超时(ms)", () => _options.Crane.MoveTimeoutMs, v => _options.Crane.MoveTimeoutMs = v));
         crane.Items.Add(IntItem("到位容差(mm)", () => _options.Crane.PositionToleranceMm, v => _options.Crane.PositionToleranceMm = v));
         crane.Items.Add(IntItem("XY精定位容差(mm)", () => _options.Crane.XyRefineToleranceMm, v => _options.Crane.XyRefineToleranceMm = v));
+        crane.Items.Add(IntItem("X最大微调距离(mm)", () => _options.Crane.XyRefineMaxXCorrectionMm, v => _options.Crane.XyRefineMaxXCorrectionMm = v));
+        crane.Items.Add(IntItem("Y最大微调距离(mm)", () => _options.Crane.XyRefineMaxYCorrectionMm, v => _options.Crane.XyRefineMaxYCorrectionMm = v));
         crane.Items.Add(IntItem("XY微调读取前等待(ms)", () => _options.Crane.XyRefineSettleMs, v => _options.Crane.XyRefineSettleMs = v));
         crane.Items.Add(IntItem("下压容差(mm)", () => _options.Crane.PressureToleranceMm, v => _options.Crane.PressureToleranceMm = v));
         crane.Items.Add(IntItem("充退磁反馈等待时间(ms)", () => _options.Crane.MagnetFeedbackDelayMs, v => _options.Crane.MagnetFeedbackDelayMs = v));

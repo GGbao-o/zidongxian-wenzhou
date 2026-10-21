@@ -137,21 +137,24 @@ public sealed class TransferContext
         }
     }
 
-    /// <summary>源/目标上方读取一次绝对编码器，仅超差XY轴补偿一次，不追加微调后的精度复核。</summary>
-    /// <param name="x">本次X绝对目标，与首次运动使用相同取整。</param>
+    /// <summary>源/目标上方读取一次绝对编码器，仅在配置最大距离内补偿超差XY轴一次；任一轴超限则整次不动，不追加精度复核。</summary>
+    /// <param name="x">本次X绝对目标，与首次运动使用相同取整。 就是当前天车要去的位置 已经加过偏移量了 不需要管偏移量的事</param>
     /// <param name="y">本次Y绝对目标，保留斜床pickY等业务偏移。</param>
     /// <param name="cancellationToken">当前搬运取消令牌。</param>
     /// <returns>跳过微调或一次相对运动完成的任务；Z增量始终为0。</returns>
+    /// <exception cref="InvalidOperationException">参数非法、读取失败、报警、任一轴超限或相对运动失败，由原搬运异常路径处理。</exception>
     public async Task RefineXyAsync(double x, double y, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var (ix, iy) = ((int)Math.Round(x), (int)Math.Round(y));
         var tolerance = Options.Crane.XyRefineToleranceMm;
         var settleMs = Options.Crane.XyRefineSettleMs;
-        if (tolerance <= 0 || settleMs < 0)
-            throw new InvalidOperationException($"{Tag} XY微调参数非法：容差={tolerance}mm须大于0，读取前等待={settleMs}ms须非负");
+        var maxX = Options.Crane.XyRefineMaxXCorrectionMm;
+        var maxY = Options.Crane.XyRefineMaxYCorrectionMm;
+        if (tolerance <= 0 || settleMs < 0 || maxX <= 0 || maxY <= 0 || maxX < tolerance || maxY < tolerance)
+            throw new InvalidOperationException($"{Tag} XY微调参数非法：容差={tolerance}mm须大于0，读取前等待={settleMs}ms须非负；X最大距离={maxX}mm、Y最大距离={maxY}mm须大于0且不小于容差");
 
-        LogStep($"XY微调：等待{settleMs}ms后读取一次绝对编码器，目标X={ix} Y={iy}，误差>{tolerance}mm才补发，最多1次，Z不参与");
+        LogStep($"XY微调：等待{settleMs}ms后读取一次绝对编码器，目标X={ix} Y={iy}，误差>{tolerance}mm才补发，最大距离X={maxX}mm Y={maxY}mm，任一轴超限整次不下发，最多1次，Z不参与");
         await Task.Delay(settleMs, cancellationToken).ConfigureAwait(false);
         var status = await CraneDriver.ReadStatusAsync(cancellationToken).ConfigureAwait(false);
         // 现有状态接口可能将读取取消转换为null；优先保留搬运取消语义。
@@ -161,10 +164,22 @@ public sealed class TransferContext
         //获取目标位置与当前编码器位置的差值
         var errorX = (long)ix - status.XEncoder;
         var errorY = (long)iy - status.YEncoder;
-        //判断差值是否大于配置的5mm 大于了话需要微调 dx dy就是差值 相对位移需要走的值
-        var dx = Math.Abs(errorX) > tolerance ? checked((int)errorX) : 0;
-        var dy = Math.Abs(errorY) > tolerance ? checked((int)errorY) : 0;
-        LogStep($"XY微调检查：编码器X={status.XEncoder} Y={status.YEncoder}，目标X={ix} Y={iy}，绝对误差X={Math.Abs(errorX)} Y={Math.Abs(errorY)}mm，阈值={tolerance}mm；修正量dX={dx} dY={dy} dZ=0");
+        var absErrorX = Math.Abs(errorX);
+        var absErrorY = Math.Abs(errorY);
+        // 先核对两轴上限再生成任何运动增量；超限不能截断成允许距离，也不能让另一轴先移动。
+        // 用long比较，避免极端编码器差值在转int时溢出而掩盖真正的定位超限原因。
+        if (absErrorX > maxX || absErrorY > maxY)
+        {
+            var exceededAxes = absErrorX > maxX ? (absErrorY > maxY ? "X、Y" : "X") : "Y";
+            var detail = $"XY微调超限：超限轴={exceededAxes}，目标X={ix} Y={iy}，编码器X={status.XEncoder} Y={status.YEncoder}，" +
+                         $"差值dX={errorX} dY={errorY}mm，绝对误差X={absErrorX} Y={absErrorY}mm，阈值={tolerance}mm，最大距离X={maxX} Y={maxY}mm；整次未下发微调，交由原搬运异常处理";
+            _logger.Error(LogCategory.StateMachine, $"{LogTag} {detail}");
+            throw new InvalidOperationException($"{Tag} {detail}");
+        }
+        // 两轴均在最大距离内后，仅为严格超过触发阈值的轴生成相对增量。
+        var dx = absErrorX > tolerance ? checked((int)errorX) : 0;
+        var dy = absErrorY > tolerance ? checked((int)errorY) : 0;
+        LogStep($"XY微调检查：编码器X={status.XEncoder} Y={status.YEncoder}，目标X={ix} Y={iy}，绝对误差X={absErrorX} Y={absErrorY}mm，阈值={tolerance}mm，最大距离X={maxX} Y={maxY}mm；修正量dX={dx} dY={dy} dZ=0");
         //说明不需要微调
         if (dx == 0 && dy == 0)
         {
@@ -172,7 +187,7 @@ public sealed class TransferContext
             return;
         }
 
-        // 差值大于5mm 进行相对位移微调 微调完不会进行再次判断  编码器差值作为相对增量，复用现有显示坐标换算、触发、到位等待和异常复位。
+        // 范围内仍只补发一次；编码器差值作为相对增量，复用现有显示坐标换算、触发、到位等待和异常复位，不追加复核。
         await MoveRelativeAsync(dx, dy, 0, cancellationToken).ConfigureAwait(false);
         LogStep("XY微调：1/1次相对运动成功，按原运动到位规则继续，不追加精度复核");
     }

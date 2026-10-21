@@ -25,6 +25,39 @@ namespace AutomatedLine.Tests;
 /// </summary>
 public class CraneStateMachineTests
 {
+    /// <summary>源微调超限保留工件，目标微调超限按充磁后弃板并尽力清源握手，两种情形均禁止相对运动。</summary>
+    /// <param name="atTarget">是否在取料完成后的目标上方注入超限。</param>
+    /// <returns>异步流程验证任务。</returns>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefinementOverLimit_UsesOriginalFailureAndCleanupPolicy(bool atTarget)
+    {
+        var h = new Harness(new BoringMachine(1, "源", 1000), new BoringMachine(2, "目标", 2000), 1000);
+        h.Source.Signals = TestSignals.Of(("RequestUnload", true));
+        var (wp, task) = h.NewTask();
+        h.Source.CurrentWorkpiece = wp;
+        wp.Runtime.CurrentLocation = WorkpieceLocation.AtDevice(h.Source.Id);
+        h.CraneDriver.OnReadStatus = _ =>
+        {
+            var status = h.CraneDriver.Status;
+            return Task.FromResult<CraneStatusDto?>(status?.XEncoder == (atTarget ? 2000 : 1000)
+                ? new() { XEncoder = status.XEncoder + 201, YEncoder = 0 } : status);
+        };
+        await h.Machine.RunFlowAsync(h.Crane, task, default);
+        Assert.DoesNotContain(h.CraneDriver.Actions, a => a.StartsWith("REL("));
+        Assert.Equal(atTarget ? WorkpieceState.Discarded : WorkpieceState.Waiting, wp.Runtime.TaskState);
+        Assert.Same(atTarget ? null : wp, h.Source.CurrentWorkpiece);
+        Assert.Empty(h.TargetDriver.Writes);
+        Assert.Contains(h.Logger.Messages, m => m.Contains("XY微调超限") && m.Contains("超限轴=X"));
+        if (atTarget) Assert.Contains("UnloadDone=0", h.SourceDriver.Writes);
+        else Assert.Empty(h.SourceDriver.Writes);
+        Assert.Equal(LineState.PausedByFault, h.Line.State);
+        Assert.False(h.Row.IsHeld(task.TaskId));
+        Assert.False(h.Reservations.IsReserved(h.Source.Id));
+        Assert.False(h.Reservations.IsReserved(h.Target.Id));
+    }
+
     /// <summary>取料交接后源引用虽已空，中转失败仍应清本任务源握手，持有资源直到清理结束。</summary>
     /// <returns>异步流程验证任务。</returns>
     [Fact]
