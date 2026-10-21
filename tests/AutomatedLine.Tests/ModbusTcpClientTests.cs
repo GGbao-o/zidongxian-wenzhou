@@ -119,7 +119,7 @@ public class ModbusTcpClientTests
             await peer.GetStream().ReadExactlyAsync(request, guard.Token);
             var header = new byte[] { request[0], request[1], 0, 0, 0, 0, 1 };
             await peer.GetStream().WriteAsync(header, guard.Token);
-            var exception = await Assert.ThrowsAsync<IOException>(() => read);
+            var exception = await Assert.ThrowsAsync<ModbusProtocolException>(() => read);
             Assert.Equal("Modbus 响应长度非法", exception.Message);
             Assert.False(client.IsConnected);
             var diagnostic = Assert.Single(logger.Messages);
@@ -199,7 +199,7 @@ public class ModbusTcpClientTests
             var request = new byte[12];
             await peer.GetStream().ReadExactlyAsync(request, guard.Token);
             await peer.GetStream().WriteAsync(new byte[] { request[0], request[1], 0, 0, 0, 3, 1, 0x84, 2 }, guard.Token);
-            var exception = await Assert.ThrowsAsync<IOException>(() => read);
+            var exception = await Assert.ThrowsAsync<ModbusProtocolException>(() => read);
             Assert.Contains("异常码 2", exception.Message);
             var diagnostic = Assert.Single(logger.Messages);
             Assert.Contains("阶段=校验功能码", diagnostic);

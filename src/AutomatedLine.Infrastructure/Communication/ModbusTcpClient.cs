@@ -379,7 +379,7 @@ public sealed class ModbusTcpClient : IDisposable
                 var bodyLength = respLength - 1;
                 if (bodyLength < 0)
                 {
-                    throw new IOException("Modbus 响应长度非法");
+                    throw new ModbusProtocolException("Modbus 响应长度非法");
                 }
 
                 phase = "读取响应体";
@@ -398,7 +398,7 @@ public sealed class ModbusTcpClient : IDisposable
                     phase = "校验打号机FC04尾字节";
                     if (trailer[0] != 0)
                     {
-                        throw new IOException($"打号机FC04响应尾字节非法：期望00，实际{trailer[0]:X2}");
+                        throw new ModbusProtocolException($"打号机FC04响应尾字节非法：期望00，实际{trailer[0]:X2}");
                     }
                 }
                 return body;
@@ -493,18 +493,18 @@ public sealed class ModbusTcpClient : IDisposable
     {
         if (response.Length == 0)
         {
-            throw new IOException("Modbus 空响应");
+            throw new ModbusProtocolException("Modbus 空响应");
         }
 
         if ((response[0] & 0x80) != 0)
         {
             var code = response.Length > 1 ? response[1] : (byte)0;
-            throw new IOException($"Modbus 异常响应，功能码 0x{response[0]:X2}，异常码 {code}");
+            throw new ModbusProtocolException($"Modbus 异常响应，功能码 0x{response[0]:X2}，异常码 {code}");
         }
 
         if (response[0] != expectedFunction)
         {
-            throw new IOException($"Modbus 功能码不匹配，期望 0x{expectedFunction:X2}，实际 0x{response[0]:X2}");
+            throw new ModbusProtocolException($"Modbus 功能码不匹配，期望 0x{expectedFunction:X2}，实际 0x{response[0]:X2}");
         }
     }
 
@@ -514,4 +514,12 @@ public sealed class ModbusTcpClient : IDisposable
         _ = DisconnectAsync();
         _ioLock.Dispose();
     }
+}
+
+/// <summary>已收到响应但协议或设备明确拒绝的错误，供运动读取排除重试；仍兼容现有IOException捕获。</summary>
+internal sealed class ModbusProtocolException : IOException
+{
+    /// <summary>保留原始诊断内容，区分重连可恢复的传输故障和不可盲目重试的协议错误。</summary>
+    /// <param name="message">原始协议或设备异常说明。</param>
+    internal ModbusProtocolException(string message) : base(message) { }
 }

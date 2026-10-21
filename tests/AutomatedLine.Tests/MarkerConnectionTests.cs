@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using AutomatedLine.Infrastructure.Communication;
 using System.Text;
 using AutomatedLine.Domain.Devices;
 using AutomatedLine.Infrastructure.Drivers;
@@ -97,7 +98,7 @@ public class MarkerConnectionTests
             {
                 // 异常声明9字节但实际12字节；必须保留设备异常码并断开，不能把异常误当正常响应适配。
                 await stream.WriteAsync(new byte[] { request[0], request[1], 0, 0, 0, 3, 1, 0x86, 2, 0, 0, 0 }, guard.Token);
-                await Assert.ThrowsAsync<IOException>(() => write);
+                await Assert.ThrowsAsync<ModbusProtocolException>(() => write);
             }
             else if (failure == "超时")
             {
@@ -159,7 +160,7 @@ public class MarkerConnectionTests
             if (failure == "非零")
             {
                 await peer.GetStream().WriteAsync(new byte[] { 0x7F }, guard.Token);
-                var exception = await Assert.ThrowsAsync<IOException>(() => read);
+                var exception = await Assert.ThrowsAsync<ModbusProtocolException>(() => read);
                 Assert.Contains("期望00，实际7F", exception.Message);
                 var message = Assert.Single(logger.Messages);
                 Assert.Contains("阶段=校验打号机FC04尾字节", message);
@@ -213,7 +214,7 @@ public class MarkerConnectionTests
             var request = await ReadFrameAsync(peer.GetStream(), guard.Token);
             await peer.GetStream().WriteAsync(new byte[]
                 { request[0], request[1], 0, 0, 0, 3, 1, 0x84, 3, 0, 0, 0 }, guard.Token);
-            var exception = await Assert.ThrowsAsync<IOException>(() => read);
+            var exception = await Assert.ThrowsAsync<ModbusProtocolException>(() => read);
             Assert.Contains("异常码 3", exception.Message);
             Assert.False(driver.IsConnected);
             var message = Assert.Single(logger.Messages);

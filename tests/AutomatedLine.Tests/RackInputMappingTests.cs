@@ -71,7 +71,7 @@ public class RackInputMappingTests
         try
         {
             var server = ReplyAsync(listener, false, true, guard.Token);
-            await Assert.ThrowsAsync<IOException>(() => driver.ReadAllSignalsAsync(guard.Token));
+            await Assert.ThrowsAsync<ModbusProtocolException>(() => driver.ReadAllSignalsAsync(guard.Token));
             await server;
         }
         finally

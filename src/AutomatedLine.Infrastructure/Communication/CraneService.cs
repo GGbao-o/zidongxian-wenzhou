@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Domain.Diagnostics;
@@ -849,7 +850,7 @@ public sealed class CraneService : ICraneDriver
         return CraneCommandResult.Fail(CraneCommandCode.Rejected, message);
     }
 
-    /// <summary>实时确认参与轴的位置误差和Busy=0（SkipAxis跳过且不读Busy）；超时以结果码返回，X2下压分支保持原规则。</summary>
+    /// <summary>即时读取参与轴位置和Busy；传输失败在原期限内重读完整反馈，不重发运动，X2及下压写入沿用原规则。</summary>
     /// <param name="targetX">X 到位目标</param>
     /// <param name="targetY">Y 到位目标</param>
     /// <param name="targetZ">Z 到位目标</param>
@@ -859,9 +860,16 @@ public sealed class CraneService : ICraneDriver
     /// <returns>InPosition / PressureReached 成功；Timeout / PressureOutOfRange 失败</returns>
     private async Task<CraneCommandResult> PollAxesAsync(int targetX, int targetY, int targetZ, bool pollEncoder, bool watchPressure, CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow.AddMilliseconds(_moveTimeoutMs);
         var lastState = "尚未完成位置及Busy读取";
         var started = Stopwatch.GetTimestamp();
+        // 一次轮询只建立一个期限，重连、锁等待和读取均计入；系统校时不延长运动等待。
+        using var readDeadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        readDeadline.CancelAfter(_moveTimeoutMs);
+        var readToken = readDeadline.Token;
+        var readFailures = 0;
+        var consecutiveFailures = 0;
+        string? lastReadFailure = null;
+        long? lastFailureLogAt = null;
         long? lastLoggedAt = null;
         string? lastBusyState = null;
         _logger.Info(LogCategory.Operation,
@@ -869,19 +877,40 @@ public sealed class CraneService : ICraneDriver
             $"位置读取=FC03 D{CraneAddress.StatusStart}/数量{CraneAddress.StatusCount}及D{CraneAddress.XAbsSpeed}/数量21，" +
             $"参与轴须误差≤{_positionTolerance}mm且Busy=0（FC01 X={CraneAddress.XBusy}/Y={CraneAddress.YBusy}/Z={CraneAddress.ZBusy}），" +
             $"超时={_moveTimeoutMs}ms，轮询等待=200ms，监视X2={watchPressure}（PDU={CraneAddress.X2_MagnetDownLimit}，下压容差={_pressureTolerance}mm）");
-        while (DateTime.UtcNow < deadline)
+        while (Stopwatch.GetElapsedTime(started).TotalMilliseconds < _moveTimeoutMs)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await Task.Delay(200, cancellationToken).ConfigureAwait(false);
+            try { await Task.Delay(200, readToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && readDeadline.IsCancellationRequested) { break; }
 
-            var status = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
+            CraneStatus status;
+            bool pressure;
+            try
+            {
+                status = await ReadRawStatusAsync(readToken).ConfigureAwait(false);
+                // 保留X2读取失败返回false的现场约定，不把下压收尾写入放进读取重试边界。
+                pressure = watchPressure && await IsPressureLimitOnAsync(readToken).ConfigureAwait(false);
+                readToken.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && readDeadline.IsCancellationRequested)
+            {
+                RecordReadFailure(new TimeoutException("位置读取达到本次运动等待期限"), "位置/X2");
+                break;
+            }
+            catch (Exception ex) when (IsRetryableMotionRead(ex))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RecordReadFailure(ex, "位置");
+                continue;
+            }
             var x = pollEncoder ? status.XEncoder : status.XPosition;
             var y = pollEncoder ? status.YEncoder : status.YPosition;
             var z = pollEncoder ? status.ZEncoder : status.ZPosition;
 
             // Z 下降叠加下压保护：压到 X2 即收尾（急停 + 清报警），再按 Z 与目标差是否在下压容差内判定成功/失败。
-            if (watchPressure && await IsPressureLimitOnAsync(cancellationToken).ConfigureAwait(false))
+            if (pressure)
             {
+                RecordReadRecovery();
                 _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位等待观测：X2=1，当前XYZ=({x},{y},{z})；进入原下压收尾，急停/清报警后按Z误差判定");
                 await PressureStopAsync().ConfigureAwait(false);
                 var delta = Math.Abs(z - targetZ);
@@ -894,10 +923,29 @@ public sealed class CraneService : ICraneDriver
             }
 
             // 容差范围内仍可能在减速；每个参与轴必须即时确认Busy=0才能进入下一阶段。
-            // 跳过轴不读线圈；读取失败直接向上传播，不能按已停止处理，也不使用展示缓存。
-            var xBusy = targetX != SkipAxis && await _client.ReadCoilAsync(CraneAddress.XBusy, cancellationToken).ConfigureAwait(false);
-            var yBusy = targetY != SkipAxis && await _client.ReadCoilAsync(CraneAddress.YBusy, cancellationToken).ConfigureAwait(false);
-            var zBusy = targetZ != SkipAxis && await _client.ReadCoilAsync(CraneAddress.ZBusy, cancellationToken).ConfigureAwait(false);
+            // 任一参与轴Busy读失败就丢弃本轮；下一轮连位置一起重读，不能把未知或旧Busy当作停止。
+            bool xBusy, yBusy, zBusy;
+            try
+            {
+                xBusy = targetX != SkipAxis && await _client.ReadCoilAsync(CraneAddress.XBusy, readToken).ConfigureAwait(false);
+                yBusy = targetY != SkipAxis && await _client.ReadCoilAsync(CraneAddress.YBusy, readToken).ConfigureAwait(false);
+                zBusy = targetZ != SkipAxis && await _client.ReadCoilAsync(CraneAddress.ZBusy, readToken).ConfigureAwait(false);
+                readToken.ThrowIfCancellationRequested();
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && readDeadline.IsCancellationRequested)
+            {
+                RecordReadFailure(new TimeoutException("Busy读取达到本次运动等待期限"), "Busy");
+                break;
+            }
+            catch (Exception ex) when (IsRetryableMotionRead(ex))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RecordReadFailure(ex, "Busy");
+                continue;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Stopwatch.GetElapsedTime(started).TotalMilliseconds >= _moveTimeoutMs) break;
+            RecordReadRecovery();
             var xBusyText = targetX == SkipAxis ? "未参与" : xBusy ? "1" : "0";
             var yBusyText = targetY == SkipAxis ? "未参与" : yBusy ? "1" : "0";
             var zBusyText = targetZ == SkipAxis ? "未参与" : zBusy ? "1" : "0";
@@ -924,16 +972,42 @@ public sealed class CraneService : ICraneDriver
                 return CraneCommandResult.Ok(CraneCommandCode.InPosition, $"天车[{_name}] 到位：{lastState}");
             }
         }
-        //到位失败  超时
-        _logger.Warn(LogCategory.Operation, $"天车[{_name}] 到位等待超时：目标XYZ=({targetX},{targetY},{targetZ})，{lastState}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，上限={_moveTimeoutMs}ms");
+        cancellationToken.ThrowIfCancellationRequested();
+        var readDiagnostic = $"读取失败累计{readFailures}次，连续{consecutiveFailures}次，最后读取失败={lastReadFailure ?? "无"}";
+        _logger.Warn(LogCategory.Operation, $"天车[{_name}] 到位等待超时：目标XYZ=({targetX},{targetY},{targetZ})，最后完整反馈：{lastState}；{readDiagnostic}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，上限={_moveTimeoutMs}ms");
         return CraneCommandResult.Fail(CraneCommandCode.Timeout,
-            $"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{_positionTolerance}mm，参与轴须Busy=0；最后状态：{lastState}）");
+            $"天车[{_name}] 运动超时未到位（目标 X={targetX} Y={targetY} Z={targetZ}，容差±{_positionTolerance}mm，参与轴须Busy=0；最后完整反馈：{lastState}；{readDiagnostic}）");
+
+        // 业务告警按首次及每2秒记录；底层仍保留每次失败的原始报文诊断。
+        void RecordReadFailure(Exception ex, string stage)
+        {
+            readFailures++;
+            consecutiveFailures++;
+            lastReadFailure = $"阶段={stage}，{ex.Message}";
+            if (lastFailureLogAt is null || Stopwatch.GetElapsedTime(lastFailureLogAt.Value).TotalMilliseconds >= 2000)
+            {
+                _logger.Warn(LogCategory.Operation, $"天车[{_name}] 到位读取失败：{lastReadFailure}，连续{consecutiveFailures}次、累计{readFailures}次；本轮数据作废，下轮自动重连重读，不重发运动；已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，原期限={_moveTimeoutMs}ms不延长");
+                lastFailureLogAt = Stopwatch.GetTimestamp();
+            }
+        }
+
+        void RecordReadRecovery()
+        {
+            if (consecutiveFailures == 0) return;
+            _logger.Info(LogCategory.Operation, $"天车[{_name}] 到位读取恢复：连续失败{consecutiveFailures}次，累计失败{readFailures}次，已取得本轮反馈，继续按原到位条件判定；耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
+            consecutiveFailures = 0;
+            lastFailureLogAt = null;
+        }
     }
+
+    // 协议拒绝同样继承IOException，必须先排除；只重试纯读取中的传输/连接/请求超时。
+    private static bool IsRetryableMotionRead(Exception ex)
+        => ex is not ModbusProtocolException && (ex is IOException or SocketException or TimeoutException);
 
     /// <summary>
     /// 读 X2 下压限位。读失败返回 false（按"未触发"处理）并记日志——
     /// 这里与页面显示不同：运动保护里"读不到就当成已下压"会导致正常运动被误急停，
-    /// 因此读失败时选择保守放行，由随后的状态读失败（通信中断）兜底。
+    /// 保留现场既有约定；位置与Busy的传输失败仍须完整重读并受原运动期限约束。
     /// </summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>true=X2 已压下</returns>
