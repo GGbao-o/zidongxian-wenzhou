@@ -81,6 +81,9 @@ public sealed class CraneStatus
 /// </summary>
 public sealed class CraneService : ICraneDriver
 {
+    /// <summary>内部不参与运动的轴标记，位于int范围内；-9999保留作跳过标记，-1是普通有效目标。</summary>
+    public const int SkipAxis = -9999;
+
     /// <summary>PLC 端口（写死）。</summary>
     private const int PlcPort = 502;
 
@@ -354,15 +357,15 @@ public sealed class CraneService : ICraneDriver
         {
             var s = await ReadRawStatusAsync(cancellationToken).ConfigureAwait(false);
 
-            // 以显示值为基准：目标 = 显示值 + 相对值（0 的轴不动）    dx/dy/dz=0 这个target值计时-1 代表这个轴不动
-            var targetX = dx != 0 ? s.XPosition + dx : -1;
-            var targetY = dy != 0 ? s.YPosition + dy : -1;
-            var targetZ = dz != 0 ? s.ZPosition + dz : -1;
+            // 零增量轴使用统一SkipAxis标记，避免实际显示目标为-1时被误跳过。
+            var targetX = dx != 0 ? s.XPosition + dx : SkipAxis;
+            var targetY = dy != 0 ? s.YPosition + dy : SkipAxis;
+            var targetZ = dz != 0 ? s.ZPosition + dz : SkipAxis;
 
             var zDirection = dz > 0 ? 1 : dz < 0 ? 2 : 0;
 
             _logger.Info(LogCategory.Operation,
-                $"天车[{_name}] 相对运动换算：增量XYZ=({dx},{dy},{dz})，当前显示XYZ=({s.XPosition},{s.YPosition},{s.ZPosition})，显示目标XYZ=({targetX},{targetY},{targetZ})；-1表示该轴跳过，Z方向={zDirection}(1下降/2上升/0不变)");
+                $"天车[{_name}] 相对运动换算：增量XYZ=({dx},{dy},{dz})，当前显示XYZ=({s.XPosition},{s.YPosition},{s.ZPosition})，显示目标XYZ=({targetX},{targetY},{targetZ})；{SkipAxis}表示该轴跳过，Z方向={zDirection}(1下降/2上升/0不变)");
             //相对运动  轮询显示值
             return await MoveAsync(targetX, targetY, targetZ, targetX, targetY, targetZ, pollEncoder: false, zDirection, cancellationToken).ConfigureAwait(false);
         }
@@ -470,7 +473,7 @@ public sealed class CraneService : ICraneDriver
 
     /// <summary>
     /// 执行绝对/相对运动：写目标 D3102~D3107 → 按 Z 方向脉冲触发 → 轮询到位。
-    /// 传值-1表示该轴不参与；普通到位须参与轴误差在配置容差内且Busy=0。Z下降仍叠加X2下压保护。
+    /// 传入<see cref="SkipAxis"/>（-9999）表示该轴不参与；-1作为普通坐标处理；普通到位须参与轴误差在配置容差内且Busy=0。Z下降仍叠加X2下压保护。
     /// </summary>
     /// <param name="writeX">写入 X 目标的值（调用方按业务换算）</param>
     /// <param name="writeY">写入 Y 目标的值</param>
@@ -493,26 +496,27 @@ public sealed class CraneService : ICraneDriver
 
             // 写目标（调用方按业务换算：相对运动写显示目标；绝对运动写 用户绝对值−编码器值+显示值）
             _logger.Info(LogCategory.Operation,
-                $"天车[{_name}] 运动目标FC16下发开始（DINT低Word在前，-1跳过）：D{CraneAddress.XAbsTarget}~D{CraneAddress.XAbsTarget + 1}={writeX}，D{CraneAddress.YAbsTarget}~D{CraneAddress.YAbsTarget + 1}={writeY}，D{CraneAddress.ZAbsTarget}~D{CraneAddress.ZAbsTarget + 1}={writeZ}");
-            if (writeX != -1) await _client.WriteInt32Async(CraneAddress.XAbsTarget, writeX, cancellationToken).ConfigureAwait(false);
-            if (writeY != -1) await _client.WriteInt32Async(CraneAddress.YAbsTarget, writeY, cancellationToken).ConfigureAwait(false);
-            if (writeZ != -1) await _client.WriteInt32Async(CraneAddress.ZAbsTarget, writeZ, cancellationToken).ConfigureAwait(false);
+                $"天车[{_name}] 运动目标FC16下发开始（DINT低Word在前，{SkipAxis}跳过）：D{CraneAddress.XAbsTarget}~D{CraneAddress.XAbsTarget + 1}={writeX}，D{CraneAddress.YAbsTarget}~D{CraneAddress.YAbsTarget + 1}={writeY}，D{CraneAddress.ZAbsTarget}~D{CraneAddress.ZAbsTarget + 1}={writeZ}");
+            //设置的-9999 防止就是为-1 写入的值算出来真为-1了
+            if (writeX != SkipAxis) await _client.WriteInt32Async(CraneAddress.XAbsTarget, writeX, cancellationToken).ConfigureAwait(false);
+            if (writeY != SkipAxis) await _client.WriteInt32Async(CraneAddress.YAbsTarget, writeY, cancellationToken).ConfigureAwait(false);
+            if (writeZ != SkipAxis) await _client.WriteInt32Async(CraneAddress.ZAbsTarget, writeZ, cancellationToken).ConfigureAwait(false);
 
             _logger.Info(LogCategory.Operation,
                 $"天车[{_name}] 运动 写入 X={writeX} Y={writeY} Z={writeZ}；到位目标 X={targetX} Y={targetY} Z={targetZ}（轮询={(pollEncoder ? "编码器" : "显示值")}）");
 
             // 触发统一为"写 2 → 500ms → 写 0"，复位后再轮询到位；
             // 同一阶段的轴并行脉冲（一起写 2、一起写 0），不是写 2 后一直轮询再写 0。
-            //注意 如果writex=-1 后面PulseManyAsync 不会写对应轴 2->延迟->0
-            var xy = new[] { (CraneAddress.ManualXAbsMove, writeX != -1), (CraneAddress.ManualYAbsMove, writeY != -1) };
-            var z = new[] { (CraneAddress.ManualZAbsMove, writeZ != -1) };
+            // 仅SkipAxis轴不参与写目标、触发及复位，真实负坐标仍按参与轴执行。
+            var xy = new[] { (CraneAddress.ManualXAbsMove, writeX != SkipAxis), (CraneAddress.ManualYAbsMove, writeY != SkipAxis) };
+            var z = new[] { (CraneAddress.ManualZAbsMove, writeZ != SkipAxis) };
             //z轴下降
             if (zDirection == 1)
             {
                 _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动阶段：Z下降，先触发XY并等待XY位置容差及Busy=0，再触发Z；最终轮询叠加X2下压保护");
                 // Z 下降：先 XY（并行）后 Z    对应的轴 寄存器地址写2 延迟 写0
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
-                var xyResult = await PollAxesAsync(targetX, targetY, -1, pollEncoder, false, cancellationToken).ConfigureAwait(false);
+                var xyResult = await PollAxesAsync(targetX, targetY, SkipAxis, pollEncoder, false, cancellationToken).ConfigureAwait(false);
                 if (!xyResult.IsSuccess) return xyResult;//这个就是xy没有运动成功
                 //z轴对应写2 写0
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
@@ -522,7 +526,7 @@ public sealed class CraneService : ICraneDriver
                 _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动阶段：Z上升，先触发Z并等待Z位置容差及Busy=0，再触发XY");
                 // Z 上升：先 Z 后 XY（并行）
                 await PulseManyAsync(z, 500, cancellationToken).ConfigureAwait(false);
-                var zResult = await PollAxesAsync(-1, -1, targetZ, pollEncoder, false, cancellationToken).ConfigureAwait(false);
+                var zResult = await PollAxesAsync(SkipAxis, SkipAxis, targetZ, pollEncoder, false, cancellationToken).ConfigureAwait(false);
                 if (!zResult.IsSuccess) return zResult;
                 await PulseManyAsync(xy, 500, cancellationToken).ConfigureAwait(false);
             }
@@ -550,9 +554,9 @@ public sealed class CraneService : ICraneDriver
             _logger.Info(LogCategory.Operation, $"天车[{_name}] 运动收尾：对本次参与轴的D{CraneAddress.ManualXAbsMove}/D{CraneAddress.ManualYAbsMove}/D{CraneAddress.ManualZAbsMove}写0；沿用不可取消的尽力复位");
             // 触发位必须复位；用不可取消令牌，避免取消/超时后卡在 2
             var resetCt = CancellationToken.None;
-            if (writeX != -1) await TryWriteAsync(CraneAddress.ManualXAbsMove, 0, resetCt).ConfigureAwait(false);
-            if (writeY != -1) await TryWriteAsync(CraneAddress.ManualYAbsMove, 0, resetCt).ConfigureAwait(false);
-            if (writeZ != -1) await TryWriteAsync(CraneAddress.ManualZAbsMove, 0, resetCt).ConfigureAwait(false);
+            if (writeX != SkipAxis) await TryWriteAsync(CraneAddress.ManualXAbsMove, 0, resetCt).ConfigureAwait(false);
+            if (writeY != SkipAxis) await TryWriteAsync(CraneAddress.ManualYAbsMove, 0, resetCt).ConfigureAwait(false);
+            if (writeZ != SkipAxis) await TryWriteAsync(CraneAddress.ManualZAbsMove, 0, resetCt).ConfigureAwait(false);
         }
     }
 
@@ -845,7 +849,7 @@ public sealed class CraneService : ICraneDriver
         return CraneCommandResult.Fail(CraneCommandCode.Rejected, message);
     }
 
-    /// <summary>实时确认参与轴的位置误差和Busy=0（-1跳过且不读Busy）；超时以结果码返回，X2下压分支保持原规则。</summary>
+    /// <summary>实时确认参与轴的位置误差和Busy=0（SkipAxis跳过且不读Busy）；超时以结果码返回，X2下压分支保持原规则。</summary>
     /// <param name="targetX">X 到位目标</param>
     /// <param name="targetY">Y 到位目标</param>
     /// <param name="targetZ">Z 到位目标</param>
@@ -861,7 +865,7 @@ public sealed class CraneService : ICraneDriver
         long? lastLoggedAt = null;
         string? lastBusyState = null;
         _logger.Info(LogCategory.Operation,
-            $"天车[{_name}] 到位等待开始：目标XYZ=({targetX},{targetY},{targetZ})，-1轴跳过，位置来源={(pollEncoder ? "编码器" : "显示值")}，" +
+            $"天车[{_name}] 到位等待开始：目标XYZ=({targetX},{targetY},{targetZ})，{SkipAxis}轴跳过，位置来源={(pollEncoder ? "编码器" : "显示值")}，" +
             $"位置读取=FC03 D{CraneAddress.StatusStart}/数量{CraneAddress.StatusCount}及D{CraneAddress.XAbsSpeed}/数量21，" +
             $"参与轴须误差≤{_positionTolerance}mm且Busy=0（FC01 X={CraneAddress.XBusy}/Y={CraneAddress.YBusy}/Z={CraneAddress.ZBusy}），" +
             $"超时={_moveTimeoutMs}ms，轮询等待=200ms，监视X2={watchPressure}（PDU={CraneAddress.X2_MagnetDownLimit}，下压容差={_pressureTolerance}mm）");
@@ -891,24 +895,24 @@ public sealed class CraneService : ICraneDriver
 
             // 容差范围内仍可能在减速；每个参与轴必须即时确认Busy=0才能进入下一阶段。
             // 跳过轴不读线圈；读取失败直接向上传播，不能按已停止处理，也不使用展示缓存。
-            var xBusy = targetX != -1 && await _client.ReadCoilAsync(CraneAddress.XBusy, cancellationToken).ConfigureAwait(false);
-            var yBusy = targetY != -1 && await _client.ReadCoilAsync(CraneAddress.YBusy, cancellationToken).ConfigureAwait(false);
-            var zBusy = targetZ != -1 && await _client.ReadCoilAsync(CraneAddress.ZBusy, cancellationToken).ConfigureAwait(false);
-            var xBusyText = targetX == -1 ? "未参与" : xBusy ? "1" : "0";
-            var yBusyText = targetY == -1 ? "未参与" : yBusy ? "1" : "0";
-            var zBusyText = targetZ == -1 ? "未参与" : zBusy ? "1" : "0";
+            var xBusy = targetX != SkipAxis && await _client.ReadCoilAsync(CraneAddress.XBusy, cancellationToken).ConfigureAwait(false);
+            var yBusy = targetY != SkipAxis && await _client.ReadCoilAsync(CraneAddress.YBusy, cancellationToken).ConfigureAwait(false);
+            var zBusy = targetZ != SkipAxis && await _client.ReadCoilAsync(CraneAddress.ZBusy, cancellationToken).ConfigureAwait(false);
+            var xBusyText = targetX == SkipAxis ? "未参与" : xBusy ? "1" : "0";
+            var yBusyText = targetY == SkipAxis ? "未参与" : yBusy ? "1" : "0";
+            var zBusyText = targetZ == SkipAxis ? "未参与" : zBusy ? "1" : "0";
             lastState = $"坐标X={x} Y={y} Z={z}；Busy X={xBusyText} Y={yBusyText} Z={zBusyText}";
             _logger.Sample(LogCategory.Communication, $"{_name}-pos", $"天车[{_name}] {lastState}");
 
-            var xOk = targetX == -1 || Math.Abs(x - targetX) <= _positionTolerance && !xBusy;
-            var yOk = targetY == -1 || Math.Abs(y - targetY) <= _positionTolerance && !yBusy;
-            var zOk = targetZ == -1 || Math.Abs(z - targetZ) <= _positionTolerance && !zBusy;
+            var xOk = targetX == SkipAxis || Math.Abs(x - targetX) <= _positionTolerance && !xBusy;
+            var yOk = targetY == SkipAxis || Math.Abs(y - targetY) <= _positionTolerance && !yBusy;
+            var zOk = targetZ == SkipAxis || Math.Abs(z - targetZ) <= _positionTolerance && !zBusy;
             // 复用本轮实测位置/Busy；首次、Busy变化及每2秒记录，不额外读取也不逐200ms刷盘。
             var busyState = $"{xBusyText}/{yBusyText}/{zBusyText}";
             if (lastLoggedAt is null || busyState != lastBusyState || Stopwatch.GetElapsedTime(lastLoggedAt.Value).TotalMilliseconds >= 2000)
             {
                 _logger.Info(LogCategory.Operation,
-                    $"天车[{_name}] 到位等待观测：{lastState}；目标XYZ=({targetX},{targetY},{targetZ})，误差XYZ=({(targetX == -1 ? "跳过" : Math.Abs((long)x - targetX).ToString())},{(targetY == -1 ? "跳过" : Math.Abs((long)y - targetY).ToString())},{(targetZ == -1 ? "跳过" : Math.Abs((long)z - targetZ).ToString())})mm，" +
+                    $"天车[{_name}] 到位等待观测：{lastState}；目标XYZ=({targetX},{targetY},{targetZ})，误差XYZ=({(targetX == SkipAxis ? "跳过" : Math.Abs((long)x - targetX).ToString())},{(targetY == SkipAxis ? "跳过" : Math.Abs((long)y - targetY).ToString())},{(targetZ == SkipAxis ? "跳过" : Math.Abs((long)z - targetZ).ToString())})mm，" +
                     $"各轴满足XYZ=({xOk},{yOk},{zOk})，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms，上限={_moveTimeoutMs}ms");
                 lastLoggedAt = Stopwatch.GetTimestamp();
                 lastBusyState = busyState;

@@ -11,6 +11,67 @@ namespace AutomatedLine.Tests;
 /// <summary>通过本机Modbus服务核对真实运动轮询的位置容差、Busy和分阶段触发，不访问现场PLC。</summary>
 public sealed class CraneMotionCompletionTests
 {
+    /// <summary>绝对目标-1必须写为DINT、触发运动并读取该轴Busy，不能再当作跳过轴。</summary>
+    /// <param name="axis">目标为-1的轴：0为X、1为Y、2为Z。</param>
+    /// <returns>异步本机通信验证任务。</returns>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task AbsoluteNegativeOne_IsWrittenTriggeredAndChecked(int axis)
+    {
+        await using var h = new MotionPeer();
+        h.FollowTargetWrites = true;
+        var target = new[] { 1000, 2000, 3000 };
+        target[axis] = -1;
+        var result = await h.Service.MoveAbsoluteAsync(target[0], target[1], target[2]);
+        Assert.Equal(CraneCommandCode.InPosition, result.Code);
+        Assert.Contains((3102 + axis * 2, -1), h.TargetWrites);
+        Assert.Contains((4522 - axis, 2), h.Writes);
+        Assert.Contains((4522 - axis, 0), h.Writes);
+        Assert.Contains(new[] { 12819, 12824, 12829 }[axis], h.CoilReads);
+    }
+
+    /// <summary>相对运动算出显示目标-1时仍执行，零增量的其余轴使用SkipAxis且不写PLC或读取Busy。</summary>
+    /// <param name="axis">唯一参与运动的轴。</param>
+    /// <returns>异步本机通信验证任务。</returns>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task RelativeComputedNegativeOne_MovesOnlyRequestedAxis(int axis)
+    {
+        await using var h = new MotionPeer();
+        h.FollowTargetWrites = true;
+        var delta = new[] { 0, 0, 0 };
+        delta[axis] = -1 - (axis + 1) * 1000;
+        var result = await h.Service.MoveRelativeAsync(delta[0], delta[1], delta[2]);
+        Assert.Equal(CraneCommandCode.InPosition, result.Code);
+        Assert.Equal((3102 + axis * 2, -1), Assert.Single(h.TargetWrites));
+        Assert.Contains((4522 - axis, 2), h.Writes);
+        Assert.Contains((4522 - axis, 0), h.Writes);
+        Assert.NotEmpty(h.CoilReads);
+        Assert.All(h.CoilReads, address => Assert.Equal(new[] { 12819, 12824, 12829 }[axis], address));
+    }
+
+    /// <summary>真实到位目标-1仍须通过位置判定；反馈相差较大时不能因跳过该轴而误报到位。</summary>
+    /// <param name="axis">唯一参与到位检查的轴。</param>
+    /// <returns>异步轮询验证任务。</returns>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Poll_NegativeOneTargetCannotBypassPositionCheck(int axis)
+    {
+        await using var h = new MotionPeer(timeoutMs: 350);
+        var target = new[] { CraneService.SkipAxis, CraneService.SkipAxis, CraneService.SkipAxis };
+        target[axis] = -1;
+        var result = await h.Poll(target[0], target[1], target[2]);
+        Assert.Equal(CraneCommandCode.Timeout, result.Code);
+        Assert.NotEmpty(h.CoilReads);
+        Assert.All(h.CoilReads, address => Assert.Equal(new[] { 12819, 12824, 12829 }[axis], address));
+    }
+
     /// <summary>按钮不受旧手动缓存影响，连续点击始终写四帧，也不改变运动前置缓存。</summary>
     /// <param name="cached">原运动前置是否已缓存成功。</param>
     /// <returns>异步通信验证任务。</returns>
@@ -80,7 +141,7 @@ public sealed class CraneMotionCompletionTests
     {
         await using var h = new MotionPeer(timeoutMs: 350);
         h.OnCoil = _ => new byte[] { 1, 1, busy ? (byte)1 : (byte)0 };
-        var result = await h.Poll(1000 + offset, -1, -1);
+        var result = await h.Poll(1000 + offset, CraneService.SkipAxis, CraneService.SkipAxis);
         Assert.Equal(expected, result.Code);
         Assert.NotEmpty(h.CoilReads);
         Assert.All(h.CoilReads, address => Assert.Equal(12819, address));
@@ -99,7 +160,7 @@ public sealed class CraneMotionCompletionTests
         await using var h = new MotionPeer(timeoutMs: 3000, tolerance: 0);
         var reads = 0;
         h.OnCoil = _ => new byte[] { 1, 1, ++reads < 3 ? (byte)1 : (byte)0 };
-        var targets = new[] { -1, -1, -1 };
+        var targets = new[] { CraneService.SkipAxis, CraneService.SkipAxis, CraneService.SkipAxis };
         targets[axis] = (axis + 1) * 1000 + 30;
         var result = await h.Poll(targets[0], targets[1], targets[2]);
         Assert.Equal(CraneCommandCode.InPosition, result.Code);
@@ -192,7 +253,7 @@ public sealed class CraneMotionCompletionTests
         await using var h = new MotionPeer();
         using var cancel = new CancellationTokenSource();
         h.OnCoil = _ => { cancel.Cancel(); return new byte[] { 1, 1, 1 }; };
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Poll(1000, -1, -1, cancel.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => h.Poll(1000, CraneService.SkipAxis, CraneService.SkipAxis, cancel.Token));
     }
 
     /// <summary>X2特殊下压判据保留15mm容差，优先于普通Busy联合到位。</summary>
@@ -206,7 +267,7 @@ public sealed class CraneMotionCompletionTests
     {
         await using var h = new MotionPeer();
         h.OnCoil = _ => new byte[] { 1, 1, 1 };
-        var result = await h.Poll(-1, -1, 3000 + offset, watchPressure: true);
+        var result = await h.Poll(CraneService.SkipAxis, CraneService.SkipAxis, 3000 + offset, watchPressure: true);
         Assert.Equal(expected, result.Code);
         Assert.Equal(new[] { 63490 }, h.CoilReads.ToArray());
         Assert.Contains((4518, 2), h.Writes);
@@ -228,6 +289,11 @@ public sealed class CraneMotionCompletionTests
         public ConcurrentQueue<int> RegisterReads { get; } = new();
         /// <summary>实际收到的单寄存器写入。</summary>
         public ConcurrentQueue<(int Address, int Value)> Writes { get; } = new();
+        /// <summary>记录FC16实际DINT目标，核对负坐标没有被跳过或误编码。</summary>
+        public ConcurrentQueue<(int Address, int Value)> TargetWrites { get; } = new();
+        /// <summary>仅指定测试随目标写入更新坐标反馈，模拟实际负坐标到位。</summary>
+        public bool FollowTargetWrites { get; set; }
+        private readonly int[] _positions = { 1000, 2000, 3000 };
         /// <summary>按线圈地址返回正常或异常PDU，模拟现场运动反馈。</summary>
         public Func<int, byte[]> OnCoil { get; set; } = _ => new byte[] { 1, 1, 0 };
         /// <summary>按模式地址返回正常或异常Word应答，模拟单点未知。</summary>
@@ -253,9 +319,9 @@ public sealed class CraneMotionCompletionTests
         }
 
         /// <summary>直接验证生产轮询的判定边界，省去无关运动脉冲耗时。</summary>
-        /// <param name="x">X目标，-1跳过。</param>
-        /// <param name="y">Y目标，-1跳过。</param>
-        /// <param name="z">Z目标，-1跳过。</param>
+        /// <param name="x">X目标，CraneService.SkipAxis跳过。</param>
+        /// <param name="y">Y目标，CraneService.SkipAxis跳过。</param>
+        /// <param name="z">Z目标，CraneService.SkipAxis跳过。</param>
         /// <param name="token">当前执行令牌。</param>
         /// <param name="watchPressure">是否保留X2下压监视。</param>
         /// <returns>生产方法的轮询结果。</returns>
@@ -306,7 +372,8 @@ public sealed class CraneMotionCompletionTests
                     body[1] = (byte)(count * 2);
                     if (address == 5000)
                     {
-                        foreach (var (offset, value) in new[] { (14, 1000), (18, 1000), (20, 2000), (22, 2000), (23, 3000), (25, 3000) })
+                        // X是DINT，负数反馈必须同时填高Word；Y/Z仍按现场协议只占一个有符号Word。
+                        foreach (var (offset, value) in new[] { (14, _positions[0]), (15, _positions[0] >> 16), (18, _positions[0]), (19, _positions[0] >> 16), (20, _positions[1]), (22, _positions[1]), (23, _positions[2]), (25, _positions[2]) })
                         {
                             body[2 + offset * 2] = (byte)(value >> 8);
                             body[3 + offset * 2] = (byte)value;
@@ -327,6 +394,15 @@ public sealed class CraneMotionCompletionTests
                         var value = pdu[3] << 8 | pdu[4];
                         Writes.Enqueue((address, value));
                         body = OnWrite(address, value) ?? body;
+                    }
+                    else
+                    {
+                        Assert.Equal(2, pdu[3] << 8 | pdu[4]);
+                        var low = pdu[6] << 8 | pdu[7];
+                        var high = pdu[8] << 8 | pdu[9];
+                        var value = unchecked((int)((uint)low | (uint)high << 16));
+                        TargetWrites.Enqueue((address, value));
+                        if (FollowTargetWrites) _positions[(address - 3102) / 2] = value;
                     }
                 }
                 header[4] = 0;
