@@ -233,7 +233,7 @@ public sealed class TransferContext
         }
     }
 
-    /// <summary>充磁（200ms脉冲复位后按配置等待再单读X6）并校验成功；取料异常边界由PickAsync调用前标记。</summary>
+    /// <summary>充磁（500ms脉冲复位后按配置等待再单读X6）并校验成功；取料异常边界由PickAsync调用前标记。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOnAsync(CancellationToken cancellationToken)
@@ -250,7 +250,7 @@ public sealed class TransferContext
         HasPieceOnCrane = true;
     }
 
-    /// <summary>放磁（200ms脉冲复位后按配置等待再单读X7）并校验成功。</summary>
+    /// <summary>放磁（500ms脉冲复位后按配置等待再单读X7）并校验成功。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOffAsync(CancellationToken cancellationToken)

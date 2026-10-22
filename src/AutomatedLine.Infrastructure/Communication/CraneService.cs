@@ -626,13 +626,13 @@ public sealed class CraneService : ICraneDriver
         });
     }
 
-    /// <summary>充磁：D4510=2 → 200ms → D4510=0 → 等待配置时长（默认1000ms）→ 单读X6。</summary>
+    /// <summary>充磁：D4510=2 → 500ms → D4510=0 → 等待配置时长（默认1000ms）→ 单读X6。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>X6=1返回成功；X6=0、配置非法或通信失败返回失败结果。</returns>
     public Task<CraneCommandResult> MagnetOnAsync(CancellationToken cancellationToken = default)
         => PulseMagnetAsync(CraneAddress.ManualMagnetOn, CraneAddress.X6_MagnetizeOk, "X6", "充磁", cancellationToken);
 
-    /// <summary>退磁：D4511=2 → 200ms → D4511=0 → 等待配置时长（默认1000ms）→ 单读X7。</summary>
+    /// <summary>退磁：D4511=2 → 500ms → D4511=0 → 等待配置时长（默认1000ms）→ 单读X7。</summary>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>X7=1返回成功；X7=0、配置非法或通信失败返回失败结果。</returns>
     public Task<CraneCommandResult> MagnetOffAsync(CancellationToken cancellationToken = default)
@@ -684,7 +684,7 @@ public sealed class CraneService : ICraneDriver
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>结果</returns>
     public Task<CraneCommandResult> EmergencyStopAsync(CancellationToken cancellationToken = default)
-        // 急停与其余脉冲命令一样必须保证 200ms 脉冲宽度，否则 PLC 可能采不到这个脉冲。
+        // 急停沿用200ms脉冲，保证PLC能够采到；充退磁采用独立的500ms保持时间。
         // 它与其它命令的唯一区别是"不切手动"——不走 D4001/D4500 前置，以便紧急情况下直接下发。
         => ExecuteAsync("急停", () => PulseAsync(CraneAddress.ManualEStop, true, 200, cancellationToken));
 
@@ -759,6 +759,7 @@ public sealed class CraneService : ICraneDriver
         _logger.Info(LogCategory.Operation, $"天车[{_name}] 脉冲写入开始：FC06 D{register}=2，等待应答");
         await _client.WriteRegisterAsync(register, 2, cancellationToken).ConfigureAwait(false);
         _logger.Info(LogCategory.Operation, $"天车[{_name}] 脉冲触发已返回：D{register}=2，保持{delayMs}ms后写0");
+        //进行延迟
         await Task.Delay(delayMs, cancellationToken).ConfigureAwait(false);
         _logger.Info(LogCategory.Operation, $"天车[{_name}] 脉冲复位开始：FC06 D{register}=0，等待应答");
         await _client.WriteRegisterAsync(register, 0, cancellationToken).ConfigureAwait(false);
@@ -805,13 +806,14 @@ public sealed class CraneService : ICraneDriver
         }
     }
 
-    /// <summary>磁铁保持200ms脉冲，写0后按本次配置等待，再单读反馈；非法等待时间拒绝执行。</summary>
+    /// <summary>充退磁保持500ms脉冲，给PLC更长的触发采样窗口；写0后按本次配置等待再单读反馈。</summary>
     /// <param name="trigger">触发寄存器</param>
     /// <param name="feedbackCoil">反馈线圈</param>
     /// <param name="feedbackName">反馈信号名，用于失败提示</param>
     /// <param name="label">动作名</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>反馈为 1 返回 Completed；为 0 返回 Rejected；通信失败沿用通用命令结果</returns>
+    /// 这个方法是冲磁放磁用的
     private async Task<CraneCommandResult> PulseMagnetAsync(int trigger, int feedbackCoil, string feedbackName, string label, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -827,19 +829,21 @@ public sealed class CraneService : ICraneDriver
         var result = await ExecuteAsync(label, async () =>
         {
             _logger.Info(LogCategory.Operation,
-                $"天车[{_name}] {label}开始：D{trigger}=2→200ms→0，复位后等待{feedbackDelayMs}ms，再单读{feedbackName}反馈");
+                $"天车[{_name}] {label}开始：D{trigger}=2→500ms→0，复位后等待{feedbackDelayMs}ms，再单读{feedbackName}反馈");
             //手动模式
             await EnterManualAsync(cancellationToken).ConfigureAwait(false);
             // 与其他手动脉冲共用写入封装，先完整复位再检查对应反馈，不轮询、不重试。  
-            // 写2到写0始终保持200ms；仅充退磁在清0完成后额外等待，再读取对应反馈。
-            await PulseAsync(trigger, true, 200, cancellationToken).ConfigureAwait(false);
+            // 延长充退磁触发保持时间，避免现场PLC未采到较短脉冲；反馈延时仍独立从写0完成后起算。
+            await PulseAsync(trigger, true, 500, cancellationToken).ConfigureAwait(false);
             _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}触发已复位：D{trigger}=0，开始等待反馈延时{feedbackDelayMs}ms");
+            // 使用本次动作开始时取得的反馈等待配置。
             await Task.Delay(feedbackDelayMs, cancellationToken).ConfigureAwait(false);
             //读线圈返回
             _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}反馈读取开始：FC01线圈PDU={feedbackCoil}（{feedbackName}），期望=1；仅本次读取，不轮询");
             feedback = await _client.ReadCoilAsync(feedbackCoil, cancellationToken).ConfigureAwait(false);
             _logger.Info(LogCategory.Operation, $"天车[{_name}] {label}反馈读取完成：{feedbackName}={(feedback ? 1 : 0)}，期望=1，匹配={feedback}");
         }).ConfigureAwait(false);
+
         if (!result.IsSuccess || feedback)
         {
             return result;
