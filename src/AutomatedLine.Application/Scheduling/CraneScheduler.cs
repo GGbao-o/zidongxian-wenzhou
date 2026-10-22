@@ -233,7 +233,7 @@ public sealed class CraneScheduler : IHostedService
                             && c.Covers(candidate.Source.PositionX)
                             && c.Covers(candidate.Target.PositionX)
                             && statuses.TryGetValue(c.Id, out var s) && s is not null && !s.HasAlarm
-                            && s.PressureLimit == false) // null为读取未知，不能当作下压信号未亮。
+                            && s.PressureLimit == false) // null为读取未知，不能当作下压信号未亮。 下压信号必须为false
                 .OrderBy(c => Math.Abs(statuses[c.Id]!.XDisplay - candidate.Source.PositionX))   // 离源最近
                 .ToList();
             
