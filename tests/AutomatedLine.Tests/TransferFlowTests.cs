@@ -155,7 +155,7 @@ public class TransferFlowTests
         Assert.Equal(0, craneDriver.StatusReadCount);
     }
 
-    /// <summary>斜床放料：Z 降后相对 -YOffset，再放磁。</summary>
+    /// <summary>斜床放料：下降后相对-YOffset对接，放磁后保持对接Y回升，不返回中心Y。</summary>
     [Fact]
     public async Task Lathe_Place_Moves_Relative_By_YOffset()
     {
@@ -170,6 +170,8 @@ public class TransferFlowTests
         await new LatheHandler().PlaceAsync(ctx, target, CancellationToken.None);
 
         Assert.Contains("REL(0,-172,0)", craneDriver.Actions);
+        Assert.Equal("MAGNET_OFF", craneDriver.Actions[^2]);
+        Assert.Equal("MOVE(2000,-172,500)", craneDriver.Actions[^1]);
         Assert.Contains("CraneLoadInPlace=1", targetDriver.Writes);   // #1102 天车上料到位
         Assert.Contains("CraneLoadDone=1", targetDriver.Writes);
         Assert.Equal(0, craneDriver.StatusReadCount);

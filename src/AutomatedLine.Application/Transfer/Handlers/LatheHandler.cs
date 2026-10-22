@@ -23,7 +23,7 @@ public sealed class LatheHandler : ITransferHandler
     public Task<int> ClearHandshakeAsync(IDeviceDriver driver, string deviceName, IAppLogger logger, CancellationToken cancellationToken)
         => HandshakeReset.ClearAsync(driver, deviceName, WrittenHandshakePoints, logger, cancellationToken);
 
-    /// <inheritdoc />  斜床下料操作
+    /// <inheritdoc />  斜床下料
     public async Task PickAsync(TransferContext ctx, DeviceBase source, CancellationToken cancellationToken)
     {
         ctx.LogStep(source, "取料：开始（等设备请求下料 RequestUnload=1）");
@@ -34,8 +34,9 @@ public sealed class LatheHandler : ITransferHandler
         var pickY = y - yOffset;   // 二次偏移位置
 
         ctx.LogStep(source, $"取料：XY → 设备上方并做 Y 二次偏移（X={x} Y={pickY}，Y偏移={yOffset}）");
-        //y到偏移位置 绝对移动
+        //绝对移动 y其实移动到了偏移位置 这个是下料操作
         await ctx.MoveAbsoluteAsync(x, pickY, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        //微调操作
         await ctx.RefineXyAsync(x, pickY, cancellationToken).ConfigureAwait(false);
 
         var zTarget = z - CraneCoordinate.ZDrop(source.Type, ctx.Workpiece.Info.Diameter);
@@ -57,10 +58,11 @@ public sealed class LatheHandler : ITransferHandler
         await ctx.WaitDeviceAsync(source, "TailstockOpened", true, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(source, $"取料：Y 回工件中心（相对 +{yOffset}）");
-        //相对移动  走正数
+        //相对移动  读到尾做张开了 y需要二次移动    走正数  =0实际是不走
         await ctx.MoveRelativeAsync(0, yOffset, 0, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(source, "取料：Z 回升到安全高度");
+        //绝对移动 但是这个是回到y的中心位置
         await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(source, "取料：写 天车下料完成=1（CraneUnloadDone）");
@@ -68,7 +70,7 @@ public sealed class LatheHandler : ITransferHandler
         ctx.LogStep(source, "取料：完成（可离开源设备）");
     }
 
-    /// <inheritdoc /> 斜床上料操作
+    /// <inheritdoc /> 斜床上料
     public async Task PlaceAsync(TransferContext ctx, DeviceBase target, CancellationToken cancellationToken)
     {
         ctx.LogStep(target, "放料：开始（等设备请求数据 RequestData=1）");
@@ -94,14 +96,16 @@ public sealed class LatheHandler : ITransferHandler
 
         var zTarget = z - CraneCoordinate.ZDrop(target.Type, info.Diameter);
         ctx.LogStep(target, $"放料：Z 下降到放料位（X={x} Y={y} Z={zTarget}）");
+        //先下将到写窗中心位置
         await ctx.MoveAbsoluteAsync(x, y, zTarget, cancellationToken).ConfigureAwait(false);
 
         // 目标特有：Y 二次偏移 → 发天车上料到位(#1102) → 尾座夹紧
         ctx.LogStep(target, $"放料：Y 二次偏移进入顶尖（相对 −{yOffset}）");
-        // 上料是相对移动   下料这个步骤也是相对移动
+        // 这个是上料操作 z到位之后 y进行相对位移
         await ctx.MoveRelativeAsync(0, -yOffset, 0, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(target, "放料：写 天车上料到位=1（CraneLoadInPlace）");
+        //写上料到位信号
         await ctx.WriteDeviceAsync(target, "CraneLoadInPlace", 1, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(target, "放料：等机床尾座夹紧（TailstockClamped=1）");
@@ -110,8 +114,9 @@ public sealed class LatheHandler : ITransferHandler
         ctx.LogStep(target, "放料：放磁");
         await ctx.MagnetOffAsync(cancellationToken).ConfigureAwait(false);
 
-        ctx.LogStep(target, "放料：Z 回升到安全高度");
-        await ctx.MoveAbsoluteAsync(x, y, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
+        ctx.LogStep(target, $"放料：Z 回升到安全高度（X={x} Y={y - yOffset} Z={ctx.Crane.SafeZ}，保持二次偏移Y）");
+        // 退磁后保持已经对接的Y位置回升，避免本阶段又命令横移回工件中心。
+        await ctx.MoveAbsoluteAsync(x, y - yOffset, ctx.Crane.SafeZ, cancellationToken).ConfigureAwait(false);
 
         ctx.LogStep(target, "放料：写 天车上料完成=1（CraneLoadDone）");
         await ctx.WriteDeviceAsync(target, "CraneLoadDone", 1, cancellationToken).ConfigureAwait(false);
