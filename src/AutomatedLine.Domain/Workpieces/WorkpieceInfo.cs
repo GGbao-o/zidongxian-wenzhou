@@ -13,8 +13,8 @@ public sealed class WorkpieceInfo
     /// <summary>版号。</summary>
     public string PlateNo { get; init; } = string.Empty;
 
-    /// <summary>序号。</summary>
-    public int SerialNo { get; init; }
+    /// <summary>工件序号文本；录入入口去首尾空格并要求非空，保留前导零、字母及负号，不用于运动或排队计算。</summary>
+    public string SerialNo { get; init; } = string.Empty;
 
     /// <summary>长度。用于目标设备加工范围匹配。</summary>
     public double Length { get; init; }

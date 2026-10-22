@@ -18,8 +18,9 @@ public static class ErpJobParser
         var columns = line.Split(',').Select(value => value.Trim()).ToArray();
         if (columns.Length < 8) return Reject($"至少需要8列，实际{columns.Length}列", out error);
         if (columns[1].Length == 0) return Reject("第2列版号不能为空", out error);
-        if (!int.TryParse(columns[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var serial) || serial < 0)
-            return Reject("第3列序号必须为非负整数（>=0）", out error);
+        // 序号属于业务身份文本，不能转数字，否则001和1会误认为同一工件。
+        if (columns[2].Length == 0)
+            return Reject("第3列序号不能为空", out error);
         if (!ReadNumber(columns[3], out var length) || length <= 0)
             return Reject("第4列长度必须为有限正数", out error);
         if (!ReadNumber(columns[4], out var diameter) || diameter <= 0)
@@ -34,7 +35,7 @@ public static class ErpJobParser
 
         info = new WorkpieceInfo
         {
-            PrintContent = columns[0], PlateNo = columns[1], SerialNo = serial,
+            PrintContent = columns[0], PlateNo = columns[1], SerialNo = columns[2],
             Length = length, Diameter = diameter, PlugHole = hole,
             LatheMachiningMode = mode, PlugThickness = thickness
         };

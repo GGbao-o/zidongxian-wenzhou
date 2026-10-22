@@ -202,7 +202,7 @@ public sealed class ProcessPlanTests
         Assert.Contains(h.Logger.Messages, message => message.Contains("缺少原工艺快照"));
     }
 
-    private static WorkpieceInfo Info(int serial) => new() { PlateNo = "P", SerialNo = serial, Diameter = 100, Length = 700 };
+    private static WorkpieceInfo Info(int serial) => new() { PlateNo = "P", SerialNo = serial.ToString(), Diameter = 100, Length = 700 };
 
     // 运行真实宿主的一轮候选重建，不访问PLC，不依赖反射调用私有方法。
     private static async Task<IReadOnlyList<AutomatedLine.Domain.Tasks.CandidateTask>> GenerateAsync(Harness h)

@@ -77,6 +77,7 @@ public sealed class RuntimeTaskManager : IRuntimeTaskManager
         // 一批只持锁一次：按文件行序去重并完成入队，避免并发批次/人工启动插入本批中间。
         lock (_sync)
         {
+            // 版号和序号按精确文本身份去重；001与1、A与a分别保留，不参与数值排序。
             var identities = _tasks.Select(t => (t.Info.PlateNo, t.Info.SerialNo)).ToHashSet();
             ProcessPlanSnapshot? batchPlan = null;
             for (var index = 0; index < infos.Count; index++)

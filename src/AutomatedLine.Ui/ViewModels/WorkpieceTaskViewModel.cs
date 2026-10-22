@@ -113,7 +113,7 @@ public partial class WorkpieceTaskViewModel : ObservableObject
         var runtime = _task.Runtime;
 
         PlateNo = info.PlateNo;
-        SerialNo = info.SerialNo.ToString();
+        SerialNo = info.SerialNo;
         Diameter = info.Diameter;
         Length = info.Length;
         PlugThickness = info.PlugThickness;

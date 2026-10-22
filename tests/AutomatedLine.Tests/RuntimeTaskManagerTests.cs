@@ -18,7 +18,7 @@ public class RuntimeTaskManagerTests
         var task = manager.Add(new WorkpieceInfo
         {
             PlateNo = "P1",
-            SerialNo = 1,
+            SerialNo = "1",
             Diameter = 100,
             Length = 700
         });
@@ -37,7 +37,7 @@ public class RuntimeTaskManagerTests
         {
             RuntimeId = originalId,
             PlateNo = "P1",
-            SerialNo = 1,
+            SerialNo = "1",
             Diameter = 120,
             Length = 800,
             PlugHole = 100,

@@ -22,7 +22,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
     [ObservableProperty]
     private string _plateNo = string.Empty;
 
-    /// <summary>手工录入的整数序号（允许负数、0和正数；输入用文本，确认时转int）。</summary>
+    /// <summary>工件序号原始文本；确认时只去首尾空格并校验非空，保留前导零和字母等内容。</summary>
     [ObservableProperty]
     private string _serialNo = string.Empty;
 
@@ -73,7 +73,7 @@ public partial class AddWorkpieceViewModel : ObservableObject
         IsEditMode = true;
 
         PlateNo = info.PlateNo;
-        SerialNo = info.SerialNo.ToString();
+        SerialNo = info.SerialNo;
         DiameterText = info.Diameter.ToString(CultureInfo.CurrentCulture);
         LengthText = info.Length.ToString(CultureInfo.CurrentCulture);
         PlugThicknessText = info.PlugThickness.ToString(CultureInfo.CurrentCulture);
@@ -108,21 +108,21 @@ public partial class AddWorkpieceViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 确认时解析原始文本并校验：版号非空、序号为int整数、直径/长度为有限正数、堵厚为有限数值、堵孔70/100、斜床工艺0~10。
+    /// 确认时解析原始文本并校验：版号和序号非空、直径/长度为有限正数、堵厚为有限数值、堵孔70/100、斜床工艺0~10。
     /// 不回写输入文本，允许编辑中的小数点、尾零保持原样。
     /// </summary>
     /// <returns>合法返回 true</returns>
     public bool Validate() => TryReadInput(out _, out _, out _, out _);
 
     // 校验和组装复用同一套解析规则；错误文本不能退回上次输入成功的数值。
-    private bool TryReadInput(out int serialNo, out double diameter, out double length, out double plugThickness)
+    private bool TryReadInput(out string serialNo, out double diameter, out double length, out double plugThickness)
     {
-        var serialValid = int.TryParse(SerialNo.Trim(), out serialNo);
+        serialNo = (SerialNo ?? string.Empty).Trim();
         var diameterValid = TryParseFinite(DiameterText, out diameter);
         var lengthValid = TryParseFinite(LengthText, out length);
         var thicknessValid = TryParseFinite(PlugThicknessText, out plugThickness);
         return !string.IsNullOrWhiteSpace(PlateNo)
-               && serialValid
+               && serialNo.Length > 0
                && diameterValid && diameter > 0
                && lengthValid && length > 0
                && thicknessValid

@@ -11,6 +11,22 @@ namespace AutomatedLine.Tests;
 /// <summary>ERP真实解析、内存任务和磁盘消费回归，全部使用测试自建目录，不接触现场文件。</summary>
 public sealed class ErpImportTests
 {
+    /// <summary>ERP序号与人工添加共用文本语义，不按数字归一化或限制int范围。</summary>
+    /// <param name="serial">待接收的序号文本。</param>
+    [Theory]
+    [InlineData("001")]
+    [InlineData(" A-01 ")]
+    [InlineData("-2")]
+    [InlineData("1.5")]
+    [InlineData("2147483648000000000")]
+    [InlineData("试件甲")]
+    public void Parser_PreservesTextSerial(string serial)
+    {
+        Assert.True(ErpJobParser.TryParse($"PRINT,P,{serial},1200,180,70,1,25", out var info, out var error));
+        Assert.Null(error);
+        Assert.Equal(serial.Trim(), info!.SerialNo);
+    }
+
     /// <summary>服务器区域不同也保留长度/直径/堵厚小数，不进行PLC换算。</summary>
     /// <param name="culture">服务器数字区域设置</param>
     [Theory]
@@ -27,7 +43,7 @@ public sealed class ErpImportTests
             Assert.NotNull(info);
             Assert.Equal("A261014001-1", info.PrintContent);
             Assert.Equal("A261014001", info.PlateNo);
-            Assert.Equal(1, info.SerialNo);
+            Assert.Equal("1", info.SerialNo);
             Assert.Equal(1200.1, info.Length);
             Assert.Equal(180.3, info.Diameter);
             Assert.Equal(70, info.PlugHole);
@@ -38,18 +54,18 @@ public sealed class ErpImportTests
         finally { CultureInfo.CurrentCulture = previous; }
     }
 
-    /// <summary>ERP序号允许从0开始，仍以整数原值保存业务身份。</summary>
-    /// <param name="serial">允许的非负整数序号。</param>
+    /// <summary>原有纯数字序号仍可接收，业务身份现在保存为对应文本。</summary>
+    /// <param name="serial">用于生成原有格式行的数字。</param>
     [Theory]
     [InlineData(0)]
     [InlineData(1)]
     [InlineData(int.MaxValue)]
-    public void Parser_AcceptsNonNegativeSerial(int serial)
+    public void Parser_PreservesNumericSerialText(int serial)
     {
         Assert.True(ErpJobParser.TryParse(Row(serial), out var info, out var error));
         Assert.Null(error);
         Assert.NotNull(info);
-        Assert.Equal(serial, info.SerialNo);
+        Assert.Equal(serial.ToString(CultureInfo.InvariantCulture), info.SerialNo);
     }
 
     /// <summary>非法行明确失败，不能把非法字段默认为0或以NaN创建工件。</summary>
@@ -58,11 +74,8 @@ public sealed class ErpImportTests
     [Theory]
     [InlineData("bad", "8列")]
     [InlineData("X,,1,1200,180,70,1,25", "版号")]
-    [InlineData("X,P,-1,1200,180,70,1,25", "序号")]
     [InlineData("X,P,,1200,180,70,1,25", "序号")]
-    [InlineData("X,P,abc,1200,180,70,1,25", "序号")]
-    [InlineData("X,P,2147483648,1200,180,70,1,25", "序号")]
-    [InlineData("X,P,1.5,1200,180,70,1,25", "序号")]
+    [InlineData("X,P,   ,1200,180,70,1,25", "序号")]
     [InlineData("X,P,1,0,180,70,1,25", "长度")]
     [InlineData("X,P,1,NaN,180,70,1,25", "长度")]
     [InlineData("X,P,1,1200,-1,70,1,25", "直径")]
@@ -85,10 +98,10 @@ public sealed class ErpImportTests
     {
         var manager = new RuntimeTaskManager(new TestLogger(), TestProcessPlans.Create());
         var results = await Task.WhenAll(Enumerable.Range(0, 32).Select(_ => Task.Run(() =>
-            manager.TryAddImported(new WorkpieceInfo { PlateNo = "P", SerialNo = 1 }))));
+            manager.TryAddImported(new WorkpieceInfo { PlateNo = "P", SerialNo = "1" }))));
         Assert.Single(results.Where(x => x is not null));
         Assert.Single(manager.Snapshot());
-        var manual = manager.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = 1 });
+        var manual = manager.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = "1" });
         Assert.Equal(2, manager.Snapshot().Count);
         Assert.Equal(WorkpieceState.Created, manual.Runtime.TaskState);
         Assert.Equal(0, manual.Runtime.QueueOrder);
@@ -111,7 +124,7 @@ public sealed class ErpImportTests
         await Until(() => fixture.Manager.Snapshot().Count == 5 && new FileInfo(path).Length == 0
             && fixture.Service.Status.Message.Contains("已自动启动入队"));
         Assert.True(fixture.Service.Status.IsListening);
-        Assert.Equal(serials, fixture.Manager.Snapshot().Select(t => t.Info.SerialNo));
+        Assert.Equal(serials.Select(serial => serial.ToString(CultureInfo.InvariantCulture)), fixture.Manager.Snapshot().Select(t => t.Info.SerialNo));
         Assert.Equal(Enumerable.Range(1, 5), fixture.Manager.Snapshot().Select(t => t.Runtime.QueueOrder));
         Assert.All(fixture.Manager.Snapshot(), t =>
         {
@@ -150,7 +163,7 @@ public sealed class ErpImportTests
     public async Task InvalidAndDuplicateRows_Remain_ValidRowIsConsumed()
     {
         await using var fixture = new Fixture();
-        var existing = fixture.Manager.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = 1, Length = 999 });
+        var existing = fixture.Manager.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = "1", Length = 999 });
         await File.WriteAllLinesAsync(fixture.Path, new[] { Row(1), "bad", Row(2) });
         await fixture.Service.StartAsync(default);
         fixture.Service.SetListening(true);
@@ -164,26 +177,30 @@ public sealed class ErpImportTests
         Assert.Contains(fixture.Logger.Messages, m => m.Contains("第2行") && m.Contains("8列"));
     }
 
-    /// <summary>序号0正常导入并清理，同版号序号0仍去重，负序号原行保留。</summary>
+    /// <summary>字符串序号保持文件行序，前导零和大小写分别保留，只有完整相同身份才去重。</summary>
     /// <returns>异步文件消费验证任务。</returns>
     [Fact]
-    public async Task ZeroSerial_IsImportedAndConsumed_DuplicatesAndNegativeRemain()
+    public async Task StringSerials_AreConsumedInFileOrder_OnlyExactDuplicatesRemain()
     {
         await using var fixture = new Fixture();
-        await File.WriteAllLinesAsync(fixture.Path, new[] { Row(0), Row(0), Row(1), Row(-1) });
+        var serials = new[] { "001", "1", "-1", "A-01", "a-01" };
+        var duplicate = "PRINT,P, 001 ,1200,180,70,1,25";
+        var blank = "PRINT,P,   ,1200,180,70,1,25";
+        await File.WriteAllLinesAsync(fixture.Path,
+            serials.Select(serial => $"PRINT,P,{serial},1200,180,70,1,25").Concat(new[] { duplicate, blank }));
         await fixture.Service.StartAsync(default);
         fixture.Service.SetListening(true);
-        await Until(() => fixture.Manager.Snapshot().Count == 2 && fixture.File.WriteCount >= 1);
+        await Until(() => fixture.Manager.Snapshot().Count == 5 && fixture.File.WriteCount >= 1);
         fixture.Service.SetListening(false);
         await fixture.Service.StopAsync(default);
 
-        Assert.Equal(new[] { 0, 1 }, fixture.Manager.Snapshot().Select(task => task.Info.SerialNo));
+        Assert.Equal(serials, fixture.Manager.Snapshot().Select(task => task.Info.SerialNo));
         Assert.All(fixture.Manager.Snapshot(), task => Assert.Equal(WorkpieceState.Waiting, task.Runtime.TaskState));
-        Assert.Equal(new[] { 1, 2 }, fixture.Manager.Snapshot().Select(task => task.Runtime.QueueOrder));
-        Assert.Equal(new[] { Row(0), Row(-1) }, await File.ReadAllLinesAsync(fixture.Path));
-        Assert.Equal(2, fixture.Service.Status.ImportedCount);
-        Assert.Contains(fixture.Logger.Messages, message => message.Contains("第2行") && message.Contains("重复"));
-        Assert.Contains(fixture.Logger.Messages, message => message.Contains("第4行") && message.Contains("序号必须为非负整数"));
+        Assert.Equal(Enumerable.Range(1, 5), fixture.Manager.Snapshot().Select(task => task.Runtime.QueueOrder));
+        Assert.Equal(new[] { duplicate, blank }, await File.ReadAllLinesAsync(fixture.Path));
+        Assert.Equal(5, fixture.Service.Status.ImportedCount);
+        Assert.Contains(fixture.Logger.Messages, message => message.Contains("第6行") && message.Contains("重复"));
+        Assert.Contains(fixture.Logger.Messages, message => message.Contains("第7行") && message.Contains("序号不能为空"));
     }
 
     /// <summary>清理失败后暂停/继续仍复用回执，不把成功行作为重复错误遗留。</summary>
@@ -394,7 +411,7 @@ public sealed class ErpImportTests
         Assert.Same(infos[1], result[1]!.Info);
         Assert.Null(result[2]);
         Assert.Same(infos[3], result[3]!.Info);
-        Assert.Equal(new[] { 1, 2, 3 }, manager.Snapshot().Select(t => t.Info.SerialNo));
+        Assert.Equal(new[] { "1", "2", "3" }, manager.Snapshot().Select(t => t.Info.SerialNo));
         Assert.Same(existing, manager.Snapshot()[0]);
         Assert.Equal(1, notifications);
         Assert.Equal(3, observedCount);
@@ -442,7 +459,7 @@ public sealed class ErpImportTests
         Assert.True(manager.Start(existing.Id));
         var manual = manager.Add(Info(6));
         var notifications = 0;
-        var observed = Array.Empty<(int Serial, WorkpieceState State, int Order)>();
+        var observed = Array.Empty<(string Serial, WorkpieceState State, int Order)>();
         manager.Changed += (_, _) =>
         {
             notifications++;
@@ -455,7 +472,7 @@ public sealed class ErpImportTests
         Assert.Equal(1, notifications);
         Assert.Equal(5, observed.Length);
         Assert.Null(result[2]);
-        Assert.Equal(new[] { 5, 9, 0, 2 }, observed.Where(task => task.State == WorkpieceState.Waiting)
+        Assert.Equal(new[] { "5", "9", "0", "2" }, observed.Where(task => task.State == WorkpieceState.Waiting)
             .OrderBy(task => task.Order).Select(task => task.Serial));
         Assert.Equal(new[] { 1, 2, 3, 4 }, observed.Where(task => task.State == WorkpieceState.Waiting)
             .Select(task => task.Order));
@@ -516,7 +533,7 @@ public sealed class ErpImportTests
         fixture.Service.SetListening(false);
         await fixture.Service.StopAsync(default);
         Assert.Equal(new[] { lines[0], lines[2], lines[3] }, await File.ReadAllLinesAsync(fixture.Path));
-        Assert.Equal(new[] { 1, 2 }, fixture.Manager.Snapshot().Select(t => t.Info.SerialNo));
+        Assert.Equal(new[] { "1", "2" }, fixture.Manager.Snapshot().Select(t => t.Info.SerialNo));
     }
 
     /// <summary>文件里因重复保留的行，在旧Completed记录删除后可以自动再次接收并消耗。</summary>

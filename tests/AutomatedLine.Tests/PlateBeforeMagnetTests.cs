@@ -38,7 +38,7 @@ public class PlateBeforeMagnetTests
             var drivers = new DriverRegistry();
             drivers.RegisterCrane(Driver);
             Context = new TransferContext(new Crane(1, 1, "天车1"),
-                new WorkpieceTask(new WorkpieceInfo { PlateNo = "测试板", SerialNo = 7 }),
+                new WorkpieceTask(new WorkpieceInfo { PlateNo = "测试板", SerialNo = "7" }),
                 drivers, new FakeConfigurationStore(), Options, Logger);
         }
     }

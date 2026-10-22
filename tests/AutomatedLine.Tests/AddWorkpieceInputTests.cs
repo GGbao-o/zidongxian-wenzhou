@@ -7,6 +7,37 @@ namespace AutomatedLine.Tests;
 /// <summary>验证新增和编辑工件确认时解析小数，输入中间状态和错误文本不会使用旧数值。</summary>
 public sealed class AddWorkpieceInputTests : IDisposable
 {
+    /// <summary>工件序号按文本保存，去首尾空格但不丢前导零或进行数值转换。</summary>
+    /// <param name="serial">原始序号文本。</param>
+    [Theory]
+    [InlineData("001")]
+    [InlineData(" A-01 ")]
+    [InlineData("-2")]
+    [InlineData("1.5")]
+    [InlineData("2147483648000000000")]
+    [InlineData("试件甲")]
+    public void Serial_PreservesNonEmptyText(string serial)
+    {
+        var vm = ValidInput();
+        vm.SerialNo = serial;
+        Assert.True(vm.Validate());
+        Assert.Equal(serial.Trim(), vm.BuildWorkpieceInfo().SerialNo);
+        Assert.Equal(serial, vm.SerialNo);
+    }
+
+    /// <summary>序号改为字符串后仍禁止空值或全空白提交，避免生成无身份的工件。</summary>
+    /// <param name="serial">空白序号。</param>
+    [Theory]
+    [InlineData("")]
+    [InlineData(" \t ")]
+    public void Serial_RejectsBlankText(string serial)
+    {
+        var vm = ValidInput();
+        vm.SerialNo = serial;
+        Assert.False(vm.Validate());
+        Assert.Throws<InvalidOperationException>(() => vm.BuildWorkpieceInfo());
+    }
+
     private readonly CultureInfo _originalCulture = CultureInfo.CurrentCulture;
 
     /// <summary>固定小数语法，避免开发机区域设置改变非法文本案例的含义。</summary>
@@ -25,7 +56,7 @@ public sealed class AddWorkpieceInputTests : IDisposable
         Assert.Equal(180.3, info.Diameter);
         Assert.Equal(1200.1, info.Length);
         Assert.Equal(25.5, info.PlugThickness);
-        Assert.Equal(0, info.SerialNo);
+        Assert.Equal("0", info.SerialNo);
         Assert.Equal("180.30", vm.DiameterText);
         Assert.Equal("1200.10", vm.LengthText);
         Assert.Equal("25.50", vm.PlugThicknessText);
@@ -113,7 +144,7 @@ public sealed class AddWorkpieceInputTests : IDisposable
         CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
         var original = new WorkpieceInfo
         {
-            PlateNo = "EDIT", SerialNo = 0, Diameter = 180.3, Length = 1200.1,
+            PlateNo = "EDIT", SerialNo = "00A-1", Diameter = 180.3, Length = 1200.1,
             PlugThickness = 25.5, PlugHole = 100, LatheMachiningMode = 3
         };
         var vm = new AddWorkpieceViewModel();
@@ -124,6 +155,7 @@ public sealed class AddWorkpieceInputTests : IDisposable
         Assert.True(vm.Validate());
         var info = vm.BuildWorkpieceInfo();
         Assert.Equal(original.RuntimeId, info.RuntimeId);
+        Assert.Equal(original.SerialNo, info.SerialNo);
         Assert.Equal(original.Diameter, info.Diameter);
         Assert.Equal(original.Length, info.Length);
         Assert.Equal(original.PlugThickness, info.PlugThickness);

@@ -109,13 +109,13 @@ public sealed class CompletedTaskCleanupTests
     public void Erp_ReacceptsIdentityOnlyAfterCompletedRecordIsRemoved()
     {
         var h = new Harness();
-        var info = new WorkpieceInfo { PlateNo = "REPEAT", SerialNo = 0 };
+        var info = new WorkpieceInfo { PlateNo = "REPEAT", SerialNo = "0" };
         var old = h.Tasks.TryAddImported(info)!;
         old.Runtime.MarkCompleted(Now.AddSeconds(-60));
         var previousOrder = old.Runtime.QueueOrder;
-        Assert.Null(h.Tasks.TryAddImported(new WorkpieceInfo { PlateNo = "REPEAT", SerialNo = 0 }));
+        Assert.Null(h.Tasks.TryAddImported(new WorkpieceInfo { PlateNo = "REPEAT", SerialNo = "0" }));
         h.Tasks.RemoveCompleted(Now.AddSeconds(-60), h.Devices, h.Cranes);
-        var next = h.Tasks.TryAddImported(new WorkpieceInfo { PlateNo = "REPEAT", SerialNo = 0 })!;
+        var next = h.Tasks.TryAddImported(new WorkpieceInfo { PlateNo = "REPEAT", SerialNo = "0" })!;
         Assert.NotEqual(old.Id, next.Id);
         Assert.Equal(WorkpieceState.Waiting, next.Runtime.TaskState);
         Assert.True(next.Runtime.QueueOrder > previousOrder);
@@ -212,7 +212,7 @@ public sealed class CompletedTaskCleanupTests
         }
         public WorkpieceTask Add(int serial, double? secondsAgo = null)
         {
-            var task = Tasks.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = serial });
+            var task = Tasks.Add(new WorkpieceInfo { PlateNo = "P", SerialNo = serial.ToString() });
             if (secondsAgo.HasValue) task.Runtime.MarkCompleted(Now.AddSeconds(secondsAgo.Value));
             return task;
         }
