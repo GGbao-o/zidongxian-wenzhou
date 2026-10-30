@@ -10,6 +10,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- 单实例协议独立于WPF，直接测试生产类，不启动宿主或连接现场资源。 -->
+    <Compile Include="..\..\src\AutomatedLine.Ui\Services\SingleInstanceService.cs" Link="Ui\SingleInstanceService.cs" />
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.5.3" />

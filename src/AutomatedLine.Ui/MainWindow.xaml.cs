@@ -24,12 +24,18 @@ public partial class MainWindow : FluentWindow
     protected override void OnClosing(CancelEventArgs e)
     {
         base.OnClosing(e);
-        if (e.Cancel) return;
+        if (e.Cancel || System.Windows.Application.Current is App { IsShutdownComplete: true }) return;
 
         // 在窗口真正关闭、触发宿主退出前询问；默认选择取消，避免误按回车退出。
         var result = System.Windows.MessageBox.Show(this,
             "确定要关闭程序吗？", "关闭程序",
             MessageBoxButton.OKCancel, MessageBoxImage.Question, MessageBoxResult.Cancel);
         e.Cancel = result != MessageBoxResult.OK;
+        if (!e.Cancel && System.Windows.Application.Current is App app)
+        {
+            // WPF的OnExit不会等待async void；先阻止关闭，宿主停止后由App真正退出。
+            e.Cancel = true;
+            _ = app.ShutdownApplicationAsync();
+        }
     }
 }

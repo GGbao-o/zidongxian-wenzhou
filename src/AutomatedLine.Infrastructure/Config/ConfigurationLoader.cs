@@ -69,7 +69,7 @@ public class ConfigurationLoader : IConfigurationLoader
     }
 
     /// <inheritdoc />
-    public Task<ConfigurationLoadResult> LoadAsync(CancellationToken cancellationToken = default)
+    public async Task<ConfigurationLoadResult> LoadAsync(CancellationToken cancellationToken = default)
     {
         // 重新装载前先清空，保证界面上删除的配置不会残留在内存
         _deviceRegistry.Clear();
@@ -78,11 +78,12 @@ public class ConfigurationLoader : IConfigurationLoader
         _craneChannels.Clear();   // 排空残留任务，避免旧配置的任务继续执行
 
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 重新装载也可能发生在UI线程；同步版本探测必须离开UI后再构造上下文。
+        var db = await Task.Run(() => scope.ServiceProvider.GetRequiredService<AppDbContext>(), cancellationToken).ConfigureAwait(false);
 
-        // 全部配置来自数据库；不再写入任何样例数据（模拟数据已移除）
-        var deviceConfigs = db.DeviceConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.Id).ToList();
-        var craneConfigs = db.CraneConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.No).ToList();
+        // 真正异步等待数据库并传递取消；同一个DbContext的两次查询保持串行，不能并发使用。
+        var deviceConfigs = await db.DeviceConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.Id).ToListAsync(cancellationToken).ConfigureAwait(false);
+        var craneConfigs = await db.CraneConfigs.AsNoTracking().Where(c => c.IsEnabled).OrderBy(c => c.No).ToListAsync(cancellationToken).ConfigureAwait(false);
 
         var driverCount = 0;
 
@@ -140,7 +141,7 @@ public class ConfigurationLoader : IConfigurationLoader
         _logger.Info(LogCategory.System,
             $"配置装载完成：设备 {deviceConfigs.Count} 台、天车 {craneConfigs.Count} 台、驱动 {driverCount} 个");
 
-        return Task.FromResult(new ConfigurationLoadResult(deviceConfigs.Count, craneConfigs.Count, driverCount));
+        return new ConfigurationLoadResult(deviceConfigs.Count, craneConfigs.Count, driverCount);
     }
 
     /// <summary>

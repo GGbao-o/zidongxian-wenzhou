@@ -30,7 +30,8 @@ public class ConfigurationStore : IConfigurationStore
     public async Task<IReadOnlyList<CraneConfigDto>> GetCraneConfigsAsync(CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 上下文构造包含同步服务器版本探测；离线或切换连接时也不能阻塞页面首帧。
+        var db = await Task.Run(() => scope.ServiceProvider.GetRequiredService<AppDbContext>(), cancellationToken).ConfigureAwait(false);
 
         var entities = await db.CraneConfigs.AsNoTracking()
             .OrderBy(c => c.No)
@@ -43,7 +44,8 @@ public class ConfigurationStore : IConfigurationStore
     public async Task SaveCraneConfigAsync(CraneConfigDto dto, CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 上下文构造包含同步服务器版本探测；离线或切换连接时也不能阻塞页面首帧。
+        var db = await Task.Run(() => scope.ServiceProvider.GetRequiredService<AppDbContext>(), cancellationToken).ConfigureAwait(false);
 
         var entity = await db.CraneConfigs.FirstOrDefaultAsync(c => c.Id == dto.Id, cancellationToken).ConfigureAwait(false);
         if (entity is null)
@@ -66,7 +68,8 @@ public class ConfigurationStore : IConfigurationStore
     public async Task DeleteCraneConfigAsync(int id, CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 上下文构造包含同步服务器版本探测；离线或切换连接时也不能阻塞页面首帧。
+        var db = await Task.Run(() => scope.ServiceProvider.GetRequiredService<AppDbContext>(), cancellationToken).ConfigureAwait(false);
 
         var entity = await db.CraneConfigs.FirstOrDefaultAsync(c => c.Id == id, cancellationToken).ConfigureAwait(false);
         if (entity is not null)
@@ -80,7 +83,8 @@ public class ConfigurationStore : IConfigurationStore
     public async Task<IReadOnlyList<DeviceConfigDto>> GetDeviceConfigsAsync(CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 上下文构造包含同步服务器版本探测；离线或切换连接时也不能阻塞页面首帧。
+        var db = await Task.Run(() => scope.ServiceProvider.GetRequiredService<AppDbContext>(), cancellationToken).ConfigureAwait(false);
         //ToListAsync() 会立即执行 LINQ 查询，把 DeviceConfigs 表的数据真正从数据库拉取到内存里
         var entities = await db.DeviceConfigs.AsNoTracking()
             .OrderBy(d => d.Id)
@@ -93,7 +97,8 @@ public class ConfigurationStore : IConfigurationStore
     public async Task SaveDeviceConfigAsync(DeviceConfigDto dto, CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 上下文构造包含同步服务器版本探测；离线或切换连接时也不能阻塞页面首帧。
+        var db = await Task.Run(() => scope.ServiceProvider.GetRequiredService<AppDbContext>(), cancellationToken).ConfigureAwait(false);
 
         var entity = await db.DeviceConfigs.FirstOrDefaultAsync(d => d.Id == dto.Id, cancellationToken).ConfigureAwait(false);
         if (entity is null)
@@ -115,7 +120,8 @@ public class ConfigurationStore : IConfigurationStore
     public async Task DeleteDeviceConfigAsync(int id, CancellationToken cancellationToken = default)
     {
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // 上下文构造包含同步服务器版本探测；离线或切换连接时也不能阻塞页面首帧。
+        var db = await Task.Run(() => scope.ServiceProvider.GetRequiredService<AppDbContext>(), cancellationToken).ConfigureAwait(false);
 
         var entity = await db.DeviceConfigs.FirstOrDefaultAsync(d => d.Id == id, cancellationToken).ConfigureAwait(false);
         if (entity is not null)
