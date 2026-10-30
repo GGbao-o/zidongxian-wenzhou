@@ -21,8 +21,10 @@ public sealed class ActiveAlarmStore
     /// 新增或合并一条报警。
     /// </summary>
     /// <param name="alarm">报警</param>
-    public void Raise(ActiveAlarm alarm)
+    /// <returns>本次合并后的稳定显示快照，供自动弹窗使用相同次数、时间和诊断。</returns>
+    public ActiveAlarm Raise(ActiveAlarm alarm)
     {
+        ActiveAlarm published;
         lock (_sync)
         {
             var existing = _alarms.FirstOrDefault(a =>
@@ -31,16 +33,26 @@ public sealed class ActiveAlarmStore
             if (existing is not null)
             {
                 // 同源同内容：合并计数并刷新时间，不新增行
-                existing.Count++;
-                existing.LastAt = DateTime.Now;
+                // 替换对象而非原地修改，旧窗口保持旧现场；诊断缺失时也不能沿用上一次现场。
+                var merged = new ActiveAlarm
+                {
+                    Id = existing.Id, Count = existing.Count + 1, LastAt = DateTime.Now,
+                    Level = alarm.Level, Source = alarm.Source, Message = alarm.Message,
+                    SystemAction = alarm.SystemAction, ResourceId = alarm.ResourceId,
+                    ResourceIsCrane = alarm.ResourceIsCrane, Diagnostic = alarm.Diagnostic
+                };
+                _alarms[_alarms.IndexOf(existing)] = merged;
+                published = merged.CreateSnapshot();
             }
             else
             {
-                _alarms.Insert(0, alarm);
+                _alarms.Insert(0, alarm.CreateSnapshot());
+                published = alarm.CreateSnapshot();
             }
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
+        return published;
     }
 
     /// <summary>
@@ -85,7 +97,7 @@ public sealed class ActiveAlarmStore
     {
         lock (_sync)
         {
-            return _alarms.ToList();
+            return _alarms.Select(alarm => alarm.CreateSnapshot()).ToList();
         }
     }
 }

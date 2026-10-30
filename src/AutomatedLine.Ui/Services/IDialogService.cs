@@ -9,6 +9,11 @@ namespace AutomatedLine.Ui.Services;
 /// </summary>
 public interface IDialogService
 {
+    /// <summary>显示固定报警快照，手动与自动入口使用同一个只读窗口。</summary>
+    /// <param name="alarm">报警及已有诊断。</param>
+    /// <param name="automatic">是否使用自动异常标题，不参与级别或线路判断。</param>
+    void ShowAlarmDetails(AutomatedLine.Domain.Alarms.ActiveAlarm alarm, bool automatic = false);
+
     /// <summary>启动线路前提醒人工确认1、2号天车安全位置，不读取或判断现场坐标。</summary>
     /// <returns>仅点击确定返回true；取消、关闭或Esc返回false。</returns>
     bool ShowLineStartConfirmation();

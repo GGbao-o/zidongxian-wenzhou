@@ -42,13 +42,15 @@ public sealed class AlarmManager
     /// <param name="systemAction">系统动作说明，可为空</param>
     /// <param name="resourceId">关联资源号，可为空</param>
     /// <param name="resourceIsCrane">关联资源是否天车</param>
+    /// <param name="diagnostic">清理前固定的可选诊断，只用于展示，不参与报警或线路判断。</param>
     public void Raise(
         AlarmLevel level,
         string source,
         string message,
         string? systemAction = null,
         int? resourceId = null,
-        bool resourceIsCrane = false)
+        bool resourceIsCrane = false,
+        AlarmDiagnostic? diagnostic = null)
     {
         var alarm = new ActiveAlarm
         {
@@ -57,10 +59,11 @@ public sealed class AlarmManager
             Message = message,
             SystemAction = systemAction,
             ResourceId = resourceId,
-            ResourceIsCrane = resourceIsCrane
+            ResourceIsCrane = resourceIsCrane,
+            Diagnostic = diagnostic
         };
 
-        Store.Raise(alarm);
+        var published = Store.Raise(alarm);
 
         // Error 及以上写错误日志，其余写警告；都归到 Alarm 类别，便于按天查阅
         var text = systemAction is null ? $"{source} {message}" : $"{source} {message}（系统动作：{systemAction}）";
@@ -74,6 +77,6 @@ public sealed class AlarmManager
         }
 
         // 通知订阅者（界面弹窗）
-        Raised?.Invoke(this, alarm);
+        Raised?.Invoke(this, published);
     }
 }

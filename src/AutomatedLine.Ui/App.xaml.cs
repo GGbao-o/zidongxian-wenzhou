@@ -184,10 +184,8 @@ public partial class App : System.Windows.Application
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (_shutdownTask is not null) return;
-                var resource = alarm.ResourceId is null ? string.Empty
-                    : (alarm.ResourceIsCrane ? $"天车{alarm.ResourceId}" : $"设备{alarm.ResourceId}");
-                MessageBox.Show($"{alarm.Message}\n\n来源：{alarm.Source} {resource}\n系统动作：{alarm.SystemAction}\n时间：{alarm.LastAt:yyyy-MM-dd HH:mm:ss}",
-                    "线路异常（已暂停）", MessageBoxButton.OK, MessageBoxImage.Error);
+                // 和报警页共用详情；传入事件快照，不按当前任务拼接，不查询日志。
+                _host!.Services.GetRequiredService<IDialogService>().ShowAlarmDetails(alarm, automatic: true);
             }));
         };
     }

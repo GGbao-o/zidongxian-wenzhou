@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using AutomatedLine.Domain.Alarms;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Configuration;
 using AutomatedLine.Application.Runtime;
@@ -77,6 +78,26 @@ public sealed class TransferContext
     /// <summary>本次搬运已进入目标设备放料交互；目标尚未接收内存工件时也可能已经写过握手。</summary>
     internal bool TargetInteractionStarted { get; set; }
 
+    // 每次进入操作先清旧诊断；只保存该操作已经取得的数据，不跨操作借用旧反馈。
+    private AlarmDiagnostic _diagnostic = new();
+    private string? _lastPublishedStep;
+
+    /// <summary>在异常补偿之前固定已有现场，不读取PLC、当前数据库或日志。</summary>
+    /// <param name="route">本次路线。</param>
+    /// <param name="phase">失败阶段。</param>
+    /// <param name="exception">实际捕获异常；为空时不补造堆栈。</param>
+    /// <returns>只包含固定值的诊断，不受后续工件清理影响。</returns>
+    public AlarmDiagnostic CaptureDiagnostic(string route, string phase, Exception? exception = null)
+        => _diagnostic with
+        {
+            CapturedAt = DateTime.Now, TaskId = _transportTaskId,
+            Workpiece = Workpiece.Info.ToString(), Route = route, Phase = phase,
+            LastStep = _lastPublishedStep, ExceptionDetail = exception?.ToString()
+        };
+
+    private void BeginDiagnostic(string operation, string parameters)
+        => _diagnostic = new AlarmDiagnostic { Operation = operation, Parameters = parameters };
+
     /// <summary>天车驱动。</summary>
     public ICraneDriver CraneDriver
         => _drivers.GetCrane(Crane.Id) ?? throw new InvalidOperationException($"天车 {Crane.Id} 无驱动");
@@ -127,6 +148,7 @@ public sealed class TransferContext
     public async Task MoveAbsoluteAsync(double x, double y, double z, CancellationToken cancellationToken)
     {
         var (ix, iy, iz) = ((int)Math.Round(x), (int)Math.Round(y), (int)Math.Round(z));
+        BeginDiagnostic("绝对运动", $"目标编码器X={ix} Y={iy} Z={iz}");
         _logger.Info(LogCategory.StateMachine, $"{LogTag} 绝对运动下发：原始目标XYZ=({x},{y},{z})，取整目标XYZ=({ix},{iy},{iz})；等待驱动实时到位/下压判定结果");
         var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MoveAbsoluteAsync(ix, iy, iz, cancellationToken).ConfigureAwait(false);
@@ -145,6 +167,7 @@ public sealed class TransferContext
     /// <exception cref="InvalidOperationException">参数非法、读取失败、报警、任一轴超限或相对运动失败，由原搬运异常路径处理。</exception>
     public async Task RefineXyAsync(double x, double y, CancellationToken cancellationToken)
     {
+        BeginDiagnostic("XY微调检查", $"目标编码器X={x} Y={y}");
         cancellationToken.ThrowIfCancellationRequested();
         var (ix, iy) = ((int)Math.Round(x), (int)Math.Round(y));
         var tolerance = Options.Crane.XyRefineToleranceMm;
@@ -162,6 +185,7 @@ public sealed class TransferContext
         if (status is null) throw new InvalidOperationException($"{Tag} XY微调读取天车状态失败，未下发微调");
         if (status.HasAlarm) throw new InvalidOperationException($"{Tag} XY微调发现天车报警，未下发微调");
         //获取目标位置与当前编码器位置的差值
+        _diagnostic = _diagnostic with { Observation = $"编码器X={status.XEncoder} Y={status.YEncoder}，报警={status.HasAlarm}" };
         var errorX = (long)ix - status.XEncoder;
         var errorY = (long)iy - status.YEncoder;
         var absErrorX = Math.Abs(errorX);
@@ -200,6 +224,7 @@ public sealed class TransferContext
     /// <returns>异步运动任务；日志不增加位置读取或运动指令。</returns>
     public async Task MoveRelativeAsync(int dx, int dy, int dz, CancellationToken cancellationToken)
     {
+        BeginDiagnostic("相对运动", $"相对增量dX={dx} dY={dy} dZ={dz}");
         _logger.Info(LogCategory.StateMachine, $"{LogTag} 相对运动 → dX{dx} dY{dy} dZ{dz}");
         var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MoveRelativeAsync(dx, dy, dz, cancellationToken).ConfigureAwait(false);
@@ -215,6 +240,7 @@ public sealed class TransferContext
     /// <returns>异步设置任务；记录取整参数和驱动返回结果。</returns>
     public async Task SetCraneSpeedAsync(CancellationToken cancellationToken)
     {
+        BeginDiagnostic("设置天车速度", $"速度X={Crane.SpeedX} Y={Crane.SpeedY} Z={Crane.SpeedZ}；加速度X={Crane.AccelX} Y={Crane.AccelY} Z={Crane.AccelZ}；减速度X={Crane.DecelX} Y={Crane.DecelY} Z={Crane.DecelZ}");
         _logger.Info(LogCategory.StateMachine,
             $"{LogTag} 设置天车速度（速度/加速度/减速度，原配置→取整指令）：" +
             $"X=({Crane.SpeedX},{Crane.AccelX},{Crane.DecelX})→({(int)Math.Round(Crane.SpeedX)},{(int)Math.Round(Crane.AccelX)},{(int)Math.Round(Crane.DecelX)})，" +
@@ -238,6 +264,7 @@ public sealed class TransferContext
     /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOnAsync(CancellationToken cancellationToken)
     {
+        BeginDiagnostic("充磁", $"等待X6=1，反馈等待={Options.Crane.MagnetFeedbackDelayMs}ms");
         _logger.Info(LogCategory.StateMachine, $"{LogTag} 充磁下发：等待驱动完成触发脉冲、复位及本次配置延时后单读X6=1；取料充磁调用标志={MagnetCommandStarted}");
         var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MagnetOnAsync(cancellationToken).ConfigureAwait(false);
@@ -255,6 +282,7 @@ public sealed class TransferContext
     /// <returns>异步命令任务，失败抛异常</returns>
     public async Task MagnetOffAsync(CancellationToken cancellationToken)
     {
+        BeginDiagnostic("放磁", $"等待X7=1，反馈等待={Options.Crane.MagnetFeedbackDelayMs}ms");
         _logger.Info(LogCategory.StateMachine, $"{LogTag} 放磁下发：等待驱动完成触发脉冲、复位及本次配置延时后单读X7=1");
         var started = Stopwatch.GetTimestamp();
         var result = await CraneDriver.MagnetOffAsync(cancellationToken).ConfigureAwait(false);
@@ -270,6 +298,7 @@ public sealed class TransferContext
     /// <returns>任一次有板时完成；配置非法、次数耗尽、专用读取/运动失败或取消时抛异常。</returns>
     public async Task CheckPlateBeforeMagnetAsync(CancellationToken cancellationToken)
     {
+        BeginDiagnostic("取料有板检查", $"期望X11=1");
         //从配置中拿下次数和下将mm值
         var retryCount = Options.StateMachine.PickPlateRetryCount;
         var stepMm = Options.StateMachine.PickPlateStepMm;
@@ -293,10 +322,13 @@ public sealed class TransferContext
                     $"{LogTag} 取料：检查第{(long)completedDrops + 1}次前等待500ms，已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm");
                 await Task.Delay(500, cancellationToken).ConfigureAwait(false);
                 action = "专用读取X11";
+                BeginDiagnostic("取料有板检查", $"期望X11=1，已补降{completedDrops}/{retryCount}次");
                 // 只有专用读取明确返回false才允许继续下降；通信失败不能解释成无板，也不读取缓存判定。
                 var hasPlate = await CraneDriver.ReadHasPlateAsync(cancellationToken).ConfigureAwait(false);
                 action = "读取诊断位置";
                 position = await ReadPlateCheckPositionAsync(cancellationToken).ConfigureAwait(false);
+                BeginDiagnostic("取料有板检查", $"期望X11=1，补降上限={retryCount}次，单次={stepMm}mm");
+                _diagnostic = _diagnostic with { Observation = $"X11={(hasPlate ? 1 : 0)}，已完成补降{completedDrops}次，累计指令下降{totalCommandDropMm}mm，{position}" };
                 var progress = $"已完成补降{completedDrops}/{retryCount}次，累计指令下降{totalCommandDropMm}mm，{position}";
                 _logger.Info(LogCategory.StateMachine,
                     $"{LogTag} 取料：检查第{(long)completedDrops + 1}次，X11={(hasPlate ? 1 : 0)}，{progress}");
@@ -363,6 +395,7 @@ public sealed class TransferContext
     /// <returns>异步等待任务；只记录原有读取结果，保留原超时和报警判定。</returns>
     public async Task WaitCraneAsync(Func<CraneStatusDto, bool> predicate, string description, CancellationToken cancellationToken)
     {
+        BeginDiagnostic("等待天车状态", $"期望条件：{description}；超时上限={Options.StateMachine.HandshakeTimeoutMs}ms；来源=原实时读取");
         _logger.Info(LogCategory.StateMachine, $"{LogTag} 等待天车 {description}：实时读取，超时={Options.StateMachine.HandshakeTimeoutMs}ms，轮询等待=200ms");
         var timeout = TimeSpan.FromMilliseconds(Options.StateMachine.HandshakeTimeoutMs);
         var deadline = DateTime.UtcNow + timeout;
@@ -376,6 +409,7 @@ public sealed class TransferContext
             var observation = dto is null ? "实时状态不可用" :
                 $"显示XYZ=({dto.XDisplay},{dto.YDisplay},{dto.ZDisplay})，编码器XYZ=({dto.XEncoder},{dto.YEncoder},{dto.ZEncoder})，" +
                 $"有板={FormatLogValue(dto.HasPlate)}，充磁={FormatLogValue(dto.MagnetizeFeedback)}，退磁={FormatLogValue(dto.DemagnetizeFeedback)}，报警={dto.HasAlarm}";
+            _diagnostic = _diagnostic with { Observation = observation, ElapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds };
             if (observation != lastObservation || Stopwatch.GetElapsedTime(lastLoggedAt).TotalMilliseconds >= 2000)
             {
                 _logger.Info(LogCategory.StateMachine, $"{LogTag} 等待天车 {description} 观测：{observation}，已等待={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
@@ -412,6 +446,7 @@ public sealed class TransferContext
     /// <returns>异步等待任务；只观察已有快照，保留原信号判定。</returns>
     public async Task WaitDeviceAsync(DeviceBase device, string signal, bool expected, CancellationToken cancellationToken)
     {
+        BeginDiagnostic("等待设备信号", $"设备={device.Name}/Id={device.Id}，信号={signal}，期望值={(expected ? 1 : 0)}，超时上限={Options.StateMachine.HandshakeTimeoutMs}ms；来源=后台采集缓存");
         _logger.Info(LogCategory.StateMachine, $"{LogTag} 等待 {device.Name}.{signal}={expected}：设备Id={device.Id}，期望={(expected ? 1 : 0)}，来源=后台采集缓存，超时={Options.StateMachine.HandshakeTimeoutMs}ms，轮询等待=200ms");
         var timeout = TimeSpan.FromMilliseconds(Options.StateMachine.HandshakeTimeoutMs);
         var deadline = DateTime.UtcNow + timeout;
@@ -431,6 +466,8 @@ public sealed class TransferContext
                 $"原值={(snapshot.Values.TryGetValue(signal, out var raw) ? FormatLogValue(raw) : "未知（缺少点位）")}，连接={snapshot.ConnectionState}，质量={snapshot.Quality}";
             var snapshotDetail = snapshot is null ? "无采集时间/序号" :
                 $"采集时间={snapshot.CapturedAt:yyyy-MM-dd HH:mm:ss.fff}，序号={snapshot.Sequence}，快照年龄={(DateTime.Now - snapshot.CapturedAt).TotalMilliseconds:0}ms";
+            // 使用上面同一个快照与原值，只附加展示数据，绝不再次读取或改变满足条件。
+            _diagnostic = _diagnostic with { Observation = $"{observation}，{snapshotDetail}", ElapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds };
             if (observation != lastObservation || Stopwatch.GetElapsedTime(lastLoggedAt).TotalMilliseconds >= 2000)
             {
                 _logger.Info(LogCategory.StateMachine,
@@ -468,6 +505,7 @@ public sealed class TransferContext
     /// <returns>异步写入任务；驱动成功返回后才记录完成，原异常继续向上传播。</returns>
     public async Task WriteDeviceAsync(DeviceBase device, string signal, object? value, CancellationToken cancellationToken)
     {
+        BeginDiagnostic("写设备信号", $"设备={device.Name}/Id={device.Id}，点名={signal}，下发值={FormatLogValue(value)}");
         _logger.Info(LogCategory.StateMachine, $"{LogTag} 写入开始：设备[{device.Name}/Id={device.Id}/类型={device.Type}]，点名={signal}，下发值={FormatLogValue(value)}；等待驱动写入返回");
         var started = Stopwatch.GetTimestamp();
         await DeviceDriver(device.Id).WriteSignalAsync(signal, value, cancellationToken).ConfigureAwait(false);
@@ -477,6 +515,7 @@ public sealed class TransferContext
     // 仅呈现原命令结果，不参与成败、取消或充磁边界的业务判断。
     private void LogCommandResult(string action, CraneCommandResult result, long started)
     {
+        _diagnostic = _diagnostic with { ResultCode = result.Code.ToString(), Observation = result.Message, ElapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds };
         var message = $"{LogTag} {action}返回：成功={result.IsSuccess}，结果码={result.Code}，详情={result.Message}，耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms";
         if (result.IsSuccess) _logger.Info(LogCategory.StateMachine, message);
         else _logger.Warn(LogCategory.StateMachine, message);
@@ -516,6 +555,9 @@ public sealed class TransferContext
     // 不解析日志文本；沿用业务明确记录步骤的时机发布只读说明，任务释放后不复活旧步骤。
     private void PublishStep(string action)
     {
+        _lastPublishedStep = action;
+        // 步骤切换时清掉前一步已成功的观测，防止后续直接调用驱动失败时误展示旧返回值。
+        BeginDiagnostic(action, "本步骤未记录独立参数");
         if (Crane.Runtime.CurrentTask is not null) Crane.Runtime.CurrentStep = action;
     }
 

@@ -74,19 +74,28 @@ public sealed class TaskAbortCoordinator
     /// </summary>
     /// <param name="crane">发生异常的天车</param>
     /// <param name="reason">异常原因（写报警） 这个参数是为了写日志弹窗的</param>
-    public void Abort(Crane crane, string reason)
-        => HandleFailure(crane, reason, discardWorkpiece: true);
+    /// <param name="diagnostic">清理前固定的可选诊断，仅供展示。</param>
+    public void Abort(Crane crane, string reason, AlarmDiagnostic? diagnostic = null)
+        => HandleFailure(crane, reason, discardWorkpiece: true, diagnostic);
 
     /// <summary>终止充磁前的本次搬运，保留工件及原位置，等待人工恢复线路后重新派发。</summary>
     /// <param name="crane">发生异常的天车</param>
     /// <param name="reason">异常详情，写入日志及报警</param>
-    public void RecoverBeforeMagnet(Crane crane, string reason)
-        => HandleFailure(crane, reason, discardWorkpiece: false);
+    /// <param name="diagnostic">清理前固定的可选诊断，仅供展示。</param>
+    public void RecoverBeforeMagnet(Crane crane, string reason, AlarmDiagnostic? diagnostic = null)
+        => HandleFailure(crane, reason, discardWorkpiece: false, diagnostic);
 
     /// <summary>共享资源释放与报警流程，只有弃板路径才清理设备工件引用和位置。</summary>
-    private void HandleFailure(Crane crane, string reason, bool discardWorkpiece)
+    private void HandleFailure(Crane crane, string reason, bool discardWorkpiece, AlarmDiagnostic? diagnostic)
     {
         var task = crane.Runtime.CurrentTask;
+        // Worker兜底可能没有TransferContext，也在清引用前保留现有任务，不读取任何现场数据。
+        diagnostic ??= new AlarmDiagnostic
+        {
+            TaskId = task?.TaskId, Workpiece = task is null ? null : _taskManager.Get(task.WorkpieceRuntimeId)?.Info.ToString(),
+            Route = task is null ? null : $"设备{task.SourceDeviceId}→设备{task.TargetDeviceId}",
+            LastStep = crane.Runtime.CurrentStep
+        };
         try
         {
             // 先暂停再把工件恢复为 Waiting，避免清理期间马上被重新生成并派发。   线路只要暂停了  生成器下一轮发现线路未运行，会清空候选池
@@ -165,7 +174,8 @@ public sealed class TaskAbortCoordinator
                     ? "已释放路权/预约/锁并标记该工件为已丢弃，线路暂停；现场残留工件取走 确保天车在安全位置后重新启动即可"
                     : "尚未开始取料充磁，已释放路权/预约/锁；线路已暂停 工件置保留，PLC信号正确 天车在安全位置后重新启动线路可再次搬运",
                 crane.Id,
-                true);
+                true,
+                diagnostic);
         }
     }
 

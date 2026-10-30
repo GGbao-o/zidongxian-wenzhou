@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using AutomatedLine.Application.Alarms;
 using AutomatedLine.Domain.Alarms;
+using AutomatedLine.Ui.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -16,27 +17,40 @@ public partial class AlarmViewModel : ObservableObject
 {
     /// <summary>活动报警存储。</summary>
     private readonly ActiveAlarmStore _alarmStore;
+    private readonly IDialogService _dialogs;
 
     /// <summary>报警行集合。</summary>
     public ObservableCollection<AlarmRowViewModel> Alarms { get; } = new();
 
     /// <summary>当前选中的报警。</summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ViewDetailsCommand))]
     private AlarmRowViewModel? _selectedAlarm;
 
     /// <summary>操作提示。</summary>
     [ObservableProperty]
-    private string _message = "报警只存内存并同步写磁盘日志。异常由程序自动清理，无需人工干预。";
+    private string _message = "选中后查看详情，或双击报警；详情只展示故障时信息，不执行设备和线路操作。";
 
     /// <summary>
     /// 构造函数。
     /// </summary>
     /// <param name="alarmStore">活动报警存储</param>
-    public AlarmViewModel(ActiveAlarmStore alarmStore)
+    /// <param name="dialogs">统一只读详情窗口。</param>
+    public AlarmViewModel(ActiveAlarmStore alarmStore, IDialogService dialogs)
     {
         _alarmStore = alarmStore;
+        _dialogs = dialogs;
         _alarmStore.Changed += (_, _) => RefreshOnUiThread();
         Refresh();
+    }
+
+    private bool CanViewDetails => SelectedAlarm is not null;
+
+    /// <summary>展示选中报警的固定快照，不读取当前任务或日志。</summary>
+    [RelayCommand(CanExecute = nameof(CanViewDetails))]
+    private void ViewDetails()
+    {
+        if (SelectedAlarm is { } row) _dialogs.ShowAlarmDetails(row.Alarm);
     }
 
     /// <summary>清除报警列表（仅清内存，磁盘日志保留）。</summary>
@@ -63,11 +77,14 @@ public partial class AlarmViewModel : ObservableObject
     /// <summary>重建报警列表。</summary>
     private void Refresh()
     {
+        // 列表重建后按ID恢复选择，重复报警合并不让操作员丢失正在选中的行。
+        var selectedId = SelectedAlarm?.Alarm.Id;
         Alarms.Clear();
         foreach (var alarm in _alarmStore.Snapshot())
         {
             Alarms.Add(new AlarmRowViewModel(alarm));
         }
+        SelectedAlarm = Alarms.FirstOrDefault(row => row.Alarm.Id == selectedId);
     }
 }
 
@@ -97,6 +114,16 @@ public sealed class AlarmRowViewModel
 
     /// <summary>内容。</summary>
     public string Message => Alarm.Message;
+
+    /// <summary>列表只显示单行摘要，详情和复制仍使用未截断的完整正文。</summary>
+    public string Summary
+    {
+        get
+        {
+            var text = Alarm.Message.Replace("\r", " ").Replace("\n", " ");
+            return text.Length <= 140 ? text : text[..140] + "……";
+        }
+    }
 
     /// <summary>系统动作。</summary>
     public string SystemAction => Alarm.SystemAction ?? "-";

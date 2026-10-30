@@ -308,7 +308,7 @@ public sealed class CraneScheduler : IHostedService
                     blockReason = "任务已被其它周期派发";
                     break;   // 本轮无需再处理该候选
                 }
-                //写入天车队列
+                //写入天车队列    10-23目前是没有避让操作的 如果需要天车避让可 可能还需要在这之前新增代码
                 if (!_channels.For(crane.Id).Writer.TryWrite(transportTask))
                 {
                     // 入队失败：回退状态，换下一台车

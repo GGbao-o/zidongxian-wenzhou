@@ -1,3 +1,4 @@
+using AutomatedLine.Domain.Alarms;
 using System.Diagnostics;
 using AutomatedLine.Application.Abstractions;
 using AutomatedLine.Application.Alarms;
@@ -205,7 +206,7 @@ public sealed class CraneStateMachine
             await FinishAsync(ctx, crane, task, target, wp, cancellationToken, execution).ConfigureAwait(false);
             _logger.Info(LogCategory.StateMachine, $"[{crane.Name}] 任务完成：{route}；搬运Id={task.TaskId:N}，工件Id={wp.Id:N}，工件状态={wp.Runtime.TaskState}，位置={wp.Runtime.CurrentLocation}，工序={wp.Runtime.CurrentProcess}，总耗时={Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)//为true 表示这个token已经失效了 手动取消的任务
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)//为true 表示这个token已经失效了 手动取消的任务
         {
             // 关闭中止入口后再选择清理策略，避免清理途中接受按钮导致弃板意图丢失。
             if (execution?.Close() == true)//人工暂停了
@@ -214,13 +215,13 @@ public sealed class CraneStateMachine
                 _logger.Error(LogCategory.StateMachine, abortDetail);
                 // 资源竞争回滚可能刚清掉归属；人工中止仍明确弃掉本次工件。
                 crane.Runtime.CurrentTask = task;
-                await HandleFailureAsync(crane, ctx, abortDetail, manualAbort: true).ConfigureAwait(false);
+                await HandleFailureAsync(crane, ctx, abortDetail, manualAbort: true, diagnostic: CaptureFailureDiagnostic(ctx, crane, task, route, phase, ex)).ConfigureAwait(false);
                 throw;//外层抛出异常
             }
             //主要用于程序关闭、Worker 停止时的宿主取消  因为token是当前任务的令牌，但创建时明确关联了宿主令牌 所以程序关闭 token也失效
             var detail = BuildFailure(crane, ctx, route, phase, "任务被取消");
             _logger.Error(LogCategory.StateMachine, detail);
-            await HandleFailureAsync(crane, ctx, detail).ConfigureAwait(false);
+            await HandleFailureAsync(crane, ctx, detail, diagnostic: CaptureFailureDiagnostic(ctx, crane, task, route, phase, ex)).ConfigureAwait(false);
             throw;
         }
         //状态机异常处理
@@ -233,19 +234,28 @@ public sealed class CraneStateMachine
                 var abortDetail = BuildFailure(crane, ctx, route, phase, $"人工中止当前任务；{ex.Message}", manualAbort: true);
                 _logger.Error(LogCategory.StateMachine, abortDetail, ex);
                 crane.Runtime.CurrentTask = task;
-                await HandleFailureAsync(crane, ctx, abortDetail, manualAbort: true).ConfigureAwait(false);
+                await HandleFailureAsync(crane, ctx, abortDetail, manualAbort: true, diagnostic: CaptureFailureDiagnostic(ctx, crane, task, route, phase, ex)).ConfigureAwait(false);
                 return;
             }
             //构造异常详情 方便打印日志
             var detail = BuildFailure(crane, ctx, route, phase, ex.Message);
             _logger.Error(LogCategory.StateMachine, detail, ex);
             // PickAsync 开始调用充磁前保留工件；开始调用后（含命令或反馈失败）沿用弃板处理。
-            await HandleFailureAsync(crane, ctx, detail).ConfigureAwait(false);
+            await HandleFailureAsync(crane, ctx, detail, diagnostic: CaptureFailureDiagnostic(ctx, crane, task, route, phase, ex)).ConfigureAwait(false);
         }
     }
 
+    // 捕获点位于任何握手补偿和任务引用清理之前；只传递诊断，不参与故障分支判断。
+    private static AlarmDiagnostic CaptureFailureDiagnostic(TransferContext? ctx, Crane crane, TransportTask task,
+        string route, string phase, Exception exception)
+        => ctx?.CaptureDiagnostic(route, phase, exception) ?? new AlarmDiagnostic
+        {
+            TaskId = task.TaskId, Route = route, Phase = phase,
+            LastStep = crane.Runtime.CurrentStep, ExceptionDetail = exception.ToString()
+        };
+
     /// <summary>按 PickAsync 的充磁标记选择异常清理，初始化失败时尚未充磁，也必须保留工件。</summary>
-    private async Task HandleFailureAsync(Crane crane, TransferContext? ctx, string detail, bool manualAbort = false)
+    private async Task HandleFailureAsync(Crane crane, TransferContext? ctx, string detail, bool manualAbort = false, AlarmDiagnostic? diagnostic = null)
     {
         // 已接受的人工中止仍沿用弃板；普通故障只在充磁开始后清PLC，充磁前保留原设备状态。
         if (manualAbort || ctx?.MagnetCommandStarted == true)
@@ -261,12 +271,12 @@ public sealed class CraneStateMachine
             {
                 _logger.Warn(LogCategory.StateMachine, $"[{crane.Name}] 异常握手清理未完成，继续原内存清理及资源释放：{ex.Message}");
             }
-            _abortCoordinator.Abort(crane, detail);
+            _abortCoordinator.Abort(crane, detail, diagnostic);
         }
         //没有下发充磁命令异常处理   没有充磁就说明没有与source设备发生握手信号 其实不需要清理原设备交互点位
         else
         {
-            _abortCoordinator.RecoverBeforeMagnet(crane, detail);
+            _abortCoordinator.RecoverBeforeMagnet(crane, detail, diagnostic);
         }
     }
 

@@ -33,11 +33,13 @@
                     Appearance="Primary"
                     Command="{Binding ClearAllCommand}"
                     Content="清除报警列表" />
+                <ui:Button Margin="12,0,0,0" Command="{Binding ViewDetailsCommand}" Content="查看详情" />
             </StackPanel>
 
             <!-- 报警可能很多，DataGrid 自带横竖滚动条 -->
             <DataGrid
                 Grid.Row="2"
+                MouseDoubleClick="AlarmGrid_MouseDoubleClick"
                 AutoGenerateColumns="False"
                 Background="Transparent"
                 CanUserAddRows="False"
@@ -53,7 +55,7 @@
                     <DataGridTextColumn Header="时间" Binding="{Binding TimeText}" />
                     <DataGridTextColumn Header="级别" Binding="{Binding LevelText}" />
                     <DataGridTextColumn Header="来源" Binding="{Binding Source}" />
-                    <DataGridTextColumn Header="内容" Binding="{Binding Message}" Width="*" />
+                    <DataGridTextColumn Header="内容" Binding="{Binding Summary}" Width="*" />
                     <DataGridTextColumn Header="系统动作" Binding="{Binding SystemAction}" />
                     <DataGridTextColumn Header="次数" Binding="{Binding Count}" />
                     <DataGridTextColumn Header="关联资源" Binding="{Binding ResourceText}" />

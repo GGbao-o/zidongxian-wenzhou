@@ -10,6 +10,31 @@ namespace AutomatedLine.Ui.Services;
 /// </summary>
 public class DialogService : IDialogService
 {
+    // 模态窗口会继续泵送Dispatcher消息；排队防止后续报警在旧窗口上不断嵌套弹窗。
+    private readonly Queue<(AutomatedLine.Domain.Alarms.ActiveAlarm Alarm, bool Automatic)> _alarmQueue = new();
+    private bool _showingAlarm;
+
+    /// <inheritdoc />
+    public void ShowAlarmDetails(AutomatedLine.Domain.Alarms.ActiveAlarm alarm, bool automatic = false)
+    {
+        _alarmQueue.Enqueue((alarm.CreateSnapshot(), automatic));
+        if (_showingAlarm) return;
+        _showingAlarm = true;
+        try
+        {
+            while (_alarmQueue.TryDequeue(out var item))
+            {
+                var app = System.Windows.Application.Current;
+                if (app is App { IsShutdownComplete: true }) { _alarmQueue.Clear(); break; }
+                new AlarmDetailsDialog(new AlarmDetailsViewModel(item.Alarm, item.Automatic))
+                {
+                    Owner = app?.MainWindow
+                }.ShowDialog();
+            }
+        }
+        finally { _showingAlarm = false; }
+    }
+
     /// <inheritdoc />
     public bool ShowLineStartConfirmation()
     {

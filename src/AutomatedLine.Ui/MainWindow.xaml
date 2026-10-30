@@ -6,7 +6,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
     xmlns:vm="clr-namespace:AutomatedLine.Ui.ViewModels"
-    Title="超运车间自动化调度系统"
+    Title="三太自动化V1"
     Width="1400"
     Height="860"
     d:DataContext="{d:DesignInstance Type=vm:ShellViewModel}"
@@ -23,7 +23,7 @@
         </Grid.RowDefinitions>
 
         <!--  Fluent 自绘标题栏  -->
-        <ui:TitleBar Title="车间自动化调度系统" Grid.Row="0" />
+        <ui:TitleBar Title="三太自动化V1-超运自动线" Grid.Row="0" />
 
         <!--  顶部导航栏：点击切换页面  -->
         <Border
